@@ -1,17 +1,30 @@
 /**
  * Conversation-port follow while an assistant reply streams.
  *
- * The demo's damped-spring lerp is driven from a float `animatedTop`, never
- * from the rounded `scrollTop` the browser reports back. A wrap raises the
- * floor by a line; if the engine were allowed to snap `scrollTop` to that
- * floor, the previous line would hop up in one frame. This overlay:
+ * The demo's damped-spring lerp is driven from a float `animatedH` — the
+ * smoothed content height — never from the rounded `scrollTop` the browser
+ * reports back. A wrap raises the content height by a line; if the engine
+ * were allowed to snap `scrollTop` to the new floor, the previous line would
+ * hop up in one frame. This overlay:
  *
  * - owns follow via `data-follow-owned` so ChatView does not snap;
  * - sets `overflow-anchor: none` so CSS scroll-anchoring does not snap;
- * - restores `animatedTop` in a ResizeObserver (before paint) so a layout
+ * - restores `animatedH` in a ResizeObserver (before paint) so a layout
  *   pass cannot flash a snapped frame;
- * - writes the interpolated lag as `translate3d` on `[data-chat-transcript]`
- *   (message rows only), so the turn-status chrome is not in that box.
+ * - while the port has scroll room, writes the interpolated lag as
+ *   `translate3d` on `[data-chat-transcript]` (message rows only), so the
+ *   turn-status chrome stays pinned at the floor;
+ * - before the port has scroll room (content shorter than the viewport), the
+ *   same lag is a content-height lag written as a negative translate on
+ *   `[data-chat-turn-status]`, so the status label descends smoothly with
+ *   each wrap instead of hopping a line at a time.
+ *
+ * Handing the port back to the reader (unpin, or the owner going inactive)
+ * first writes the effective visual top (`engine - lag`) into `scrollTop`
+ * before clearing the transform, so the frame stays continuous. That write
+ * also lands in ChatView's observed-top ledger as reader input beyond
+ * `FOLLOW_THRESHOLD`, releasing its native snap-follow instead of fighting
+ * the gesture for the port.
  *
  * Unpin is a real gesture (wheel / touch / pointer / key) that leaves the
  * floor; a `scrollTop` delta from our own write must not release the pin.
@@ -65,7 +78,7 @@ export interface FollowGlideInput {
 }
 
 export interface FollowGlideStep {
-  /** Pixels to advance `animatedTop` this frame (fractional). */
+  /** Pixels to advance `animatedH` this frame (fractional). */
   readonly advancePx: number
   /** Applied lerp fraction, for tests. */
   readonly lerpStep: number
@@ -90,13 +103,43 @@ export function computeFollowStep(dtMs: number, input: FollowGlideInput): Follow
   return { advancePx: input.lag * lerpStep, lerpStep }
 }
 
+/** The message-rows box the lag transform rides on, when the host has one. */
 function shiftRootOf(port: HTMLElement): HTMLElement | null {
+  return port.querySelector('[data-chat-transcript]')
+}
+
+/**
+ * Row wrappers that carry only messages/tools. Hosts without a transcript
+ * box keep the turn-status chrome as a sibling of the rows inside
+ * `[data-chat-flow]`, so shifting that whole flow would drag the chrome
+ * along; shifting the rows individually leaves every non-message sibling
+ * (turn status, steering bubbles) pinned while the text glides.
+ *
+ * Only the outermost rows are shifted: a tool call nests its subcalls as
+ * descendant `[data-chat-anchor-key]` rows, and writing the lag on each of
+ * them would double (or further multiply) the shift, tearing the subcalls
+ * away from their parent every frame. Descendants ride the parent's
+ * transform instead.
+ */
+function shiftRowsOf(port: HTMLElement): HTMLElement[] {
+  return [...port.querySelectorAll<HTMLElement>('[data-chat-anchor-key]')]
+    .filter(row => row.parentElement?.closest('[data-chat-anchor-key]') === null)
+}
+
+/** Element whose resize signals flow growth for the before-paint restore. */
+function resizeProxyOf(port: HTMLElement): HTMLElement | null {
   return port.querySelector('[data-chat-transcript]') ?? port.querySelector('[data-chat-flow]')
 }
 
-function setShift(element: HTMLElement, px: number): void {
-  if (Math.abs(px) > 0.01) {
-    element.style.transform = `translate3d(0, ${px}px, 0)`
+/** True when the glide expresses its lag as transforms instead of engine top. */
+function hasShiftSurface(port: HTMLElement): boolean {
+  return shiftRootOf(port) !== null || shiftRowsOf(port).length > 0
+}
+
+function setShift(element: HTMLElement, px: number, negative = false): void {
+  const value = negative ? -px : px
+  if (Math.abs(value) > 0.01) {
+    element.style.transform = `translate3d(0, ${value}px, 0)`
     element.style.willChange = 'transform'
   } else {
     element.style.transform = ''
@@ -105,26 +148,62 @@ function setShift(element: HTMLElement, px: number): void {
 }
 
 /**
- * While following: pin the engine at the floor so ChatView's to-bottom
- * chrome stays hidden (`FOLLOW_THRESHOLD` is 24px), and put the interpolated
- * lag on `[data-chat-transcript]` (message rows only). The turn-status row
- * is a sibling of that box, so it never receives a transform and cannot
- * flicker from a parent/child inverse pair.
+ * The running-turn label. Before the port scrolls (content shorter than the
+ * viewport) the content-height lag has no `scrollTop` room to ride, so it is
+ * expressed as a negative translate on this sibling: the label descends
+ * smoothly with each wrap instead of hopping down a line at a time.
  */
-function applyVisual(port: HTMLElement, animatedTop: number): void {
-  const floor = Math.max(0, port.scrollHeight - port.clientHeight)
-  const top = Math.min(floor, Math.max(0, animatedTop))
-  const lag = floor - top
+function chromeShiftOf(port: HTMLElement): HTMLElement | null {
+  return port.querySelector<HTMLElement>('[data-chat-turn-status]')
+}
+
+/**
+ * Render the single smoothed extent `animatedH`. Before the port scrolls
+ * (content shorter than the viewport) `animatedH` is clamped to the content
+ * height and the content-height lag rides a negative translate on the
+ * turn-status label; once the port has scroll room the engine is pinned at
+ * the floor and the lag rides `[data-chat-transcript]` (or each message row
+ * when the host has no transcript box) so the chrome stays put. Without any
+ * shift surface the engine itself carries the interpolated top.
+ */
+function applyVisual(port: HTMLElement, animatedH: number): void {
+  const contentHeight = Math.max(0, port.scrollHeight)
+  const floor = Math.max(0, contentHeight - port.clientHeight)
+  const extent = Math.min(contentHeight, Math.max(0, animatedH))
+  const lag = contentHeight - extent
   port.style.overflowAnchor = 'none'
   port.style.scrollBehavior = 'auto'
   const shiftRoot = shiftRootOf(port)
   if (shiftRoot !== null) {
+    if (floor <= 0) {
+      port.scrollTop = 0
+      port.setAttribute(FOLLOW_OWNED_ATTR, String(port.scrollTop))
+      const chrome = chromeShiftOf(port)
+      if (chrome !== null) setShift(chrome, lag, true)
+      setShift(shiftRoot, 0)
+      return
+    }
     port.scrollTop = floor
     port.setAttribute(FOLLOW_OWNED_ATTR, String(port.scrollTop))
     setShift(shiftRoot, lag)
     return
   }
-  port.scrollTop = top
+  const rows = shiftRowsOf(port)
+  if (rows.length > 0) {
+    if (floor <= 0) {
+      port.scrollTop = 0
+      port.setAttribute(FOLLOW_OWNED_ATTR, String(port.scrollTop))
+      const chrome = chromeShiftOf(port)
+      if (chrome !== null) setShift(chrome, lag, true)
+      for (const row of rows) setShift(row, 0)
+      return
+    }
+    port.scrollTop = floor
+    port.setAttribute(FOLLOW_OWNED_ATTR, String(port.scrollTop))
+    for (const row of rows) setShift(row, lag)
+    return
+  }
+  port.scrollTop = Math.min(floor, Math.max(0, extent))
   port.setAttribute(FOLLOW_OWNED_ATTR, String(port.scrollTop))
 }
 
@@ -133,9 +212,20 @@ function clearVisual(port: HTMLElement): void {
   port.style.overflowAnchor = ''
   port.style.scrollBehavior = ''
   const shiftRoot = shiftRootOf(port)
-  if (shiftRoot === null) return
-  shiftRoot.style.transform = ''
-  shiftRoot.style.willChange = ''
+  if (shiftRoot !== null) {
+    shiftRoot.style.transform = ''
+    shiftRoot.style.willChange = ''
+  } else {
+    for (const row of shiftRowsOf(port)) {
+      row.style.transform = ''
+      row.style.willChange = ''
+    }
+  }
+  const chrome = chromeShiftOf(port)
+  if (chrome !== null) {
+    chrome.style.transform = ''
+    chrome.style.willChange = ''
+  }
 }
 
 /** Live follow hosts per conversation port so one unmount does not clear another. */
@@ -178,7 +268,7 @@ export function useConversationFollow(
     let last = performance.now()
     let following = true
     let primed = false
-    let animatedTop = 0
+    let animatedH = 0
     let interacting = false
     let interactTimer: ReturnType<typeof setTimeout> | null = null
     let port: HTMLElement | null = null
@@ -201,6 +291,23 @@ export function useConversationFollow(
       clearVisual(next)
     }
 
+    /**
+     * Give the reader the visual position the glide was showing before the
+     * transforms go away. While transforms carry the lag, the engine sits at
+     * the floor and the effective visual top is `engine - lag`; writing that
+     * keeps the handover frame-continuous, and the write shows up in
+     * ChatView's ledger as reader movement, disarming its snap-follow.
+     * Without a shift surface the engine already holds the interpolated top,
+     * so there is nothing to compensate.
+     */
+    const handBackVisual = (next: HTMLElement): void => {
+      if (!hasShiftSurface(next)) return
+      const floor = Math.max(0, next.scrollHeight - next.clientHeight)
+      if (floor <= 0) return
+      const lag = Math.max(0, next.scrollHeight - animatedH)
+      next.scrollTop = Math.min(floor, Math.max(0, next.scrollTop - lag))
+    }
+
     const markGesture = (event: Event): void => {
       interacting = true
       if (event instanceof WheelEvent && event.deltaY < 0) awayPx += -event.deltaY
@@ -215,8 +322,7 @@ export function useConversationFollow(
 
     const restoreBeforePaint = (): void => {
       if (!following || port === null) return
-      const floor = Math.max(0, port.scrollHeight - port.clientHeight)
-      applyVisual(port, Math.min(floor, animatedTop))
+      applyVisual(port, animatedH)
     }
 
     const bindPort = (next: HTMLElement): void => {
@@ -232,8 +338,8 @@ export function useConversationFollow(
       if (typeof ResizeObserver !== 'undefined') {
         resize = new ResizeObserver(restoreBeforePaint)
         resize.observe(port)
-        const shiftRoot = shiftRootOf(port)
-        if (shiftRoot !== null) resize.observe(shiftRoot)
+        const proxy = resizeProxyOf(port)
+        if (proxy !== null) resize.observe(proxy)
       }
     }
 
@@ -249,13 +355,17 @@ export function useConversationFollow(
 
       const floor = Math.max(0, nextPort.scrollHeight - nextPort.clientHeight)
       const reportedLag = floor - nextPort.scrollTop
+      // Visual extent (content-height equivalent of the reader's scroll top):
+      // content shorter than the viewport has no scrollTop to derive from, so
+      // the extent is just the content height.
+      const extent = Math.min(nextPort.scrollHeight, Math.max(0, nextPort.scrollHeight - reportedLag))
 
       if (!primed) {
-        animatedTop = nextPort.scrollTop
+        animatedH = extent
         following = reportedLag <= FOLLOW_SLACK_PX
         if (following) {
           hold(nextPort)
-          applyVisual(nextPort, animatedTop)
+          applyVisual(nextPort, animatedH)
         }
         primed = true
         return
@@ -263,29 +373,32 @@ export function useConversationFollow(
 
       if (!following && !interacting && reportedLag <= FOLLOW_SLACK_PX) {
         following = true
-        animatedTop = nextPort.scrollTop
+        animatedH = extent
         hold(nextPort)
       } else if (following && interacting && awayPx >= FOLLOW_UNPIN_GESTURE_PX) {
         following = false
-        animatedTop = nextPort.scrollTop
         awayPx = 0
+        // Compensate before the transform clears, or the flow (turn-status
+        // chrome included) jumps up by the whole lag in one frame.
+        handBackVisual(nextPort)
+        animatedH = nextPort.scrollHeight
         drop(nextPort)
       }
 
       if (!activeRef.current || !following) return
       hold(nextPort)
 
-      const lag = floor - animatedTop
+      const lag = nextPort.scrollHeight - animatedH
       const step = computeFollowStep(dt, {
         lag,
         speedEma: speedCpsRef.current,
       })
       if (lag <= 0.1) {
-        animatedTop = floor
+        animatedH = nextPort.scrollHeight
       } else {
-        animatedTop = Math.min(floor, animatedTop + step.advancePx)
+        animatedH = Math.min(nextPort.scrollHeight, animatedH + step.advancePx)
       }
-      applyVisual(nextPort, animatedTop)
+      applyVisual(nextPort, animatedH)
     }
 
     rafId = requestAnimationFrame(frame)
@@ -300,8 +413,10 @@ export function useConversationFollow(
       const host = root?.closest<HTMLElement>('[data-conversation-scroll]') ?? port
       if (host === null) return
       if (following) {
-        const floor = Math.max(0, host.scrollHeight - host.clientHeight)
-        host.scrollTop = floor
+        // Same handback as an unpin: land on the effective visual top rather
+        // than the floor, so the owner change (stream close, unmount) does
+        // not snap the flow up by the remaining lag.
+        handBackVisual(host)
       }
       const remaining = holding === host ? releaseFollow(host) : (followOwners.get(host) ?? 0)
       holding = null
