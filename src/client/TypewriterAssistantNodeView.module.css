@@ -1,0 +1,142 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 16px;
+  line-height: 28px;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.think {
+  display: flex;
+  flex-direction: column;
+}
+
+.thinkRow {
+  position: relative;
+  overflow: hidden;
+}
+
+.think[data-state='running'] .thinkRow::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 300px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent) 55%,
+    transparent 100%
+  );
+  animation: dsh-stream-think-sweep 2.6s ease-out infinite;
+  pointer-events: none;
+}
+
+@keyframes dsh-stream-think-sweep {
+  0% { left: -300px; }
+  90%, 100% { left: 100%; }
+}
+
+.thinkLeading {
+  flex-shrink: 0;
+}
+
+.thinkChevron {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.thinkTitle {
+  font-weight: 400;
+}
+
+.thinkSeparator {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  margin: 0 8px;
+  border-radius: 1px;
+  background: var(--dsw-alias-label-caption);
+}
+
+.thinkSummary {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thinkSummary[data-follow-end] {
+  text-overflow: clip;
+}
+
+.thinkBody {
+  padding: 4px 0 4px 22px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  line-height: 24px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .think[data-state='running'] .thinkRow::after {
+    animation: none;
+  }
+}
+
+.stopped {
+  align-self: flex-start;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.visuallyHidden {
+  position: absolute;
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/*
+ * Follow host: ordinary document flow. The last text block owns the
+ * conversation scrollport's bottom-follow while the reply reveals
+ * (see useConversationFollow).
+ */
+.follow {
+  min-width: 0;
+}
+
+/*
+ * Trim the half-leading above and below each text block so line boxes hug
+ * the font's ascent/descent edges. `text` edges are used instead of
+ * `cap alphabetic` because assistant text is CJK-heavy and cap-height
+ * trimming would clip ideographic glyphs.
+ */
+@supports (text-box-trim: trim-both) {
+  .root :is(p, h1, h2, h3, h4, h5, h6, li, blockquote) {
+    text-box-trim: trim-both;
+    text-box-edge: text;
+  }
+}

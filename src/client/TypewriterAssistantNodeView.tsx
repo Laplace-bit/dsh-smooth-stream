@@ -1,0 +1,318 @@
+import { memo, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { DisclosureRow, IconThinkOutline14, JsonBlock, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import { ImageGallery, type ImageLoader, type MessageImageLabels } from '@deepseek-ai/dsh-client-ui-attachment'
+import type { ChatNodeViewProps, TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { useSmoothStreamContent, type StreamSmoothingPreset } from './useSmoothStreamContent.ts'
+import { useFpsGuard } from './useFpsGuard.ts'
+import { FollowHost } from './FollowHost.tsx'
+import { DEFAULT_STREAM_CONFIG, type StreamMode } from '../config.ts'
+import css from './TypewriterAssistantNodeView.module.css'
+
+type AssistantProps = ChatNodeViewProps<'assistant-step'>
+type MarkdownProps = Pick<ComponentProps<typeof MarkdownText>, 'codeLabels' | 'fileMentions' | 'text'>
+
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true,
+  )
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.matchMedia === undefined) return
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const onChange = () => setReduced(query.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+  return reduced
+}
+
+interface AnimatedMarkdownTextProps extends MarkdownProps {
+  streaming: boolean
+  announce: boolean
+  /** True on the last text block: that block owns conversation follow. */
+  ownFollow: boolean
+  preset: StreamSmoothingPreset
+  shouldHoldBack: () => boolean
+}
+
+/**
+ * Smooth streaming text arm. While the reply runs, the accumulated source is
+ * revealed through the smoother at a rate that tracks the model's arrival
+ * and rendered by the Harness `MarkdownText`
+ * streaming arm (incremental parse, frozen non-tail blocks), so there is no
+ * raw-text tail and no text-to-markdown swap: the tree stays markdown
+ * throughout. The last text block owns conversation-port follow so wraps
+ * glide instead of snapping. Once the stream closes and the reveal queue
+ * drains, the settled full parse (KaTeX math, fence highlighting, file
+ * mentions) swaps in exactly once.
+ */
+function AnimatedMarkdownText({
+  text,
+  codeLabels,
+  fileMentions,
+  streaming,
+  announce,
+  ownFollow,
+  preset,
+  shouldHoldBack,
+}: AnimatedMarkdownTextProps) {
+  const reduced = usePrefersReducedMotion()
+  const [typing, setTyping] = useState(streaming)
+  const speedCpsRef = useRef(35)
+  const displayed = useSmoothStreamContent(text, {
+    enabled: typing && !reduced,
+    preset,
+    shouldHoldBack,
+    speedCpsRef,
+  })
+  const shown = reduced ? text : displayed
+  const live = typing && !reduced
+
+  // The stream closed: keep revealing the remaining queue, then swap to the
+  // settled parse exactly once. The markdown tree stays mounted until then.
+  useEffect(() => {
+    if (typing && !streaming && shown.length === text.length) setTyping(false)
+  }, [shown, streaming, text, typing])
+
+  if (live) {
+    return (
+      <>
+        {announce && <span className={css.visuallyHidden} aria-live="polite">{text}</span>}
+        <FollowHost active={ownFollow} speedCpsRef={speedCpsRef}>
+          <MarkdownText text={shown} streaming codeLabels={codeLabels} />
+        </FollowHost>
+      </>
+    )
+  }
+  return <MarkdownText text={text} codeLabels={codeLabels} fileMentions={fileMentions} />
+}
+
+function imageLabels(t: AssistantProps['t']): MessageImageLabels {
+  return {
+    image: t('image.label'),
+    open: t('image.openOriginal'),
+    openNamed: label => t('image.openOriginalLabel', { label }),
+    loading: t('image.loading'),
+    loadFailed: t('image.loadFailed'),
+    lightbox: {
+      dialog: t('image.preview'),
+      close: t('image.closePreview'),
+    },
+  }
+}
+
+function firstLine(text: string): string {
+  const newline = text.indexOf('\n')
+  return newline === -1 ? text : text.slice(0, newline)
+}
+
+function latestLine(text: string): string {
+  const visible = text.trimEnd()
+  const newline = visible.lastIndexOf('\n')
+  return newline === -1 ? visible : visible.slice(newline + 1)
+}
+
+/**
+ * Built-in Think disclosure with a smoothed `text` feed. Chevron and row
+ * click stay on `DisclosureRow`. The row opens only while this block is
+ * the streaming tail and closes as soon as thinking ends — a later block,
+ * or the assistant node settling — not when the rest of the reply is
+ * still streaming.
+ */
+function AnimatedReasoning({
+  text,
+  running,
+  preset,
+  shouldHoldBack,
+  t,
+}: {
+  text: string
+  running: boolean
+  preset: StreamSmoothingPreset
+  shouldHoldBack: () => boolean
+  t: AssistantProps['t']
+}) {
+  const reduced = usePrefersReducedMotion()
+  const [expanded, setExpanded] = useState(running)
+  const summaryRef = useRef<HTMLSpanElement>(null)
+  const speedCpsRef = useRef(35)
+  const displayed = useSmoothStreamContent(text, {
+    enabled: running && !reduced,
+    preset,
+    shouldHoldBack,
+    speedCpsRef,
+  })
+  const shown = running && !reduced ? displayed : text
+  const summary = running ? latestLine(shown) : firstLine(text)
+
+  useEffect(() => {
+    setExpanded(running)
+  }, [running])
+
+  useEffect(() => {
+    const element = summaryRef.current
+    if (element === null) return
+    element.scrollLeft = running ? element.scrollWidth - element.clientWidth : 0
+  }, [running, summary])
+
+  return (
+    <FollowHost active={running} speedCpsRef={speedCpsRef}>
+      <div className={css.think} data-variant="think" data-state={running ? 'running' : 'ok'}>
+        {running && <span className={css.visuallyHidden}>{t('row.running')}</span>}
+        <DisclosureRow
+          rowClassName={css.thinkRow}
+          leadingClassName={css.thinkLeading}
+          titleClassName={css.thinkTitle}
+          chevronClassName={css.thinkChevron}
+          icon={<IconThinkOutline14 size={14} />}
+          title="Think"
+          open={expanded}
+          expandable
+          expandOnRowClick
+          onToggle={() => { setExpanded(value => !value) }}
+          collapsedContent={(
+            <>
+              <span className={css.thinkSeparator} aria-hidden />
+              <span ref={summaryRef} className={css.thinkSummary} data-follow-end={running || undefined}>{summary}</span>
+            </>
+          )}
+        >
+          <div className={css.thinkBody}>{shown}</div>
+        </DisclosureRow>
+      </div>
+    </FollowHost>
+  )
+}
+
+/**
+ * Assistant node renderer for the typewriter overlay. Text observed while
+ * streaming is revealed by the smoother through the Harness Markdown
+ * renderer at a rate that tracks arrival. Reasoning blocks keep the
+ * built-in Think disclosure and only receive a smoothed text feed; the
+ * last text or reasoning block owns conversation-port follow so wraps
+ * glide. The FPS guard holds offscreen
+ * reveals when the frame rate is degraded. Settled text renders with the
+ * full Markdown pipeline.
+ */
+export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNodeView({
+  mode: _mode = DEFAULT_STREAM_CONFIG.mode,
+  preset = DEFAULT_STREAM_CONFIG.preset,
+  revealCharsPerSec: _revealCharsPerSec = DEFAULT_STREAM_CONFIG.revealCharsPerSec,
+  scrollSpeedPxPerSec: _scrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.scrollSpeedPxPerSec,
+  maxScrollSpeedPxPerSec: _maxScrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.maxScrollSpeedPxPerSec,
+  node,
+  useTurnData,
+  openFile,
+  loadImage,
+  fileMentions,
+  t,
+}: AssistantProps & {
+  mode?: StreamMode
+  preset?: StreamSmoothingPreset
+  revealCharsPerSec?: number
+  scrollSpeedPxPerSec?: number
+  maxScrollSpeedPxPerSec?: number
+}) {
+  const data = node.data
+  const streaming = data.status === 'running'
+  const { ref: guardRef, shouldHoldBack } = useFpsGuard(streaming)
+  const rootSpeedRef = useRef(35)
+  const turn = node.location.kind === 'turn' || node.location.kind === 'step'
+    ? node.location.turn
+    : undefined
+  const tail = useTurnData('turn-tail')
+  const owner = useMemo<TurnTailOwnerProps | undefined>(() => {
+    if (turn?.status !== 'closed' || data.finalNode === undefined) return undefined
+    if (tail?.closing?.finalNode.seq !== data.finalNode.seq) return undefined
+    return { turn, seq: data.finalNode.seq, openFile }
+  }, [data.finalNode, openFile, tail, turn])
+  const mentions = useMemo(
+    () => owner === undefined ? undefined : fileMentions(owner),
+    [fileMentions, owner],
+  )
+  const codeLabels = useMemo(() => ({ copyLabel: t('copy'), copiedLabel: t('copied') }), [t])
+  const imageLoader: ImageLoader = loadImage ?? (async () => {
+    throw new Error(t('image.serviceUnavailable'))
+  })
+  const hasVisible = streaming
+    || data.status === 'interrupted'
+    || data.blocks.some(block => block.kind !== 'tool-call')
+  if (!hasVisible) return null
+
+  const rendered: ReactNode[] = []
+  const last = data.blocks.length - 1
+  let lastFollow = -1
+  for (let index = 0; index < data.blocks.length; index += 1) {
+    const kind = data.blocks[index]?.kind
+    if (kind === 'text' || kind === 'reasoning') lastFollow = index
+  }
+  for (let index = 0; index < data.blocks.length; index += 1) {
+    const block = data.blocks[index]
+    if (block === undefined) continue
+    switch (block.kind) {
+      case 'text':
+        rendered.push(
+          <AnimatedMarkdownText
+            key={index}
+            text={block.text}
+            codeLabels={codeLabels}
+            fileMentions={mentions}
+            streaming={streaming}
+            announce={index === last}
+            ownFollow={!streaming && index === lastFollow}
+            preset={preset}
+            shouldHoldBack={shouldHoldBack}
+          />,
+        )
+        break
+      case 'reasoning':
+        rendered.push(
+          <AnimatedReasoning
+            key={index}
+            text={block.text}
+            running={streaming && index === last}
+            preset={preset}
+            shouldHoldBack={shouldHoldBack}
+            t={t}
+          />,
+        )
+        break
+      case 'image': {
+        const start = index
+        const group = [block]
+        while (index + 1 < data.blocks.length) {
+          const next = data.blocks[index + 1]
+          if (next === undefined || next.kind !== 'image') break
+          group.push(next)
+          index += 1
+        }
+        rendered.push(
+          <ImageGallery key={start} images={group} load={imageLoader} align="start" labels={imageLabels(t)} />,
+        )
+        break
+      }
+      case 'tool-call':
+        break
+      case 'other':
+        rendered.push(
+          <JsonBlock
+            key={index}
+            label={t('message.unknownBlock')}
+            payload={block.block}
+            truncatedLabel={total => t('json.truncated', { total })}
+          />,
+        )
+        break
+    }
+  }
+
+  return (
+    <div ref={guardRef} className={css.root} data-streaming={streaming || undefined}>
+      <FollowHost active={streaming} speedCpsRef={rootSpeedRef}>
+        <div className={css.body}>
+          {rendered}
+          {data.status === 'interrupted' && <span className={css.stopped}>{t('message.stopped')}</span>}
+        </div>
+      </FollowHost>
+    </div>
+  )
+})

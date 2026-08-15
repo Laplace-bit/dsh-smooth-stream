@@ -1,0 +1,10 @@
+# Applied when this package appears in a profile's dsh.profile.bundles list.
+- insert:
+    - id: stream
+      name: dsh-stream
+      config:
+        mode: typewriter
+        preset: balanced
+        revealCharsPerSec: 80
+        scrollSpeedPxPerSec: 48
+        maxScrollSpeedPxPerSec: 1000
