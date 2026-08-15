@@ -13,13 +13,6 @@
  * - writes the interpolated lag as `translate3d` on `[data-chat-transcript]`
  *   (message rows only), so the turn-status chrome is not in that box.
  *
- * Handing the port back to the reader (unpin, or the owner going inactive)
- * first writes the effective visual top (`engine - lag`) into `scrollTop`
- * before clearing the transform, so the frame stays continuous. That write
- * also lands in ChatView's observed-top ledger as reader input beyond
- * `FOLLOW_THRESHOLD`, releasing its native snap-follow instead of fighting
- * the gesture for the port.
- *
  * Unpin is a real gesture (wheel / touch / pointer / key) that leaves the
  * floor; a `scrollTop` delta from our own write must not release the pin.
  */
@@ -97,30 +90,8 @@ export function computeFollowStep(dtMs: number, input: FollowGlideInput): Follow
   return { advancePx: input.lag * lerpStep, lerpStep }
 }
 
-/** The message-rows box the lag transform rides on, when the host has one. */
 function shiftRootOf(port: HTMLElement): HTMLElement | null {
-  return port.querySelector('[data-chat-transcript]')
-}
-
-/**
- * Row wrappers that carry only messages/tools. Hosts without a transcript
- * box keep the turn-status chrome as a sibling of the rows inside
- * `[data-chat-flow]`, so shifting that whole flow would drag the chrome
- * along; shifting the rows individually leaves every non-message sibling
- * (turn status, steering bubbles) pinned while the text glides.
- */
-function shiftRowsOf(port: HTMLElement): HTMLElement[] {
-  return [...port.querySelectorAll<HTMLElement>('[data-chat-anchor-key]')]
-}
-
-/** Element whose resize signals flow growth for the before-paint restore. */
-function resizeProxyOf(port: HTMLElement): HTMLElement | null {
   return port.querySelector('[data-chat-transcript]') ?? port.querySelector('[data-chat-flow]')
-}
-
-/** True when the glide expresses its lag as transforms instead of engine top. */
-function hasShiftSurface(port: HTMLElement): boolean {
-  return shiftRootOf(port) !== null || shiftRowsOf(port).length > 0
 }
 
 function setShift(element: HTMLElement, px: number): void {
@@ -136,10 +107,9 @@ function setShift(element: HTMLElement, px: number): void {
 /**
  * While following: pin the engine at the floor so ChatView's to-bottom
  * chrome stays hidden (`FOLLOW_THRESHOLD` is 24px), and put the interpolated
- * lag on transforms - on `[data-chat-transcript]` (message rows only) when
- * the host has that box, else on each `[data-chat-anchor-key]` row so the
- * turn-status chrome (their sibling) never rides the motion. Without any
- * shift surface the engine itself carries the interpolated top.
+ * lag on `[data-chat-transcript]` (message rows only). The turn-status row
+ * is a sibling of that box, so it never receives a transform and cannot
+ * flicker from a parent/child inverse pair.
  */
 function applyVisual(port: HTMLElement, animatedTop: number): void {
   const floor = Math.max(0, port.scrollHeight - port.clientHeight)
@@ -154,13 +124,6 @@ function applyVisual(port: HTMLElement, animatedTop: number): void {
     setShift(shiftRoot, lag)
     return
   }
-  const rows = shiftRowsOf(port)
-  if (rows.length > 0) {
-    port.scrollTop = floor
-    port.setAttribute(FOLLOW_OWNED_ATTR, String(port.scrollTop))
-    for (const row of rows) setShift(row, lag)
-    return
-  }
   port.scrollTop = top
   port.setAttribute(FOLLOW_OWNED_ATTR, String(port.scrollTop))
 }
@@ -170,15 +133,9 @@ function clearVisual(port: HTMLElement): void {
   port.style.overflowAnchor = ''
   port.style.scrollBehavior = ''
   const shiftRoot = shiftRootOf(port)
-  if (shiftRoot !== null) {
-    shiftRoot.style.transform = ''
-    shiftRoot.style.willChange = ''
-    return
-  }
-  for (const row of shiftRowsOf(port)) {
-    row.style.transform = ''
-    row.style.willChange = ''
-  }
+  if (shiftRoot === null) return
+  shiftRoot.style.transform = ''
+  shiftRoot.style.willChange = ''
 }
 
 /** Live follow hosts per conversation port so one unmount does not clear another. */
@@ -244,22 +201,6 @@ export function useConversationFollow(
       clearVisual(next)
     }
 
-    /**
-     * Give the reader the visual position the glide was showing before the
-     * transforms go away. While transforms carry the lag, the engine sits at
-     * the floor and the effective visual top is `engine - lag`; writing that
-     * keeps the handover frame-continuous, and the write shows up in
-     * ChatView's ledger as reader movement, disarming its snap-follow.
-     * Without a shift surface the engine already holds the interpolated top,
-     * so there is nothing to compensate.
-     */
-    const handBackVisual = (next: HTMLElement): void => {
-      if (!hasShiftSurface(next)) return
-      const floor = Math.max(0, next.scrollHeight - next.clientHeight)
-      const lag = Math.max(0, floor - animatedTop)
-      next.scrollTop = Math.min(floor, Math.max(0, next.scrollTop - lag))
-    }
-
     const markGesture = (event: Event): void => {
       interacting = true
       if (event instanceof WheelEvent && event.deltaY < 0) awayPx += -event.deltaY
@@ -291,8 +232,8 @@ export function useConversationFollow(
       if (typeof ResizeObserver !== 'undefined') {
         resize = new ResizeObserver(restoreBeforePaint)
         resize.observe(port)
-        const proxy = resizeProxyOf(port)
-        if (proxy !== null) resize.observe(proxy)
+        const shiftRoot = shiftRootOf(port)
+        if (shiftRoot !== null) resize.observe(shiftRoot)
       }
     }
 
@@ -326,11 +267,8 @@ export function useConversationFollow(
         hold(nextPort)
       } else if (following && interacting && awayPx >= FOLLOW_UNPIN_GESTURE_PX) {
         following = false
-        awayPx = 0
-        // Compensate before the transform clears, or the flow (turn-status
-        // chrome included) jumps up by the whole lag in one frame.
-        handBackVisual(nextPort)
         animatedTop = nextPort.scrollTop
+        awayPx = 0
         drop(nextPort)
       }
 
@@ -362,10 +300,8 @@ export function useConversationFollow(
       const host = root?.closest<HTMLElement>('[data-conversation-scroll]') ?? port
       if (host === null) return
       if (following) {
-        // Same handback as an unpin: land on the effective visual top rather
-        // than the floor, so the owner change (stream close, unmount) does
-        // not snap the flow up by the remaining lag.
-        handBackVisual(host)
+        const floor = Math.max(0, host.scrollHeight - host.clientHeight)
+        host.scrollTop = floor
       }
       const remaining = holding === host ? releaseFollow(host) : (followOwners.get(host) ?? 0)
       holding = null
