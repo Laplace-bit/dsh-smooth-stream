@@ -1,4 +1,4 @@
-# dsh-stream
+# dsh-smooth-stream
 
 [English](README.md) | 中文
 
@@ -6,9 +6,9 @@
 
 ## 效果
 
-左：默认 Web UI。右：dsh-stream。
+左：默认 Web UI。右：dsh-smooth-stream。
 
-![左：未使用插件。右：使用 dsh-stream。](docs/compare.gif)
+![左：未使用插件。右：使用 dsh-smooth-stream。](docs/compare.gif)
 
 ## 它做什么
 
@@ -25,20 +25,20 @@
 在 DeepSeek Harness 源码仓库里：
 
 ```sh
-pnpm dsh plugin --profile web add github:Laplace-bit/dsh-stream
+pnpm dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream
 ```
 
 如果 `PATH` 上已经有 `dsh`：
 
 ```sh
-dsh plugin --profile web add github:Laplace-bit/dsh-stream
+dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream
 ```
 
 第一次 `add` 失败是正常的。git 安装需要跑这个包的 `prepare` 脚本，pnpm ≥10 在你授权之前会拦截。打开 `~/.dsh/profiles/web/pnpm-workspace.yaml`，把 pnpm 打印的那段加进去。当前 pnpm 打印的是：
 
 ```yaml
 onlyBuiltDependencies:
-  - dsh-stream
+  - dsh-smooth-stream
 ```
 
 然后重新执行同一条 `add`。
@@ -49,9 +49,9 @@ onlyBuiltDependencies:
 pnpm dsh web
 ```
 
-Host 日志里应出现 `[dsh-stream] plugin loaded!`。
+Host 日志里应出现 `[dsh-smooth-stream] plugin loaded!`。
 
-卸载：`pnpm dsh plugin --profile web remove dsh-stream`（或 `dsh plugin --profile web remove dsh-stream`）。
+卸载：`pnpm dsh plugin --profile web remove dsh-smooth-stream`（或 `dsh plugin --profile web remove dsh-smooth-stream`）。
 
 ## 配置
 

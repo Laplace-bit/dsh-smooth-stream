@@ -1,5 +1,5 @@
 {
-  "name": "dsh-stream",
+  "name": "dsh-smooth-stream",
   "version": "0.1.0",
   "description": "Smooth streaming reveal and conversation follow for the DeepSeek Harness Web UI",
   "license": "MIT",
@@ -9,17 +9,18 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Laplace-bit/dsh-stream.git"
+    "url": "git+https://github.com/Laplace-bit/dsh-smooth-stream.git"
   },
   "bugs": {
-    "url": "https://github.com/Laplace-bit/dsh-stream/issues"
+    "url": "https://github.com/Laplace-bit/dsh-smooth-stream/issues"
   },
-  "homepage": "https://github.com/Laplace-bit/dsh-stream#readme",
+  "homepage": "https://github.com/Laplace-bit/dsh-smooth-stream#readme",
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",
     "dsh",
     "streaming",
+    "smooth",
     "typewriter"
   ],
   "main": "lib/index.js",

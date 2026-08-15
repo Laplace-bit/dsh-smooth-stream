@@ -29,7 +29,7 @@ const SKIP_WRAP = new Set(['assistant-step', 'user', 'steering', 'command-input'
 function readBootConfig(): StreamConfig {
   const raw = (globalThis as Record<string, unknown>)[STREAM_BOOT_GLOBAL]
   if (raw === undefined) {
-    console.info('[dsh-stream] no host config bridge; using defaults')
+    console.info('[dsh-smooth-stream] no host config bridge; using defaults')
     return DEFAULT_STREAM_CONFIG
   }
   if (
@@ -40,7 +40,7 @@ function readBootConfig(): StreamConfig {
     || typeof (raw as StreamConfig).scrollSpeedPxPerSec !== 'number'
     || typeof (raw as StreamConfig).maxScrollSpeedPxPerSec !== 'number'
   ) {
-    throw new Error(`[dsh-stream] malformed ${STREAM_BOOT_GLOBAL} boot global: ${JSON.stringify(raw)}`)
+    throw new Error(`[dsh-smooth-stream] malformed ${STREAM_BOOT_GLOBAL} boot global: ${JSON.stringify(raw)}`)
   }
   return raw as StreamConfig
 }
@@ -112,7 +112,7 @@ export function apply(ctx: ClientContext): void {
       key: 'assistant-step',
       priority: -100,
       locale: 'conversation',
-      registrant: 'dsh-stream',
+      registrant: 'dsh-smooth-stream',
     }, configured)
     return () => {
       unshadow()

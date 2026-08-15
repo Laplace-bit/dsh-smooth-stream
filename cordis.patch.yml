@@ -1,7 +1,7 @@
 # Applied when this package appears in a profile's dsh.profile.bundles list.
 - insert:
-    - id: stream
-      name: dsh-stream
+    - id: smooth-stream
+      name: dsh-smooth-stream
       config:
         mode: typewriter
         preset: balanced

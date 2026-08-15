@@ -5,7 +5,7 @@ import { DEFAULT_STREAM_CONFIG, type StreamConfig } from './config.ts'
 import { injectStreamConfig } from './boot-config.ts'
 
 /** Display name shown by the Host loader while the plugin is mounted. */
-export const name = 'dsh-stream'
+export const name = 'dsh-smooth-stream'
 
 /**
  * Plugin configuration accepted from the overlay's `config` section. Cordis
@@ -41,14 +41,14 @@ export const Config: Schema<Config> = Schema.object({
  */
 export function apply(ctx: Context, config: Config): void {
   console.log(
-    `[dsh-stream] plugin loaded! mode=${config.mode} preset=${config.preset} `
+    `[dsh-smooth-stream] plugin loaded! mode=${config.mode} preset=${config.preset} `
     + `seed=${config.revealCharsPerSec}cps scroll=${config.scrollSpeedPxPerSec}px/s `
     + `maxScroll=${config.maxScrollSpeedPxPerSec}px/s`,
   )
   ctx.inject(['webServer'], (httpCtx) => {
     httpCtx.effect(
       () => httpCtx.webServer.tapIndex(html => injectStreamConfig(html, config)),
-      'dsh-stream: boot config bridge',
+      'dsh-smooth-stream: boot config bridge',
     )
   })
 }

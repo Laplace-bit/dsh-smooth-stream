@@ -1,4 +1,4 @@
-# dsh-stream
+# dsh-smooth-stream
 
 English | [中文](README.zh.md)
 
@@ -6,9 +6,9 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web plugin
 
 ## Preview
 
-Left: default Web UI. Right: dsh-stream.
+Left: default Web UI. Right: dsh-smooth-stream.
 
-![Left: without the plugin. Right: with dsh-stream.](docs/compare.gif)
+![Left: without the plugin. Right: with dsh-smooth-stream.](docs/compare.gif)
 
 ## What it does
 
@@ -25,20 +25,20 @@ Left: default Web UI. Right: dsh-stream.
 From a DeepSeek Harness source checkout:
 
 ```sh
-pnpm dsh plugin --profile web add github:Laplace-bit/dsh-stream
+pnpm dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream
 ```
 
 If `dsh` is already on your `PATH`:
 
 ```sh
-dsh plugin --profile web add github:Laplace-bit/dsh-stream
+dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream
 ```
 
 The first `add` is expected to fail. Git install has to run this package's `prepare` script, and pnpm ≥10 blocks that until you allow it. Open `~/.dsh/profiles/web/pnpm-workspace.yaml` and add the snippet pnpm printed. On current pnpm that is:
 
 ```yaml
 onlyBuiltDependencies:
-  - dsh-stream
+  - dsh-smooth-stream
 ```
 
 Then run the same `add` again.
@@ -49,9 +49,9 @@ Start the UI:
 pnpm dsh web
 ```
 
-The Host log should include `[dsh-stream] plugin loaded!`.
+The Host log should include `[dsh-smooth-stream] plugin loaded!`.
 
-Remove it with `pnpm dsh plugin --profile web remove dsh-stream` (or `dsh plugin --profile web remove dsh-stream`).
+Remove it with `pnpm dsh plugin --profile web remove dsh-smooth-stream` (or `dsh plugin --profile web remove dsh-smooth-stream`).
 
 ## Configuration
 

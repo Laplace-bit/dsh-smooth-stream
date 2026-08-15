@@ -47,4 +47,4 @@ export const DEFAULT_STREAM_CONFIG: StreamConfig = {
  * graph carries no per-entry config, so this inline script is the only
  * Host-to-client configuration channel for a composed web plugin.
  */
-export const STREAM_BOOT_GLOBAL = '__DSH_STREAM_CONFIG__'
+export const STREAM_BOOT_GLOBAL = '__DSH_SMOOTH_STREAM_CONFIG__'
