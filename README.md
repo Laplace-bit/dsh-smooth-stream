@@ -2,93 +2,68 @@
 
 English | [中文](README.zh.md)
 
-Community plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It is not part of the official distribution.
+A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web plugin for streaming replies. Community project, not part of the official distribution.
 
-The overlay keeps the built-in `MarkdownText` renderer and reveals assistant text at a cadence that tracks the model's arrival rate. Growing Chat rows — the assistant reply, tool cards, retries, workflow runs — glide with the conversation instead of jumping. A reader who scrolls away keeps their place; returning to the floor resumes follow.
+## Preview
 
-## Requirements
+Left: default Web UI. Right: dsh-stream.
 
-- Node.js `^22.19 || >=24`
-- A DeepSeek Harness Web profile (`dsh web` / `npx @deepseek-ai/dsh web`)
-- `pnpm` on `PATH` (`dsh plugin` forwards to it)
+![Left: without the plugin. Right: with dsh-stream.](docs/compare.gif)
+
+## What it does
+
+- **Reveal tracks the model.** Assistant text appears at a cadence that follows the arrival rate. Fast bursts do not dump a whole paragraph; a slow stream does not sit still and then jump.
+- **Markdown stays markdown.** Code, emphasis, and the rest render while the reply is still coming. There is no plain-text tail that later swaps into formatted markdown.
+- **Wraps glide in.** A new line or a growing tool card eases into view instead of snapping the transcript up by a line.
+- **You keep the scroll.** Scroll up to read earlier text and the overlay lets go. Follow resumes only when you return to the bottom — the to-bottom button counts.
+- **Think stays the built-in row.** Reasoning uses the usual disclosure. It opens while thinking is the live tail and closes when thinking ends; the chevron still toggles by hand.
+- **The rest of the turn moves with it.** Running tool cards, model retries, and workflow runs share the same follow, so the whole turn slides instead of only the assistant text.
+- **It backs off when it should.** `prefers-reduced-motion` shows the finished text at once and does not take follow. If the frame rate drops below 30 fps and the reply is off-screen, reveal pauses and catches up when the view is healthy again.
 
 ## Install
 
-From a DeepSeek Harness source checkout (this repo's `pnpm dsh` script):
+From a DeepSeek Harness source checkout:
 
 ```sh
 pnpm dsh plugin --profile web add github:Laplace-bit/dsh-stream
 ```
 
-If you installed the CLI globally (`dsh` on `PATH`):
+If `dsh` is already on your `PATH`:
 
 ```sh
 dsh plugin --profile web add github:Laplace-bit/dsh-stream
 ```
 
-`npx @deepseek-ai/dsh …` is not reliable here: npm looks for a `dsh` binary after the scoped package and can fail with `dsh: command not found`. Prefer `pnpm dsh` from a checkout, or `pnpm dlx @deepseek-ai/dsh …` if you have no checkout.
-
-A git install fetches **sources**. pnpm ≥10 blocks the package `prepare` script until you allow it, so the **first** `add` fails and prints the allowlist snippet. Copy that exact snippet into `~/.dsh/profiles/web/pnpm-workspace.yaml`. Current pnpm prints:
+The first `add` is expected to fail. Git install has to run this package's `prepare` script, and pnpm ≥10 blocks that until you allow it. Open `~/.dsh/profiles/web/pnpm-workspace.yaml` and add the snippet pnpm printed. On current pnpm that is:
 
 ```yaml
 onlyBuiltDependencies:
   - dsh-stream
 ```
 
-Older pnpm / the dsh hint may say `allowBuilds` instead:
+Then run the same `add` again.
 
-```yaml
-allowBuilds:
-  dsh-stream: true
-```
-
-Use whichever form pnpm printed, then run the same `add` again. Pin a release so a later push cannot change what runs:
-
-```sh
-dsh plugin --profile web add github:Laplace-bit/dsh-stream#v0.1.0
-```
-
-Start the Web UI (`pnpm dsh web` from a source checkout):
+Start the UI:
 
 ```sh
 pnpm dsh web
 ```
 
-The Host log should include `[dsh-stream] plugin loaded!`. Remove it with `dsh plugin --profile web remove dsh-stream`.
+The Host log should include `[dsh-stream] plugin loaded!`.
+
+Remove it with `pnpm dsh plugin --profile web remove dsh-stream` (or `dsh plugin --profile web remove dsh-stream`).
 
 ## Configuration
 
-Cordis validates the overlay `config` against the exported schema. Omitted fields use the defaults. An invalid value fails the load.
+The bundle installs with `preset: balanced`. Change it in the profile `cordis.patch.yml` if you want a different cadence:
 
-| Field | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `mode` | `typewriter` \| `teleprompter` | `typewriter` | Kept for config compatibility; neither mode draws a caret |
-| `preset` | `realtime` \| `balanced` \| `silky` | `balanced` | Reveal-cadence smoothing preset |
-| `revealCharsPerSec` | number (5–200) | `80` | Unused at runtime; live reveal tracks observed arrival |
-| `scrollSpeedPxPerSec` | number (1–200) | `48` | Unused at runtime; follow is a smooth-damp, not a cruise speed |
-| `maxScrollSpeedPxPerSec` | number (1–2000) | `1000` | Follow velocity ceiling so a huge first lag does not teleport |
+| `preset` | Feel |
+| --- | --- |
+| `realtime` | Keeps closer to the model |
+| `balanced` | Default |
+| `silky` | More buffer, slower catch-up |
 
-Override values in the profile `cordis.patch.yml` after install. The bundle already inserts the row with the defaults above.
-
-`prefers-reduced-motion` users receive the complete text immediately, and the overlay does not take follow. While the frame rate is below 30 fps **and** the reply is offscreen, reveal commits are held back and flush when the guard clears.
-
-## Development
-
-```sh
-pnpm install
-pnpm run typecheck
-pnpm test
-pnpm run build
-```
-
-Renderer tests resolve DeepSeek Harness packages through a sibling checkout:
-
-```text
-~/work/project/deepseek-harness
-~/work/project/dsh-stream
-```
-
-`prepare` / `build` transpile `src/` with tsdown and do not need that sibling. They emit `lib/index.js` (Host) and `lib/client.js` (browser ModuleLoader bundle).
+`maxScrollSpeedPxPerSec` (default `1000`) is a ceiling so the first large lag does not teleport.
 
 ## License
 
