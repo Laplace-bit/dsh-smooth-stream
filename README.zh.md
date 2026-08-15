@@ -6,34 +6,51 @@
 
 overlay 保留内置 `MarkdownText` 渲染器，并按模型到达速率揭示助手文本。仍在增长的 Chat 行——助手回复、工具卡片、重试、workflow run——随对话滑行，而不是跳入。读者向上滚动时保持原位；回到底部后重新跟随。
 
-## 安装
+## 环境
 
-需要 DeepSeek Harness 的 Web profile（`dsh web` / `dsh --profile web`）。
+- Node.js `^22.19 || >=24`
+- DeepSeek Harness 的 Web profile（`dsh web` / `npx @deepseek-ai/dsh web`）
+- `PATH` 上有 `pnpm`（`dsh plugin` 会转发给它）
+
+## 安装
 
 ```sh
 dsh plugin --profile web add github:Laplace-bit/dsh-stream
 ```
 
-git 安装拉取的是源码。pnpm ≥10 在得到允许之前会拦截包的 `prepare` 脚本。第一次 `add` 会失败并打印键名；把它复制进 `~/.dsh/profiles/web/pnpm-workspace.yaml`：
+如果没有 `dsh` 命令：
+
+```sh
+npx @deepseek-ai/dsh plugin --profile web add github:Laplace-bit/dsh-stream
+```
+
+git 安装拉取的是**源码**。pnpm ≥10 在得到允许之前会拦截包的 `prepare` 脚本，所以**第一次** `add` 会失败，并打印一段授权片段。把 pnpm 打印的那段原样复制进 `~/.dsh/profiles/web/pnpm-workspace.yaml`。当前 pnpm 打印的是：
+
+```yaml
+onlyBuiltDependencies:
+  - dsh-stream
+```
+
+较旧的 pnpm / dsh 提示可能写成 `allowBuilds`：
 
 ```yaml
 allowBuilds:
   dsh-stream: true
 ```
 
-然后重新执行 `add`。不想让后续推送悄悄改变运行内容时，请锁定 commit：
+用 pnpm 实际打印的那种，然后重新执行同一条 `add`。锁定发行版，避免后续推送悄悄改变运行内容：
 
 ```sh
-dsh plugin --profile web add github:Laplace-bit/dsh-stream#<sha>
+dsh plugin --profile web add github:Laplace-bit/dsh-stream#v0.1.0
 ```
 
 启动 Web UI：
 
 ```sh
-dsh --profile web
+dsh web
 ```
 
-卸载：`dsh plugin --profile web remove dsh-stream`。
+Host 日志里应出现 `[dsh-stream] plugin loaded!`。卸载：`dsh plugin --profile web remove dsh-stream`。
 
 ## 配置
 

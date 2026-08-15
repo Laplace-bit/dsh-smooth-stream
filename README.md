@@ -6,34 +6,51 @@ Community plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-
 
 The overlay keeps the built-in `MarkdownText` renderer and reveals assistant text at a cadence that tracks the model's arrival rate. Growing Chat rows — the assistant reply, tool cards, retries, workflow runs — glide with the conversation instead of jumping. A reader who scrolls away keeps their place; returning to the floor resumes follow.
 
-## Install
+## Requirements
 
-Requires the DeepSeek Harness Web profile (`dsh web` / `dsh --profile web`).
+- Node.js `^22.19 || >=24`
+- A DeepSeek Harness Web profile (`dsh web` / `npx @deepseek-ai/dsh web`)
+- `pnpm` on `PATH` (`dsh plugin` forwards to it)
+
+## Install
 
 ```sh
 dsh plugin --profile web add github:Laplace-bit/dsh-stream
 ```
 
-A git install fetches sources. pnpm ≥10 blocks the package `prepare` script until you allow it. The first `add` fails and prints the key; copy it into `~/.dsh/profiles/web/pnpm-workspace.yaml`:
+If `dsh` is not on `PATH`:
+
+```sh
+npx @deepseek-ai/dsh plugin --profile web add github:Laplace-bit/dsh-stream
+```
+
+A git install fetches **sources**. pnpm ≥10 blocks the package `prepare` script until you allow it, so the **first** `add` fails and prints the allowlist snippet. Copy that exact snippet into `~/.dsh/profiles/web/pnpm-workspace.yaml`. Current pnpm prints:
+
+```yaml
+onlyBuiltDependencies:
+  - dsh-stream
+```
+
+Older pnpm / the dsh hint may say `allowBuilds` instead:
 
 ```yaml
 allowBuilds:
   dsh-stream: true
 ```
 
-Then run the `add` again. Pin a commit if you do not want a later push to change what runs:
+Use whichever form pnpm printed, then run the same `add` again. Pin a release so a later push cannot change what runs:
 
 ```sh
-dsh plugin --profile web add github:Laplace-bit/dsh-stream#<sha>
+dsh plugin --profile web add github:Laplace-bit/dsh-stream#v0.1.0
 ```
 
 Start the Web UI:
 
 ```sh
-dsh --profile web
+dsh web
 ```
 
-Remove it with `dsh plugin --profile web remove dsh-stream`.
+The Host log should include `[dsh-stream] plugin loaded!`. Remove it with `dsh plugin --profile web remove dsh-stream`.
 
 ## Configuration
 
