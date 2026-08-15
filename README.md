@@ -2,7 +2,9 @@
 
 English | [中文](README.zh.md)
 
-A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web plugin for streaming replies. Community project, not part of the official distribution.
+**dsh-smooth-stream** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) community plugin for **silky streaming** in the Web UI: arrival-tracking typewriter reveal, glide-in wraps, no flicker. It is not part of the official DeepSeek distribution.
+
+Project homepage: <https://laplace-bit.github.io/dsh-smooth-stream/>
 
 ## Preview
 
@@ -64,6 +66,20 @@ The bundle installs with `preset: balanced`. Change it in the profile `cordis.pa
 | `silky` | More buffer, slower catch-up |
 
 `maxScrollSpeedPxPerSec` (default `1000`) is a ceiling so the first large lag does not teleport.
+
+## FAQ
+
+**Is this an official DeepSeek plugin?**
+No. It is a community plugin for the DeepSeek Harness (`dsh`) Web UI, MIT-licensed, and not part of the official DeepSeek distribution.
+
+**How do I install a DeepSeek Harness plugin?**
+Use the built-in plugin command: `dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream` from a dsh source checkout (see [Install](#install) for the pnpm ≥10 build-script note).
+
+**Can I install it from npm?**
+Not yet - the plugin currently installs from GitHub. Watch this repository for npm availability.
+
+**Does it respect `prefers-reduced-motion`?**
+Yes. With reduced motion enabled the finished text is shown at once and the plugin does not take over follow. If the frame rate drops below 30 fps while the reply is off-screen, reveal pauses and catches up later.
 
 ## License
 

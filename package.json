@@ -1,7 +1,7 @@
 {
   "name": "dsh-smooth-stream",
   "version": "0.1.0",
-  "description": "Smooth streaming reveal and conversation follow for the DeepSeek Harness Web UI",
+  "description": "DeepSeek Harness (dsh) plugin: silky streaming reveal, no flicker. dsh 丝滑流式渲染插件。",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -14,14 +14,23 @@
   "bugs": {
     "url": "https://github.com/Laplace-bit/dsh-smooth-stream/issues"
   },
-  "homepage": "https://github.com/Laplace-bit/dsh-smooth-stream#readme",
+  "homepage": "https://laplace-bit.github.io/dsh-smooth-stream/",
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",
+    "deepseek",
     "dsh",
+    "cordis",
     "streaming",
-    "smooth",
-    "typewriter"
+    "smooth-streaming",
+    "smooth-stream",
+    "typewriter",
+    "typewriter-effect",
+    "markdown",
+    "chat-ui",
+    "web-ui",
+    "plugin",
+    "react"
   ],
   "main": "lib/index.js",
   "exports": {

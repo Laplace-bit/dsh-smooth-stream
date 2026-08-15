@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dsh-smooth-stream – DeepSeek Harness (dsh) 丝滑流式渲染插件 | Silky streaming Web UI plugin</title>
+<meta name="description" content="dsh-smooth-stream 是 DeepSeek Harness (dsh) 的社区插件，为 Web 对话带来丝滑流式渲染：打字机跟随模型速率、Markdown 边流边渲染、换行滑入、不闪烁。A community plugin for the DeepSeek Harness (dsh) Web UI: arrival-tracking typewriter reveal, live Markdown rendering, glide-in wraps, zero flicker.">
+<meta name="keywords" content="dsh-smooth-stream, dsh plugin, dsh 插件, DeepSeek Harness, deepseek-harness plugin, deepseek streaming, 丝滑流式渲染, smooth streaming, streaming markdown, typewriter effect, AI chat UI, cordis plugin">
+<meta name="author" content="Laplace-bit">
+<link rel="canonical" href="https://laplace-bit.github.io/dsh-smooth-stream/">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="dsh-smooth-stream">
+<meta property="og:title" content="dsh-smooth-stream – DeepSeek Harness 丝滑流式渲染插件 (silky streaming plugin)">
+<meta property="og:description" content="打字机跟随模型速率、Markdown 边流边渲染、换行滑入、不闪烁。Arrival-tracking typewriter reveal, live Markdown rendering, zero flicker for the dsh Web UI.">
+<meta property="og:url" content="https://laplace-bit.github.io/dsh-smooth-stream/">
+<meta property="og:image" content="https://laplace-bit.github.io/dsh-smooth-stream/og-image.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="710">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:locale:alternate" content="en_US">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="dsh-smooth-stream – DeepSeek Harness 丝滑流式渲染插件">
+<meta name="twitter:description" content="打字机跟随模型速率、Markdown 边流边渲染、换行滑入、不闪烁。社区插件，非官方。">
+<meta name="twitter:image" content="https://laplace-bit.github.io/dsh-smooth-stream/og-image.jpg">
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234d6bfe'/%3E%3Cpath d='M14 20h22M14 30h30M14 40h18' stroke='white' stroke-width='6' stroke-linecap='round'/%3E%3Cpath d='M42 38l6 6 10-12' stroke='%2370e384' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "dsh-smooth-stream",
+  "url": "https://laplace-bit.github.io/dsh-smooth-stream/",
+  "description": "Community plugin for the DeepSeek Harness (dsh) Web UI that renders streaming replies smoothly: arrival-tracking typewriter reveal, live Markdown rendering, glide-in wraps, no flicker. DeepSeek Harness (dsh) 社区插件：丝滑流式渲染。",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Linux, macOS, Windows",
+  "programmingLanguage": "TypeScript",
+  "softwareVersion": "0.1.0",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "license": "https://spdx.org/licenses/MIT",
+  "author": { "@type": "Person", "name": "Laplace-bit", "url": "https://github.com/Laplace-bit" },
+  "sameAs": [
+    "https://github.com/Laplace-bit/dsh-smooth-stream",
+    "https://github.com/deepseek-ai/deepseek-harness"
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "什么是 dsh-smooth-stream？",
+      "acceptedAnswer": { "@type": "Answer", "text": "dsh-smooth-stream 是 DeepSeek Harness (dsh) 的社区插件，为 Web 对话界面提供丝滑的流式渲染：文字按模型到达速率以打字机方式出现，Markdown 在流式过程中实时渲染，新行滑入视图，全程无闪烁。" }
+    },
+    {
+      "@type": "Question",
+      "name": "怎么安装 dsh-smooth-stream 插件？",
+      "acceptedAnswer": { "@type": "Answer", "text": "在 DeepSeek Harness 源码目录运行：pnpm dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream。首次安装需要按 pnpm ≥10 提示在 ~/.dsh/profiles/web/pnpm-workspace.yaml 中允许 dsh-smooth-stream 的构建脚本，然后重新执行同一条命令。" }
+    },
+    {
+      "@type": "Question",
+      "name": "Is dsh-smooth-stream an official DeepSeek plugin?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No. It is a community plugin for the DeepSeek Harness (dsh) Web UI and is not part of the official DeepSeek distribution. Source code is available on GitHub under the MIT license." }
+    },
+    {
+      "@type": "Question",
+      "name": "dsh-smooth-stream 支持 prefers-reduced-motion 吗？",
+      "acceptedAnswer": { "@type": "Answer", "text": "支持。系统开启「减少动态效果」时，插件会直接显示完整文本并放弃滚动跟随；帧率低于 30 fps 且回复在屏幕外时，揭示会自动暂停，画面恢复后再补上。" }
+    },
+    {
+      "@type": "Question",
+      "name": "Can dsh-smooth-stream be installed from npm?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Currently the plugin is installed from GitHub via the dsh plugin command (github:Laplace-bit/dsh-smooth-stream). Watch the GitHub repository for npm availability." }
+    }
+  ]
+}
+</script>
+
+<style>
+:root{--ink:#1c2333;--muted:#5b6472;--brand:#4d6bfe;--bg:#fbfcff;--card:#fff;--line:#e5e9f2;--code:#f4f6fb}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;color:var(--ink);background:var(--bg)}
+.wrap{max-width:820px;margin:0 auto;padding:0 20px}
+header{background:linear-gradient(160deg,#eef2ff,#fbfcff);border-bottom:1px solid var(--line);padding:56px 0 40px}
+h1{font-size:2rem;letter-spacing:-.02em}
+h1 span{color:var(--brand)}
+.tagline{color:var(--muted);margin-top:10px;font-size:1.05rem;max-width:44em}
+.cta{margin-top:22px;display:flex;gap:12px;flex-wrap:wrap}
+.btn{display:inline-block;padding:10px 18px;border-radius:9px;text-decoration:none;font-weight:600;font-size:.95rem}
+.btn.primary{background:var(--brand);color:#fff}
+.btn.ghost{border:1px solid var(--brand);color:var(--brand)}
+.notice{margin-top:16px;font-size:.85rem;color:var(--muted)}
+section{padding:36px 0}
+h2{font-size:1.35rem;margin-bottom:14px;letter-spacing:-.01em}
+h2 small{font-weight:400;color:var(--muted);font-size:.95rem}
+figure{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card)}
+figure img{display:block;width:100%;height:auto}
+figcaption{padding:8px 14px;font-size:.85rem;color:var(--muted)}
+ul.f{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+ul.f li{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+ul.f b{display:block;margin-bottom:4px}
+ul.f p{font-size:.9rem;color:var(--muted)}
+pre{background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;font-size:.9rem}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+p code,li code{background:var(--code);border-radius:5px;padding:1px 6px;font-size:.88em}
+.note{font-size:.9rem;color:var(--muted);margin-top:10px}
+table{border-collapse:collapse;width:100%;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:.95rem}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line)}
+th{background:var(--code);font-size:.9rem}
+tr:last-child td{border-bottom:none}
+details{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:10px}
+summary{font-weight:600;cursor:pointer}
+details p{color:var(--muted);margin-top:8px;font-size:.95rem}
+footer{border-top:1px solid var(--line);padding:26px 0 44px;color:var(--muted);font-size:.88rem}
+footer a{color:var(--brand)}
+a{color:var(--brand)}
+</style>
+</head>
+<body>
+
+<header>
+<div class="wrap">
+<h1>dsh-<span>smooth-stream</span></h1>
+<p class="tagline">DeepSeek Harness（dsh）社区插件 —— 丝滑流式渲染：打字机跟随模型速率、Markdown 边流边渲染、换行滑入、不闪烁。<br>
+A community plugin for the DeepSeek Harness (dsh) Web UI — silky streaming: arrival-tracking typewriter reveal, live Markdown rendering, glide-in wraps, zero flicker.</p>
+<div class="cta">
+<a class="btn primary" href="https://github.com/Laplace-bit/dsh-smooth-stream">GitHub 仓库 / Source</a>
+<a class="btn ghost" href="https://github.com/Laplace-bit/dsh-smooth-stream/issues">Issues</a>
+</div>
+<p class="notice">社区项目，非 DeepSeek 官方发行的一部分。Community project, not part of the official DeepSeek distribution. MIT License.</p>
+</div>
+</header>
+
+<section id="preview">
+<div class="wrap">
+<h2>效果 <small>Preview</small></h2>
+<figure>
+<img src="compare.gif" alt="左右对比：左侧为默认 DeepSeek Harness Web UI 的流式输出，右侧为安装 dsh-smooth-stream 后的丝滑流式渲染（打字机跟随、无闪烁）。Side-by-side: default Web UI vs dsh-smooth-stream." width="1824" height="1080" loading="lazy">
+<figcaption>左：默认 Web UI · Left: default &nbsp;&nbsp;|&nbsp;&nbsp; 右：dsh-smooth-stream · Right: with the plugin</figcaption>
+</figure>
+</div>
+</section>
+
+<section id="features">
+<div class="wrap">
+<h2>它做什么 <small>Features</small></h2>
+<ul class="f">
+<li><b>揭示跟着模型走</b><p>文字按 token 到达速率出现，突发不倾倒、慢流不卡顿。Reveal tracks the model's arrival rate.</p></li>
+<li><b>一直是 Markdown</b><p>代码块、强调等在流式中实时渲染，没有纯文本尾巴再换排版的交接。Markdown renders live, no plain-text swap.</p></li>
+<li><b>换行滑入</b><p>新行与增长的工具卡片滑入视野，不再把对话往上顶一格。New lines glide in.</p></li>
+<li><b>滚动条归你</b><p>上翻即松手，回到底部才继续跟随。Scroll stays yours; follow resumes at the bottom.</p></li>
+<li><b>整轮一起动</b><p>工具卡片、模型重试、workflow 共用同一套跟随。The whole turn moves together.</p></li>
+<li><b>该停就停</b><p>支持 <code>prefers-reduced-motion</code>；低帧率时自动暂停。Backs off for reduced motion and low fps.</p></li>
+</ul>
+</div>
+</section>
+
+<section id="install">
+<div class="wrap">
+<h2>安装 <small>Install</small></h2>
+<pre><code>pnpm dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream</code></pre>
+<p class="note">首次 <code>add</code> 失败是正常的：pnpm ≥10 会拦截 <code>prepare</code> 脚本，按提示把 <code>dsh-smooth-stream</code> 加入 <code>~/.dsh/profiles/web/pnpm-workspace.yaml</code> 的 <code>onlyBuiltDependencies</code>，再执行一次同一条命令。然后 <code>pnpm dsh web</code> 启动，Host 日志出现 <code>[dsh-smooth-stream] plugin loaded!</code> 即成功。</p>
+</div>
+</section>
+
+<section id="config">
+<div class="wrap">
+<h2>配置 <small>Configuration</small></h2>
+<table>
+<tr><th><code>preset</code></th><th>手感 / Feel</th></tr>
+<tr><td><code>realtime</code></td><td>更贴模型到达 / Keeps closer to the model</td></tr>
+<tr><td><code>balanced</code></td><td>默认 / Default</td></tr>
+<tr><td><code>silky</code></td><td>缓冲更大，追上更慢 / More buffer, slower catch-up</td></tr>
+</table>
+<p class="note"><code>maxScrollSpeedPxPerSec</code>（默认 1000）限制滚动速度上限，避免首次大滞后时瞬移。</p>
+</div>
+</section>
+
+<section id="faq">
+<div class="wrap">
+<h2>常见问题 <small>FAQ</small></h2>
+<details open>
+<summary>什么是 dsh-smooth-stream？</summary>
+<p>DeepSeek Harness（dsh）的社区插件，为 Web 对话提供丝滑流式渲染：打字机跟随模型速率、Markdown 边流边渲染、换行滑入、不闪烁。</p>
+</details>
+<details>
+<summary>怎么安装 dsh 插件？</summary>
+<p>在 DeepSeek Harness 源码目录运行 <code>pnpm dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream</code>，按上面的 pnpm 授权说明重跑一次即可。</p>
+</details>
+<details>
+<summary>Is it an official DeepSeek plugin?</summary>
+<p>No — it is a community plugin for the DeepSeek Harness (dsh) Web UI, MIT-licensed on GitHub, and not part of the official DeepSeek distribution.</p>
+</details>
+<details>
+<summary>支持 prefers-reduced-motion 吗？</summary>
+<p>支持。系统开启减少动态效果时直接显示完整文本，不接管跟随；帧率低于 30 fps 且回复在屏外时揭示自动暂停。</p>
+</details>
+<details>
+<summary>Can it be installed from npm?</summary>
+<p>Currently the plugin installs from GitHub via <code>dsh plugin add github:Laplace-bit/dsh-smooth-stream</code>. Watch the repository for npm availability.</p>
+</details>
+</div>
+</section>
+
+<footer>
+<div class="wrap">
+<p><a href="https://github.com/Laplace-bit/dsh-smooth-stream">dsh-smooth-stream</a> · <a href="https://github.com/Laplace-bit/dsh-smooth-stream/blob/main/LICENSE">MIT License</a> · 适用于 <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness (dsh)</a></p>
+</div>
+</footer>
+
+</body>
+</html>

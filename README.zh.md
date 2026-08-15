@@ -2,7 +2,9 @@
 
 [English](README.md) | 中文
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的 Web 流式回复插件。社区项目，不是官方发行的一部分。
+**dsh-smooth-stream** 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）的社区插件，给 Web 对话做**丝滑流式渲染**：字跟着模型走、换行滑入、不闪。不是官方发行的一部分。
+
+项目主页：<https://laplace-bit.github.io/dsh-smooth-stream/>
 
 ## 效果
 
@@ -64,6 +66,20 @@ Host 日志里应出现 `[dsh-smooth-stream] plugin loaded!`。
 | `silky` | 缓冲更大，追上更慢 |
 
 `maxScrollSpeedPxPerSec`（默认 `1000`）是速度上限，避免第一次滞后过大时瞬移。
+
+## 常见问题
+
+**这是 DeepSeek 官方插件吗？**
+不是。它是 DeepSeek Harness（`dsh`）Web UI 的社区插件，MIT 协议开源，不属于 DeepSeek 官方发行。
+
+**dsh 插件怎么安装？**
+用内置插件命令：在 dsh 源码目录运行 `dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream`（pnpm ≥10 的构建授权说明见[安装](#安装)）。
+
+**能用 npm 安装吗？**
+暂时不能，目前只支持从 GitHub 安装。可以关注本仓库，npm 发布后会有通知。
+
+**支持 `prefers-reduced-motion` 吗？**
+支持。系统开启减少动态效果时直接显示完整文本、不接管跟随；帧率低于 30 fps 且回复在屏外时，揭示自动暂停、恢复后再补上。
 
 ## 许可证
 
