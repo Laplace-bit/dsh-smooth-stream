@@ -14,15 +14,19 @@ The overlay keeps the built-in `MarkdownText` renderer and reveals assistant tex
 
 ## Install
 
+From a DeepSeek Harness source checkout (this repo's `pnpm dsh` script):
+
+```sh
+pnpm dsh plugin --profile web add github:Laplace-bit/dsh-stream
+```
+
+If you installed the CLI globally (`dsh` on `PATH`):
+
 ```sh
 dsh plugin --profile web add github:Laplace-bit/dsh-stream
 ```
 
-If `dsh` is not on `PATH`:
-
-```sh
-npx @deepseek-ai/dsh plugin --profile web add github:Laplace-bit/dsh-stream
-```
+`npx @deepseek-ai/dsh …` is not reliable here: npm looks for a `dsh` binary after the scoped package and can fail with `dsh: command not found`. Prefer `pnpm dsh` from a checkout, or `pnpm dlx @deepseek-ai/dsh …` if you have no checkout.
 
 A git install fetches **sources**. pnpm ≥10 blocks the package `prepare` script until you allow it, so the **first** `add` fails and prints the allowlist snippet. Copy that exact snippet into `~/.dsh/profiles/web/pnpm-workspace.yaml`. Current pnpm prints:
 
@@ -44,10 +48,10 @@ Use whichever form pnpm printed, then run the same `add` again. Pin a release so
 dsh plugin --profile web add github:Laplace-bit/dsh-stream#v0.1.0
 ```
 
-Start the Web UI:
+Start the Web UI (`pnpm dsh web` from a source checkout):
 
 ```sh
-dsh web
+pnpm dsh web
 ```
 
 The Host log should include `[dsh-stream] plugin loaded!`. Remove it with `dsh plugin --profile web remove dsh-stream`.
