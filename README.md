@@ -2,6 +2,8 @@
 
 English | [中文](README.zh.md)
 
+[![featured on dsh-suite](https://img.shields.io/badge/featured%20on-dsh--suite-4d6bfe)](https://whyihaveyou.github.io/dsh-suite/)
+
 **dsh-smooth-stream** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) community plugin for **silky streaming** in the Web UI: arrival-tracking typewriter reveal, glide-in wraps, no flicker. It is not part of the official DeepSeek distribution.
 
 Project homepage: <https://laplace-bit.github.io/dsh-smooth-stream/>

@@ -76,7 +76,7 @@
     "typecheck": "tsc -p tsconfig.json --pretty false"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-locale": "*",
     "@deepseek-ai/dsh-client-runtime": "*",
     "@deepseek-ai/dsh-client-ui-attachment": "*",
