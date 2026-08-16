@@ -1,88 +1,81 @@
 # dsh-smooth-stream
 
-English | [中文](README.zh.md)
+[English](README.en.md) | 中文
 
 [![featured on dsh-suite](https://img.shields.io/badge/featured%20on-dsh--suite-4d6bfe)](https://whyihaveyou.github.io/dsh-suite/)
 
-**dsh-smooth-stream** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) community plugin for **silky streaming** in the Web UI: arrival-tracking typewriter reveal, glide-in wraps, no flicker. It is not part of the official DeepSeek distribution.
+**dsh-smooth-stream** 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）的社区插件，给 Web 对话做**丝滑流式渲染**：字跟着模型走、换行滑入、不闪。不是官方发行的一部分。
 
-Project homepage: <https://laplace-bit.github.io/dsh-smooth-stream/>
+项目主页：<https://laplace-bit.github.io/dsh-smooth-stream/>
 
-## Preview
+## 效果
 
-Left: default Web UI. Right: dsh-smooth-stream.
+左：默认 Web UI。右：dsh-smooth-stream。
 
-![Left: without the plugin. Right: with dsh-smooth-stream.](docs/compare.gif)
+![左：未使用插件。右：使用 dsh-smooth-stream。](docs/compare.gif)
 
-## What it does
+## 它做什么
 
-- **Reveal tracks the model.** Assistant text appears at a cadence that follows the arrival rate. Fast bursts do not dump a whole paragraph; a slow stream does not sit still and then jump.
-- **Markdown stays markdown.** Code, emphasis, and the rest render while the reply is still coming. There is no plain-text tail that later swaps into formatted markdown.
-- **Wraps glide in.** A new line or a growing tool card eases into view instead of snapping the transcript up by a line.
-- **You keep the scroll.** Scroll up to read earlier text and the overlay lets go. Follow resumes only when you return to the bottom — the to-bottom button counts.
-- **Think stays the built-in row.** Reasoning uses the usual disclosure. It opens while thinking is the live tail and closes when thinking ends; the chevron still toggles by hand.
-- **The rest of the turn moves with it.** Running tool cards, model retries, and workflow runs share the same follow, so the whole turn slides instead of only the assistant text.
-- **It backs off when it should.** `prefers-reduced-motion` shows the finished text at once and does not take follow. If the frame rate drops below 30 fps and the reply is off-screen, reveal pauses and catches up when the view is healthy again.
+- **揭示跟着模型走。** 助手文本按到达速率出现。突发不会整段倒出来，慢流也不会停住再猛地补上。
+- **一直是 Markdown。** 代码、强调等在流式过程中就按格式渲染，没有先出纯文本再换成排版的交接。
+- **换行是滑进来的。** 新的一行或正在变高的工具卡片会滑入视野，而不是把整段记录往上顶一格。
+- **滚动条归你。** 往上翻看前文时 overlay 会松手。只有回到底部才会继续跟随——点「回到底部」也算。
+- **思考仍是内置那一行。** 推理用原来的 disclosure。它是当前流式尾部时展开，思考一结束就收起；箭头仍可手动开关。
+- **整轮一起动。** 运行中的工具卡片、模型重试、workflow run 共用同一套跟随，所以滑的是整轮回复，不只是助手正文。
+- **该停的时候会停。** `prefers-reduced-motion` 会直接给出全文，也不接管跟随。帧率低于 30 fps 且回复在屏外时，揭示会暂停，画面恢复后再补上。
 
-## Install
+## 安装
 
-From a DeepSeek Harness source checkout:
-
-```sh
-pnpm dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream
-```
-
-If `dsh` is already on your `PATH`:
+在 DeepSeek Harness 源码仓库里：
 
 ```sh
-dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream
+pnpm dsh plugin --profile web add dsh-smooth-stream
 ```
 
-The first `add` is expected to fail. Git install has to run this package's `prepare` script, and pnpm ≥10 blocks that until you allow it. Open `~/.dsh/profiles/web/pnpm-workspace.yaml` and add the snippet pnpm printed. On current pnpm that is:
+如果 `PATH` 上已经有 `dsh`：
 
-```yaml
-onlyBuiltDependencies:
-  - dsh-smooth-stream
+```sh
+dsh plugin --profile web add dsh-smooth-stream
 ```
 
-Then run the same `add` again.
+npm 包带预构建的 `lib/`，无需 pnpm ≥10 的构建脚本授权，直接可装。
 
-Start the UI:
+启动界面：
 
 ```sh
 pnpm dsh web
 ```
 
-The Host log should include `[dsh-smooth-stream] plugin loaded!`.
+Host 日志里应出现 `[dsh-smooth-stream] plugin loaded!`。
 
-Remove it with `pnpm dsh plugin --profile web remove dsh-smooth-stream` (or `dsh plugin --profile web remove dsh-smooth-stream`).
+卸载：`pnpm dsh plugin --profile web remove dsh-smooth-stream`（或 `dsh plugin --profile web remove dsh-smooth-stream`）。
 
-## Configuration
+## 配置
 
-The bundle installs with `preset: balanced`. Change it in the profile `cordis.patch.yml` if you want a different cadence:
+组合包默认 `preset: balanced`。要换节拍，在 profile 的 `cordis.patch.yml` 里改：
 
-| `preset` | Feel |
+| `preset` | 手感 |
 | --- | --- |
-| `realtime` | Keeps closer to the model |
-| `balanced` | Default |
-| `silky` | More buffer, slower catch-up |
+| `realtime` | 更贴模型到达 |
+| `balanced` | 默认 |
+| `silky` | 缓冲更大，追上更慢 |
 
-`maxScrollSpeedPxPerSec` (default `1000`) is a ceiling so the first large lag does not teleport.
+`maxScrollSpeedPxPerSec`（默认 `1000`）是速度上限，避免第一次滞后过大时瞬移。
 
-## FAQ
+## 常见问题
 
-**Is this an official DeepSeek plugin?**
-No. It is a community plugin for the DeepSeek Harness (`dsh`) Web UI, MIT-licensed, and not part of the official DeepSeek distribution.
+**这是 DeepSeek 官方插件吗？**
+不是。它是 DeepSeek Harness（`dsh`）Web UI 的社区插件，MIT 协议开源，不属于 DeepSeek 官方发行。
 
-**How do I install a DeepSeek Harness plugin?**
-Use the built-in plugin command: `dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream` from a dsh source checkout (see [Install](#install) for the pnpm ≥10 build-script note).
+**dsh 插件怎么安装？**
+用内置插件命令：在 dsh 源码目录运行 `dsh plugin --profile web add dsh-smooth-stream`（见[安装](#安装)）。
 
-**Can I install it from npm?**
-Not yet - the plugin currently installs from GitHub. Watch this repository for npm availability.
+**能用 npm 安装吗？**
+能。`dsh-smooth-stream` 已发布到 [npm](https://www.npmjs.com/package/dsh-smooth-stream)，`dsh plugin --profile web add dsh-smooth-stream` 安装的就是预构建的 npm 包。
 
-**Does it respect `prefers-reduced-motion`?**
-Yes. With reduced motion enabled the finished text is shown at once and the plugin does not take over follow. If the frame rate drops below 30 fps while the reply is off-screen, reveal pauses and catches up later.
+**支持 `prefers-reduced-motion` 吗？**
+支持。系统开启减少动态效果时直接显示完整文本、不接管跟随；帧率低于 30 fps 且回复在屏外时，揭示自动暂停、恢复后再补上。
 
-## License
+## 许可证
 
 [MIT](LICENSE)
