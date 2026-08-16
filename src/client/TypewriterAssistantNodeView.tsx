@@ -1,7 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
-import { DisclosureRow, IconThinkOutline14, JsonBlock, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconThinkOutline14, JsonBlock, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ImageGallery, type ImageLoader, type MessageImageLabels } from '@deepseek-ai/dsh-client-ui-attachment'
 import type { ChatNodeViewProps, TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { AnimatedDisclosure } from './AnimatedDisclosure.tsx'
 import { useSmoothStreamContent, type StreamSmoothingPreset } from './useSmoothStreamContent.ts'
 import { useFpsGuard } from './useFpsGuard.ts'
 import { FollowHost } from './FollowHost.tsx'
@@ -113,7 +114,9 @@ function latestLine(text: string): string {
 
 /**
  * Built-in Think disclosure with a smoothed `text` feed. Chevron and row
- * click stay on `DisclosureRow`. The row opens only while this block is
+ * click stay on the disclosure chrome, which the plugin's AnimatedDisclosure
+ * renders with a height-animated body (the harness primitive would mount and
+ * unmount it, which cannot glide). The row opens only while this block is
  * the streaming tail and closes as soon as thinking ends — a later block,
  * or the assistant node settling — not when the rest of the reply is
  * still streaming.
@@ -158,7 +161,7 @@ function AnimatedReasoning({
     <FollowHost active={running} speedCpsRef={speedCpsRef}>
       <div className={css.think} data-variant="think" data-state={running ? 'running' : 'ok'}>
         {running && <span className={css.visuallyHidden}>{t('row.running')}</span>}
-        <DisclosureRow
+        <AnimatedDisclosure
           rowClassName={css.thinkRow}
           leadingClassName={css.thinkLeading}
           titleClassName={css.thinkTitle}
@@ -166,8 +169,6 @@ function AnimatedReasoning({
           icon={<IconThinkOutline14 size={14} />}
           title="Think"
           open={expanded}
-          expandable
-          expandOnRowClick
           onToggle={() => { setExpanded(value => !value) }}
           collapsedContent={(
             <>
@@ -177,7 +178,7 @@ function AnimatedReasoning({
           )}
         >
           <div className={css.thinkBody}>{shown}</div>
-        </DisclosureRow>
+        </AnimatedDisclosure>
       </div>
     </FollowHost>
   )

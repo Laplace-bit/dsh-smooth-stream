@@ -169,7 +169,9 @@ describe('assistant renderer', () => {
     view.rerender(<TypewriterAssistantNodeView {...assistantProps('settled', [block])} />)
     expect(view.getByText('first line')).toBeTruthy()
     expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('false')
-    expect(view.queryByText('second')).toBeNull()
+    // The animated body stays mounted while collapsed (hidden by the 0fr
+    // track), so collapse is an assertion on the wrapper state, not absence.
+    expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-collapsed')).toBe(true)
   })
 
   it('collapses the Think disclosure when a later block becomes the tail', () => {
@@ -182,7 +184,20 @@ describe('assistant renderer', () => {
     ])} />)
     expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('false')
     expect(view.getByText('first line')).toBeTruthy()
-    expect(view.queryByText('second')).toBeNull()
+    expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-collapsed')).toBe(true)
+  })
+
+  it('keeps the Think body mounted behind the animated 0fr track while collapsed', () => {
+    const block = { kind: 'reasoning', text: 'first line\n\nsecond' }
+    const view = render(<TypewriterAssistantNodeView {...assistantProps('settled', [block])} />)
+    const content = view.container.querySelector('[data-disclosure-content]')
+    // The height-animates substrate: the body is in the DOM (measurable for
+    // the grid track) while the collapsed wrapper carries data-collapsed.
+    expect(content).not.toBeNull()
+    expect(content?.hasAttribute('data-collapsed')).toBe(true)
+    expect(content?.querySelector(`.${css.thinkBody}`)?.textContent).toContain('second')
+    fireEvent.click(view.container.querySelector('[data-disclosure-row]') as HTMLElement)
+    expect(content?.hasAttribute('data-collapsed')).toBe(false)
   })
 
   it('expands the built-in Think row on click', async () => {

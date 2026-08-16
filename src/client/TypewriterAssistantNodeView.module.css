@@ -90,9 +90,107 @@
   word-break: break-word;
 }
 
+/*
+ * AnimatedDisclosure chrome: mirrors the harness DisclosureRow geometry
+ * ([16px leading] gap 6 [title 14/24]) plus the hover icon->chevron preview.
+ */
+.disclosureRoot {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+.disclosureRow {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  height: 24px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.disclosureLeading {
+  position: relative;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.disclosureIconIdle {
+  display: inline-flex;
+  opacity: 1;
+  transition: opacity 100ms ease;
+}
+
+.disclosureChevronHover {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.disclosureRow:hover .disclosureIconIdle {
+  opacity: 0;
+}
+
+.disclosureRow:hover .disclosureChevronHover {
+  opacity: 1;
+}
+
+.disclosureTitle {
+  flex: none;
+  font-size: 14px;
+  line-height: 24px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/*
+ * The animated body: one grid track transitions 0fr <-> 1fr, so the height
+ * glides to the body's natural size with no measured pixel target. The direct
+ * child clips to the track; `visibility` (not display) keeps a collapsed body
+ * out of the accessibility tree and tab order while it still measures for the
+ * animation - it flips visible immediately on expand and waits for the height
+ * to collapse before hiding. Rides the deepsuite curve tokens with fallbacks
+ * for standalone composition.
+ */
+.disclosureContent {
+  display: grid;
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition:
+    grid-template-rows var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, cubic-bezier(0.4, 0, 0.2, 1)),
+    visibility 0s;
+}
+
+.disclosureContent[data-collapsed] {
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, cubic-bezier(0.4, 0, 0.2, 1)),
+    visibility 0s var(--ds-transition-duration, 0.2s);
+}
+
+.disclosureContent > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .think[data-state='running'] .thinkRow::after {
     animation: none;
+  }
+
+  .disclosureContent,
+  .disclosureContent[data-collapsed] {
+    transition: none;
   }
 }
 

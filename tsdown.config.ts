@@ -99,12 +99,18 @@ const clientBundle: UserConfig = {
       return [
         `const css = ${JSON.stringify(code.toString())};`,
         `const tagId = ${JSON.stringify(`${PACKAGE_ID}/${basename(fileId)}`)};`,
-        'if (typeof document !== \'undefined\' && document.querySelector(\'style[data-plugin-css=\' + JSON.stringify(tagId) + \']\') === null) {',
-        '  const tag = document.createElement(\'style\');',
-        `  tag.dataset.plugin = ${JSON.stringify(PACKAGE_ID)};`,
-        '  tag.dataset.pluginCss = tagId;',
+        'if (typeof document !== \'undefined\') {',
+        // Keyed on the file, not the content: a same-document module
+        // re-execution (HMR reload after a rebuild) must REPLACE the sheet,
+        // or the new hashed class names run against the stale old CSS.
+        '  let tag = document.querySelector(\'style[data-plugin-css=\' + JSON.stringify(tagId) + \']\');',
+        '  if (tag === null) {',
+        '    tag = document.createElement(\'style\');',
+        `    tag.dataset.plugin = ${JSON.stringify(PACKAGE_ID)};`,
+        '    tag.dataset.pluginCss = tagId;',
+        '    document.head.appendChild(tag);',
+        '  }',
         '  tag.textContent = css;',
-        '  document.head.appendChild(tag);',
         '}',
         `export default ${JSON.stringify(classMap)};`,
       ].join('\n')
