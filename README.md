@@ -62,6 +62,28 @@ Host 日志里应出现 `[dsh-smooth-stream] plugin loaded!`。
 
 `maxScrollSpeedPxPerSec`（默认 `1000`）是速度上限，避免第一次滞后过大时瞬移。
 
+## 用户设置
+
+在 Web 界面打开 **设置 → 插件 → 插件配置**，会看到一张 **丝滑流式（Smooth stream）** 卡片，可切换**「自动展开思考」**：
+
+- **开**（默认）：思考块在流式时自动展开，思考结束收起——与插件默认行为一致。
+- **关**：思考块保持折叠；仍可手动点开，且不会被流式状态抢回控制。
+
+该设置是用户级的持久化偏好，改完即生效，无需重启；会写进 DeepSeek Harness 的用户设置文档，而不是插件的组合配置。
+
+## 关于与更新
+
+- **版本 / 主页 / 许可证**：见本页顶部与 [package.json](package.json) 的 `version`、`homepage`、`repository`、`license` 字段；安装的插件列表可在 **设置 → 插件 → 全部** 里查看。
+- **更新**：卡片会显示 Host 当前加载的版本。只有当前 profile 明确把 `dsh-smooth-stream` 声明为 npm 依赖时，**更新**按钮才会对该 profile 执行固定的包更新，并提示重启 Harness。`link:` 或 `file:` 本地开发安装会显示为开发版本，更新按钮会保持禁用，避免覆盖你的源码目录。
+
+也可以通过命令行更新 npm 安装的 profile：
+
+```sh
+dsh plugin --profile web update dsh-smooth-stream
+```
+
+（也可用 `dsh plugin --profile web outdated` 查看是否有新版本。）
+
 ## 常见问题
 
 **这是 DeepSeek 官方插件吗？**

@@ -1,0 +1,3 @@
+# Boot overlay: same web profile, plugin row off.
+- id: smooth-stream
+  disabled: true

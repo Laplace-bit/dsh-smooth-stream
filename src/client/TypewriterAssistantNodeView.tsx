@@ -7,6 +7,7 @@ import { useSmoothStreamContent, type StreamSmoothingPreset } from './useSmoothS
 import { useFpsGuard } from './useFpsGuard.ts'
 import { FollowHost } from './FollowHost.tsx'
 import { DEFAULT_STREAM_CONFIG, type StreamMode } from '../config.ts'
+import { DEFAULT_STREAM_SETTINGS } from '../settings.ts'
 import css from './TypewriterAssistantNodeView.module.css'
 
 type AssistantProps = ChatNodeViewProps<'assistant-step'>
@@ -125,17 +126,19 @@ function AnimatedReasoning({
   text,
   running,
   preset,
+  thinkAutoExpand,
   shouldHoldBack,
   t,
 }: {
   text: string
   running: boolean
   preset: StreamSmoothingPreset
+  thinkAutoExpand: boolean
   shouldHoldBack: () => boolean
   t: AssistantProps['t']
 }) {
   const reduced = usePrefersReducedMotion()
-  const [expanded, setExpanded] = useState(running)
+  const [expanded, setExpanded] = useState(running && thinkAutoExpand)
   const summaryRef = useRef<HTMLSpanElement>(null)
   const speedCpsRef = useRef(35)
   const displayed = useSmoothStreamContent(text, {
@@ -148,8 +151,10 @@ function AnimatedReasoning({
   const summary = running ? latestLine(shown) : firstLine(text)
 
   useEffect(() => {
-    setExpanded(running)
-  }, [running])
+    // Only the running state owns disclosure while auto-expand is on; with it
+    // off, a manual toggle is never wrestled back by the stream.
+    if (thinkAutoExpand) setExpanded(running)
+  }, [running, thinkAutoExpand])
 
   useEffect(() => {
     const element = summaryRef.current
@@ -200,6 +205,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   revealCharsPerSec: _revealCharsPerSec = DEFAULT_STREAM_CONFIG.revealCharsPerSec,
   scrollSpeedPxPerSec: _scrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.scrollSpeedPxPerSec,
   maxScrollSpeedPxPerSec: _maxScrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.maxScrollSpeedPxPerSec,
+  thinkAutoExpand = DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
   node,
   useTurnData,
   openFile,
@@ -212,6 +218,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   revealCharsPerSec?: number
   scrollSpeedPxPerSec?: number
   maxScrollSpeedPxPerSec?: number
+  thinkAutoExpand?: boolean
 }) {
   const data = node.data
   const streaming = data.status === 'running'
@@ -272,6 +279,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
             text={block.text}
             running={streaming && index === last}
             preset={preset}
+            thinkAutoExpand={thinkAutoExpand}
             shouldHoldBack={shouldHoldBack}
             t={t}
           />,

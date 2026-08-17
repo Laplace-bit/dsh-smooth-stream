@@ -62,6 +62,28 @@ The bundle installs with `preset: balanced`. Change it in the profile `cordis.pa
 
 `maxScrollSpeedPxPerSec` (default `1000`) is a ceiling so the first large lag does not teleport.
 
+## User settings
+
+In the Web UI, open **Settings → Plugins → Plugin configuration** to find a **Smooth stream** card with an **"Auto-expand thinking"** toggle:
+
+- **On** (default): reasoning blocks auto-expand while streaming and collapse when thinking ends — the plugin's default behavior.
+- **Off**: reasoning blocks stay collapsed; you can still open one by hand, and the stream state will not wrestle it back.
+
+This is a durable, user-level preference that applies live without a restart, and is written to the DeepSeek Harness user-settings document rather than the plugin's composed configuration.
+
+## About & updates
+
+- **Version / homepage / license**: see the top of this page and the `version`, `homepage`, `repository`, and `license` fields in [package.json](package.json). Installed plugins are listed under **Settings → Plugins → All**.
+- **Updates**: the card shows the version loaded by the Host. When the active profile declares `dsh-smooth-stream` as an npm dependency, its **Update** button runs the same fixed package update for that profile and then asks you to restart Harness. A `link:` or `file:` development install is shown as a development version and deliberately leaves the button disabled, so it cannot replace your checkout.
+
+You can also update an npm-installed profile from the command line:
+
+```sh
+dsh plugin --profile web update dsh-smooth-stream
+```
+
+(`dsh plugin --profile web outdated` shows whether a newer version exists.)
+
 ## FAQ
 
 **Is this an official DeepSeek plugin?**

@@ -1,6 +1,6 @@
 {
   "name": "dsh-smooth-stream",
-  "version": "0.1.0",
+  "version": "0.3.1",
   "description": "DeepSeek Harness (dsh) plugin: silky streaming reveal, no flicker. dsh 丝滑流式渲染插件。",
   "license": "MIT",
   "type": "module",
@@ -65,7 +65,10 @@
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-conversation",
-        "@deepseek-ai/dsh-client-locale"
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-plugins"
       ]
     }
   },
@@ -75,13 +78,19 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --pretty false"
   },
+  "dependencies": {
+    "@deepseek-ai/dsh-settings": "0.1.0-rc.6"
+  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-locale": "*",
     "@deepseek-ai/dsh-client-runtime": "*",
     "@deepseek-ai/dsh-client-ui-attachment": "*",
+    "@deepseek-ai/dsh-client-connection": "*",
     "@deepseek-ai/dsh-client-ui-conversation": "*",
     "@deepseek-ai/dsh-client-ui-primitives": "*",
+    "@deepseek-ai/dsh-client-ui-settings": "*",
+    "@deepseek-ai/dsh-client-ui-settings-plugins": "*",
     "@deepseek-ai/dsh-client-ui-slots": "*",
     "@deepseek-ai/dsh-host-webserver": "*",
     "@deepseek-ai/schemastery": "*",
@@ -97,10 +106,19 @@
     "@deepseek-ai/dsh-client-ui-attachment": {
       "optional": true
     },
+    "@deepseek-ai/dsh-client-connection": {
+      "optional": true
+    },
     "@deepseek-ai/dsh-client-ui-conversation": {
       "optional": true
     },
     "@deepseek-ai/dsh-client-ui-primitives": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-settings": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-settings-plugins": {
       "optional": true
     },
     "@deepseek-ai/dsh-client-ui-slots": {
@@ -115,10 +133,14 @@
     "@deepseek-ai/dsh-client-locale": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-attachment": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-connection": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-conversation": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-settings-plugins": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-slots": "0.1.0-rc.6",
     "@deepseek-ai/dsh-host-webserver": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-settings": "0.1.0-rc.6",
     "@deepseek-ai/schemastery": "3.18.1",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^22.20.0",
