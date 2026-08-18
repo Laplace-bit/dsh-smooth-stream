@@ -218,8 +218,8 @@
 }
 
 /*
- * Follow host: ordinary document flow. The last text block owns the
- * conversation scrollport's bottom-follow while the reply reveals
+ * Follow host: ordinary document flow. The assistant node owns follow during
+ * streaming; the last text block takes over while its settled queue drains
  * (see useConversationFollow).
  */
 .follow {

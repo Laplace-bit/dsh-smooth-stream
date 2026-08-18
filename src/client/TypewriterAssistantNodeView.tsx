@@ -128,6 +128,7 @@ function AnimatedReasoning({
   preset,
   thinkAutoExpand,
   shouldHoldBack,
+  followSpeedCpsRef,
   t,
 }: {
   text: string
@@ -135,17 +136,17 @@ function AnimatedReasoning({
   preset: StreamSmoothingPreset
   thinkAutoExpand: boolean
   shouldHoldBack: () => boolean
+  followSpeedCpsRef?: { current: number } | undefined
   t: AssistantProps['t']
 }) {
   const reduced = usePrefersReducedMotion()
   const [expanded, setExpanded] = useState(running && thinkAutoExpand)
   const summaryRef = useRef<HTMLSpanElement>(null)
-  const speedCpsRef = useRef(35)
   const displayed = useSmoothStreamContent(text, {
     enabled: running && !reduced,
     preset,
     shouldHoldBack,
-    speedCpsRef,
+    speedCpsRef: followSpeedCpsRef,
   })
   const shown = running && !reduced ? displayed : text
   const summary = running ? latestLine(shown) : firstLine(text)
@@ -162,8 +163,9 @@ function AnimatedReasoning({
     element.scrollLeft = running ? element.scrollWidth - element.clientWidth : 0
   }, [running, summary])
 
+  // Preserve FollowHost's layout wrapper without mounting a second scroll owner.
   return (
-    <FollowHost active={running} speedCpsRef={speedCpsRef}>
+    <div className={css.follow}>
       <div className={css.think} data-variant="think" data-state={running ? 'running' : 'ok'}>
         {running && <span className={css.visuallyHidden}>{t('row.running')}</span>}
         <AnimatedDisclosure
@@ -185,7 +187,7 @@ function AnimatedReasoning({
           <div className={css.thinkBody}>{shown}</div>
         </AnimatedDisclosure>
       </div>
-    </FollowHost>
+    </div>
   )
 }
 
@@ -194,10 +196,10 @@ function AnimatedReasoning({
  * streaming is revealed by the smoother through the Harness Markdown
  * renderer at a rate that tracks arrival. Reasoning blocks keep the
  * built-in Think disclosure and only receive a smoothed text feed; the
- * last text or reasoning block owns conversation-port follow so wraps
- * glide. The FPS guard holds offscreen
- * reveals when the frame rate is degraded. Settled text renders with the
- * full Markdown pipeline.
+ * outer node owns conversation-port follow while streaming; the final text
+ * block keeps ownership while its settled reveal queue drains. The FPS guard
+ * holds offscreen reveals when the frame rate is degraded. Settled text
+ * renders with the full Markdown pipeline.
  */
 export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNodeView({
   mode: _mode = DEFAULT_STREAM_CONFIG.mode,
@@ -224,6 +226,10 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   const streaming = data.status === 'running'
   const { ref: guardRef, shouldHoldBack } = useFpsGuard(streaming)
   const rootSpeedRef = useRef(35)
+  const reasoningOwnsSpeed = streaming && data.blocks[data.blocks.length - 1]?.kind === 'reasoning'
+  useEffect(() => {
+    if (!reasoningOwnsSpeed) rootSpeedRef.current = 35
+  }, [reasoningOwnsSpeed])
   const turn = node.location.kind === 'turn' || node.location.kind === 'step'
     ? node.location.turn
     : undefined
@@ -281,6 +287,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
             preset={preset}
             thinkAutoExpand={thinkAutoExpand}
             shouldHoldBack={shouldHoldBack}
+            followSpeedCpsRef={reasoningOwnsSpeed && index === last ? rootSpeedRef : undefined}
             t={t}
           />,
         )

@@ -187,6 +187,56 @@ describe('assistant renderer', () => {
     expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-collapsed')).toBe(true)
   })
 
+  it('does not flash the conversation port to the top when Think yields to new text', async () => {
+    const think = { kind: 'reasoning', text: 'working through the details' }
+    let height = 500
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-transcript>
+          <TypewriterAssistantNodeView {...assistantProps('running', [think])} />
+        </div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', { configurable: true, get: () => height })
+    port.scrollTop = 390
+    await act(() => vi.advanceTimersByTimeAsync(80))
+    expect(port.scrollTop).toBe(400)
+
+    // Reasoning ends as a large text block arrives. Before the fix, the
+    // outgoing Think owner handed its stale lag to the still-running root
+    // owner: 400 - (1200 - 500) clamps to 0 for one rendered frame.
+    height = 1200
+    view.rerender(
+      <div data-conversation-scroll>
+        <div data-chat-transcript>
+          <TypewriterAssistantNodeView {...assistantProps('running', [
+            think,
+            { kind: 'text', text: 'the answer '.repeat(100) },
+          ])} />
+        </div>
+      </div>,
+    )
+
+    // The owner must survive the content-type handoff without an intermediate
+    // cleanup write. The next frames express growth as transcript lag, so the
+    // effective visual top may advance but must never move upward.
+    expect(port.scrollTop).toBe(400)
+    const visualTop = () => {
+      const shift = Number(/translate3d\(0, ([\d.]+)px, 0\)/.exec(
+        (view.container.querySelector('[data-chat-transcript]') as HTMLElement).style.transform,
+      )?.[1] ?? 0)
+      return port.scrollTop - shift
+    }
+    for (const collapsingHeight of [1200, 1100, 1000, 900]) {
+      height = collapsingHeight
+      await act(() => vi.advanceTimersByTimeAsync(16))
+      expect(port.scrollTop).toBeGreaterThan(0)
+      expect(visualTop()).toBeGreaterThanOrEqual(399)
+    }
+  })
+
   it('keeps the Think body mounted behind the animated 0fr track while collapsed', () => {
     const block = { kind: 'reasoning', text: 'first line\n\nsecond' }
     const view = render(<TypewriterAssistantNodeView {...assistantProps('settled', [block])} />)
@@ -301,6 +351,54 @@ describe('assistant renderer', () => {
     expect(settled.scrollTop).toBe(370)
   })
 
+  it('keeps follow while the final text reveal queue drains after stream close', async () => {
+    const initial = { kind: 'text', text: '' }
+    const text = 'queued ending '.repeat(80)
+    let height = 500
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-transcript>
+          <TypewriterAssistantNodeView {...assistantProps('running', [initial])} />
+        </div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', { configurable: true, get: () => height })
+    port.scrollTop = 390
+    await act(() => vi.advanceTimersByTimeAsync(80))
+
+    const queued = { kind: 'text', text }
+    view.rerender(
+      <div data-conversation-scroll>
+        <div data-chat-transcript>
+          <TypewriterAssistantNodeView {...assistantProps('running', [queued])} />
+        </div>
+      </div>,
+    )
+    await act(() => vi.advanceTimersByTimeAsync(120))
+    // A final layout flush lands before the stream-close effects. The old
+    // cleanup handed this >25px lag to the next owner, which then refused to
+    // follow because it looked like reader input.
+    height = 650
+    view.rerender(
+      <div data-conversation-scroll>
+        <div data-chat-transcript>
+          <TypewriterAssistantNodeView {...assistantProps('settled', [queued])} />
+        </div>
+      </div>,
+    )
+    await act(() => vi.advanceTimersByTimeAsync(80))
+    expect(port.getAttribute('data-follow-owned')).not.toBeNull()
+    expect(port.scrollTop).toBe(550)
+
+    height = 800
+    const beforeGrowth = port.scrollTop
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(port.getAttribute('data-follow-owned')).not.toBeNull()
+    expect(port.scrollTop).toBeGreaterThan(beforeGrowth)
+  })
+
   it('unpins on a light upward wheel instead of requiring a 25px engine lag', async () => {
     const block = { kind: 'text', text: 'line one\n\nline two\n\nline three' }
     const view = render(
@@ -342,6 +440,7 @@ describe('assistant renderer', () => {
     expect(port.scrollTop).toBe(400)
     const lagBefore = Number(/translate3d\(0, ([\d.]+)px, 0\)/.exec(transcript.style.transform)?.[1] ?? -1)
     expect(lagBefore).toBeGreaterThan(0)
+    expect(transcript.style.clipPath).toBe('')
 
     // Reader pulls the engine up beyond the slack band; the effective visual
     // top is engine - lag.
@@ -350,6 +449,7 @@ describe('assistant renderer', () => {
     await act(() => vi.advanceTimersByTimeAsync(80))
     expect(port.getAttribute('data-follow-owned')).toBeNull()
     expect(transcript.style.transform).toBe('')
+    expect(transcript.style.clipPath).toBe('')
     // Continuity: after the transform clears, scrollTop IS the visual top the
     // reader was seeing (engine - lag), not the pre-unpin engine position.
     expect(port.scrollTop).toBeCloseTo(340 - lagBefore, 1)
@@ -358,7 +458,36 @@ describe('assistant renderer', () => {
     expect(port.scrollTop).toBe(held)
   })
 
-  it('settles on the lag-compensated position when the stream closes instead of snapping to the floor', async () => {
+  it('preserves an upward gesture when the stream closes before the unpin frame', async () => {
+    const block = { kind: 'reasoning', text: 'first line\n\nsecond' }
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-transcript>
+          <TypewriterAssistantNodeView {...assistantProps('running', [block])} />
+        </div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', { configurable: true, value: 500 })
+    port.scrollTop = 390
+    await act(() => vi.advanceTimersByTimeAsync(80))
+
+    fireEvent.wheel(port, { deltaY: -60 })
+    port.scrollTop = 340
+    view.rerender(
+      <div data-conversation-scroll>
+        <div data-chat-transcript>
+          <TypewriterAssistantNodeView {...assistantProps('settled', [block])} />
+        </div>
+      </div>,
+    )
+
+    expect(port.getAttribute('data-follow-owned')).toBeNull()
+    expect(port.scrollTop).toBeLessThan(340)
+  })
+
+  it('settles at the floor when the stream closes without a reader gesture', async () => {
     const block = { kind: 'text', text: 'line one\n\nline two\n\nline three' }
     const view = render(
       <div data-conversation-scroll>
@@ -374,8 +503,8 @@ describe('assistant renderer', () => {
     await act(() => vi.advanceTimersByTimeAsync(80))
     expect(port.scrollTop).toBe(400)
 
-    // Close while the glide still trails: the ownership handover must land on
-    // the visual top (below the floor), never snap scrollTop to the floor.
+    // Lifecycle completion is not a reader unpin. Even with residual visual
+    // lag, the final position must remain pinned at the floor.
     view.rerender(
       <div data-conversation-scroll>
         <div data-chat-transcript>
@@ -384,11 +513,13 @@ describe('assistant renderer', () => {
       </div>,
     )
     await act(() => vi.advanceTimersByTimeAsync(48))
-    expect(port.scrollTop).toBeLessThan(400)
+    expect(port.scrollTop).toBe(400)
   })
 
   it('shifts message rows, not the turn-status sibling, when the host has no transcript box', async () => {
     const block = { kind: 'text', text: 'line one\n\nline two\n\nline three' }
+    let height = 500
+    const statusGap = 16
     const view = render(
       <div data-conversation-scroll>
         <div data-chat-flow>
@@ -403,8 +534,17 @@ describe('assistant renderer', () => {
     const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
     const flow = view.container.querySelector('[data-chat-flow]') as HTMLElement
     const label = view.container.querySelector('[role="status"]') as HTMLElement
+    const rows = flow.querySelectorAll<HTMLElement>('[data-chat-anchor-key]')
     Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
-    Object.defineProperty(port, 'scrollHeight', { configurable: true, value: 500 })
+    Object.defineProperty(port, 'scrollHeight', { configurable: true, get: () => height })
+    vi.spyOn(rows[1] as HTMLElement, 'getBoundingClientRect').mockImplementation(() => {
+      const row = rows[1] as HTMLElement
+      const shift = Number(/translate3d\(0, ([\d.]+)px, 0\)/.exec(row.style.transform)?.[1] ?? 0)
+      return { top: 100 + shift, bottom: 200 + shift } as DOMRect
+    })
+    vi.spyOn(label, 'getBoundingClientRect').mockImplementation(
+      () => ({ top: 200 + statusGap, bottom: 200 + statusGap + 26 }) as DOMRect,
+    )
     port.scrollTop = 390
     await act(() => vi.advanceTimersByTimeAsync(80))
     expect(port.getAttribute('data-follow-owned')).not.toBeNull()
@@ -412,11 +552,20 @@ describe('assistant renderer', () => {
     expect(port.scrollTop).toBe(400)
     expect(flow.style.transform).toBe('')
     expect(label.style.transform).toBe('')
-    const rows = flow.querySelectorAll('[data-chat-anchor-key]')
     expect(rows.length).toBe(2)
     for (const row of rows) {
-      expect((row as HTMLElement).style.transform).toMatch(/^translate3d\(0(px)?, \d/)
+      expect(row.style.transform).toMatch(/^translate3d\(0(px)?, \d/)
     }
+    expect(rows[0]?.style.clipPath).toBe('')
+    expect(rows[1]?.style.clipPath).toBe('')
+
+    height = 1200
+    await act(() => vi.advanceTimersByTimeAsync(16))
+    const last = rows[1] as HTMLElement
+    const shift = Number(/translate3d\(0, ([\d.]+)px, 0\)/.exec(last.style.transform)?.[1] ?? -1)
+    const bottomClip = Number(/inset\(0(?:px)? 0(?:px)? ([\d.]+)px 0(?:px)?\)/.exec(last.style.clipPath)?.[1] ?? -1)
+    expect(shift).toBeGreaterThan(25)
+    expect(bottomClip).toBeCloseTo(shift - statusGap, 5)
   })
 
   it('shifts only the outermost rows so nested tool subcalls do not double-shift', async () => {
@@ -451,8 +600,63 @@ describe('assistant renderer', () => {
     expect(outer.style.transform).toMatch(/^translate3d\(0(px)?, \d/)
     expect(sibling.style.transform).toMatch(/^translate3d\(0(px)?, \d/)
     expect(sub.style.transform).toBe('')
+    expect(outer.style.clipPath).toBe('')
+    expect(sibling.style.clipPath).toMatch(/^inset\(0(px)? 0(px)? [\d.]+px 0(px)?\)$/)
+    expect(sub.style.clipPath).toBe('')
     expect(flow.style.transform).toBe('')
     expect(label.style.transform).toBe('')
+  })
+
+  it('clips transcript paint at the status line, preserving the natural gap', async () => {
+    const block = { kind: 'text', text: 'line one\n\nline two\n\nline three' }
+    let height = 500
+    const statusGap = 16
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-transcript>
+            <TypewriterAssistantNodeView {...assistantProps('running', [block])} />
+          </div>
+          <div data-chat-turn-status="" role="status">Deep diving...</div>
+        </div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    const chrome = view.container.querySelector('[data-chat-turn-status]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', { configurable: true, get: () => height })
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => {
+      const shift = Number(/translate3d\(0, ([\d.]+)px, 0\)/.exec(transcript.style.transform)?.[1] ?? 0)
+      return { top: 0, bottom: height + shift } as DOMRect
+    })
+    vi.spyOn(chrome, 'getBoundingClientRect').mockImplementation(
+      () => ({ top: height + statusGap, bottom: height + statusGap + 24 }) as DOMRect,
+    )
+    port.scrollTop = 390
+    await act(() => vi.advanceTimersByTimeAsync(80))
+
+    const initialShift = Number(/translate3d\(0, ([\d.]+)px, 0\)/.exec(transcript.style.transform)?.[1] ?? -1)
+    expect(initialShift).toBeGreaterThan(0)
+    expect(initialShift).toBeLessThan(statusGap)
+    expect(transcript.style.clipPath).toBe('')
+
+    // Simulate a fast chunk or an FPS-guard flush landing in one layout pass.
+    height = 1200
+    await act(() => vi.advanceTimersByTimeAsync(16))
+    const shift = Number(/translate3d\(0, ([\d.]+)px, 0\)/.exec(transcript.style.transform)?.[1] ?? -1)
+    const bottomClip = Number(/inset\(0(?:px)? 0(?:px)? ([\d.]+)px 0(?:px)?\)/.exec(transcript.style.clipPath)?.[1] ?? -1)
+    expect(shift).toBeGreaterThan(25)
+    expect(bottomClip).toBeCloseTo(shift - statusGap, 5)
+    // Preserve the layout gap as usable reveal space; only paint that would
+    // enter the status line itself is clipped.
+    const naturalBottom = height
+    expect(naturalBottom + shift - bottomClip).toBeCloseTo(naturalBottom + statusGap, 5)
+    expect(chrome.style.transform).toBe('')
+
+    view.unmount()
+    expect(transcript.style.transform).toBe('')
+    expect(transcript.style.clipPath).toBe('')
   })
 
   it('keeps following when the column grows without a reader gesture', async () => {
@@ -474,7 +678,7 @@ describe('assistant renderer', () => {
     expect(port.scrollTop).toBeGreaterThan(390)
   })
 
-  it('glides the turn-status chrome down before the port has scroll room', async () => {
+  it('keeps the turn-status chrome in natural flow before the port has scroll room', async () => {
     const block = { kind: 'text', text: 'line one\n\nline two' }
     const view = render(
       <div data-conversation-scroll>
@@ -497,22 +701,18 @@ describe('assistant renderer', () => {
     await act(() => vi.advanceTimersByTimeAsync(80))
     expect(port.getAttribute('data-follow-owned')).not.toBeNull()
 
-    // A wrap grows the content while it is still short of the viewport. The
-    // interpolated lag descends the turn-status label instead of snapping it.
+    // A wrap grows the content while it is still short of the viewport. A
+    // negative status transform would consume the column's 16px gap and
+    // overlap the newly revealed transcript, so chrome stays in normal flow.
     Object.defineProperty(port, 'scrollHeight', { configurable: true, value: 60 })
-    await act(() => vi.advanceTimersByTimeAsync(80))
+    await act(() => vi.advanceTimersByTimeAsync(16))
     expect(port.scrollTop).toBe(0)
     expect(transcript.style.transform).toBe('')
-    const chromeShift = Number(/translate3d\(0, ([\d.-]+)px, 0\)/.exec(chrome.style.transform)?.[1] ?? 0)
-    // The label is descending (negative), but by less than the full 40px
-    // content-height jump — it is gliding, not snapping.
-    expect(chromeShift).toBeLessThan(0)
-    expect(chromeShift).toBeGreaterThan(-40)
+    expect(chrome.style.transform).toBe('')
 
-    // The lag keeps closing toward the settled position.
+    // It remains unshifted throughout the old glide window.
     await act(() => vi.advanceTimersByTimeAsync(400))
-    const laterShift = Number(/translate3d\(0, ([\d.-]+)px, 0\)/.exec(chrome.style.transform)?.[1] ?? 0)
-    expect(laterShift).toBeGreaterThan(chromeShift)
+    expect(chrome.style.transform).toBe('')
   })
 
   it('returns settled text to the Harness Markdown renderer', () => {

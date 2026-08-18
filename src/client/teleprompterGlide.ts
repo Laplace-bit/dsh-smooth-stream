@@ -14,17 +14,15 @@
  * - while the port has scroll room, writes the interpolated lag as
  *   `translate3d` on `[data-chat-transcript]` (message rows only), so the
  *   turn-status chrome stays pinned at the floor;
- * - before the port has scroll room (content shorter than the viewport), the
- *   same lag is a content-height lag written as a negative translate on
- *   `[data-chat-turn-status]`, so the status label descends smoothly with
- *   each wrap instead of hopping a line at a time.
+ * - clips only the part of the translated surface that crosses the
+ *   turn-status line, preserving the normal gap above that line;
+ * - leaves `[data-chat-turn-status]` in normal flow at every height, so its
+ *   layout gap cannot be consumed by an interpolated transform.
  *
- * Handing the port back to the reader (unpin, or the owner going inactive)
- * first writes the effective visual top (`engine - lag`) into `scrollTop`
- * before clearing the transform, so the frame stays continuous. That write
- * also lands in ChatView's observed-top ledger as reader input beyond
- * `FOLLOW_THRESHOLD`, releasing its native snap-follow instead of fighting
- * the gesture for the port.
+ * A real reader unpin first writes the effective visual top (`engine - lag`)
+ * into `scrollTop` before clearing the transform, so the frame stays
+ * continuous. Lifecycle completion is different: without a reader gesture,
+ * the last owner settles at the floor and preserves bottom-follow.
  *
  * Unpin is a real gesture (wheel / touch / pointer / key) that leaves the
  * floor; a `scrollTop` delta from our own write must not release the pin.
@@ -136,35 +134,54 @@ function hasShiftSurface(port: HTMLElement): boolean {
   return shiftRootOf(port) !== null || shiftRowsOf(port).length > 0
 }
 
-function setShift(element: HTMLElement, px: number, negative = false): void {
-  const value = negative ? -px : px
-  if (Math.abs(value) > 0.01) {
-    element.style.transform = `translate3d(0, ${value}px, 0)`
+/** Cached natural gap from a shifted surface's bottom to the status line. */
+const statusGapCache = new WeakMap<HTMLElement, { chrome: HTMLElement; px: number }>()
+
+function currentShiftOf(element: HTMLElement): number {
+  return Number(/translate3d\(0, ([\d.]+)px, 0\)/.exec(element.style.transform)?.[1] ?? 0)
+}
+
+function statusGapBelow(surface: HTMLElement, chrome: HTMLElement): number {
+  const cached = statusGapCache.get(surface)
+  if (cached?.chrome === chrome) return cached.px
+  // getBoundingClientRect includes our current transform. Remove it to recover
+  // the layout bottom, then keep the existing gap available to the reveal.
+  const naturalBottom = surface.getBoundingClientRect().bottom - currentShiftOf(surface)
+  const px = Math.max(0, chrome.getBoundingClientRect().top - naturalBottom)
+  statusGapCache.set(surface, { chrome, px })
+  return px
+}
+
+function setShift(element: HTMLElement, px: number, paintAllowance?: number): void {
+  if (Math.abs(px) > 0.01) {
+    element.style.transform = `translate3d(0, ${px}px, 0)`
     element.style.willChange = 'transform'
+    const bottomClip = paintAllowance === undefined ? 0 : Math.max(0, px - paintAllowance)
+    element.style.clipPath = bottomClip > 0.01 ? `inset(0 0 ${bottomClip}px 0)` : ''
   } else {
     element.style.transform = ''
     element.style.willChange = ''
+    element.style.clipPath = ''
   }
 }
 
 /**
- * The running-turn label. Before the port scrolls (content shorter than the
- * viewport) the content-height lag has no `scrollTop` room to ride, so it is
- * expressed as a negative translate on this sibling: the label descends
- * smoothly with each wrap instead of hopping down a line at a time.
+ * The running-turn label. It stays in normal flow so the host column's gap
+ * always separates it from the transcript.
  */
-function chromeShiftOf(port: HTMLElement): HTMLElement | null {
-  return port.querySelector<HTMLElement>('[data-chat-turn-status]')
+function statusChromeOf(port: HTMLElement): HTMLElement | null {
+  return port.querySelector<HTMLElement>(
+    '[data-chat-turn-status], [data-chat-flow] > [role="status"]',
+  )
 }
 
 /**
- * Render the single smoothed extent `animatedH`. Before the port scrolls
- * (content shorter than the viewport) `animatedH` is clamped to the content
- * height and the content-height lag rides a negative translate on the
- * turn-status label; once the port has scroll room the engine is pinned at
- * the floor and the lag rides `[data-chat-transcript]` (or each message row
- * when the host has no transcript box) so the chrome stays put. Without any
- * shift surface the engine itself carries the interpolated top.
+ * Render the single smoothed extent `animatedH`. Once the port has scroll
+ * room the engine is pinned at the floor and the lag rides
+ * `[data-chat-transcript]` (or each message row when the host has no
+ * transcript box). Before that, message rows and status chrome remain in
+ * normal flow. Without any shift surface the engine carries the interpolated
+ * top itself.
  */
 function applyVisual(port: HTMLElement, animatedH: number): void {
   const contentHeight = Math.max(0, port.scrollHeight)
@@ -173,19 +190,19 @@ function applyVisual(port: HTMLElement, animatedH: number): void {
   const lag = contentHeight - extent
   port.style.overflowAnchor = 'none'
   port.style.scrollBehavior = 'auto'
+  const chrome = statusChromeOf(port)
+  if (chrome !== null) setShift(chrome, 0)
   const shiftRoot = shiftRootOf(port)
   if (shiftRoot !== null) {
     if (floor <= 0) {
       port.scrollTop = 0
       port.setAttribute(FOLLOW_OWNED_ATTR, String(port.scrollTop))
-      const chrome = chromeShiftOf(port)
-      if (chrome !== null) setShift(chrome, lag, true)
       setShift(shiftRoot, 0)
       return
     }
     port.scrollTop = floor
     port.setAttribute(FOLLOW_OWNED_ATTR, String(port.scrollTop))
-    setShift(shiftRoot, lag)
+    setShift(shiftRoot, lag, chrome === null ? undefined : statusGapBelow(shiftRoot, chrome))
     return
   }
   const rows = shiftRowsOf(port)
@@ -193,14 +210,16 @@ function applyVisual(port: HTMLElement, animatedH: number): void {
     if (floor <= 0) {
       port.scrollTop = 0
       port.setAttribute(FOLLOW_OWNED_ATTR, String(port.scrollTop))
-      const chrome = chromeShiftOf(port)
-      if (chrome !== null) setShift(chrome, lag, true)
       for (const row of rows) setShift(row, 0)
       return
     }
     port.scrollTop = floor
     port.setAttribute(FOLLOW_OWNED_ATTR, String(port.scrollTop))
-    for (const row of rows) setShift(row, lag)
+    const last = rows.length - 1
+    for (const [index, row] of rows.entries()) {
+      const allowance = index === last && chrome !== null ? statusGapBelow(row, chrome) : undefined
+      setShift(row, lag, allowance)
+    }
     return
   }
   port.scrollTop = Math.min(floor, Math.max(0, extent))
@@ -213,19 +232,30 @@ function clearVisual(port: HTMLElement): void {
   port.style.scrollBehavior = ''
   const shiftRoot = shiftRootOf(port)
   if (shiftRoot !== null) {
+    statusGapCache.delete(shiftRoot)
     shiftRoot.style.transform = ''
     shiftRoot.style.willChange = ''
+    shiftRoot.style.clipPath = ''
   } else {
     for (const row of shiftRowsOf(port)) {
+      statusGapCache.delete(row)
       row.style.transform = ''
       row.style.willChange = ''
+      row.style.clipPath = ''
     }
   }
-  const chrome = chromeShiftOf(port)
+  const chrome = statusChromeOf(port)
   if (chrome !== null) {
     chrome.style.transform = ''
     chrome.style.willChange = ''
+    chrome.style.clipPath = ''
   }
+}
+
+function settleAtFloor(port: HTMLElement): void {
+  const floor = Math.max(0, port.scrollHeight - port.clientHeight)
+  port.scrollTop = floor
+  port.setAttribute(FOLLOW_OWNED_ATTR, String(port.scrollTop))
 }
 
 /** Live follow hosts per conversation port so one unmount does not clear another. */
@@ -412,15 +442,15 @@ export function useConversationFollow(
       const root = rootRef.current
       const host = root?.closest<HTMLElement>('[data-conversation-scroll]') ?? port
       if (host === null) return
-      if (following) {
-        // Same handback as an unpin: land on the effective visual top rather
-        // than the floor, so the owner change (stream close, unmount) does
-        // not snap the flow up by the remaining lag.
-        handBackVisual(host)
-      }
       const remaining = holding === host ? releaseFollow(host) : (followOwners.get(host) ?? 0)
       holding = null
-      if (remaining === 0) clearVisual(host)
+      if (remaining === 0) {
+        if (following) {
+          if (interacting && awayPx >= FOLLOW_UNPIN_GESTURE_PX) handBackVisual(host)
+          else settleAtFloor(host)
+        }
+        clearVisual(host)
+      }
     }
   }, [active, rootRef, speedCpsRef])
 }
