@@ -1,6 +1,6 @@
 {
   "name": "dsh-smooth-stream",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "DeepSeek Harness (dsh) plugin: silky streaming reveal, no flicker. dsh 丝滑流式渲染插件。",
   "license": "MIT",
   "type": "module",
