@@ -26,7 +26,6 @@ export interface StreamSmoothingPresetConfig {
   readonly maxActiveCps: number
   readonly maxCps: number
   readonly maxFlushCps: number
-  readonly minCommitIntervalMs: number
   readonly minCps: number
   readonly settleAfterMs: number
   readonly settleDrainMaxMs: number
@@ -44,7 +43,6 @@ export const PRESET_CONFIG: Record<StreamSmoothingPreset, StreamSmoothingPresetC
     maxActiveCps: 360,
     maxCps: 240,
     maxFlushCps: 480,
-    minCommitIntervalMs: 16,
     minCps: 24,
     settleAfterMs: 280,
     settleDrainMaxMs: 420,
@@ -60,7 +58,6 @@ export const PRESET_CONFIG: Record<StreamSmoothingPreset, StreamSmoothingPresetC
     maxActiveCps: 480,
     maxCps: 320,
     maxFlushCps: 640,
-    minCommitIntervalMs: 16,
     minCps: 32,
     settleAfterMs: 200,
     settleDrainMaxMs: 280,
@@ -76,7 +73,6 @@ export const PRESET_CONFIG: Record<StreamSmoothingPreset, StreamSmoothingPresetC
     maxActiveCps: 280,
     maxCps: 180,
     maxFlushCps: 400,
-    minCommitIntervalMs: 16,
     minCps: 20,
     settleAfterMs: 360,
     settleDrainMaxMs: 520,
@@ -85,10 +81,11 @@ export const PRESET_CONFIG: Record<StreamSmoothingPreset, StreamSmoothingPresetC
   },
 }
 
-const MAX_COMMIT_INTERVAL_MS = 16
-/** Demo queue divisor: each frame reveals about `backlog / 8` characters. */
-export const QUEUE_REVEAL_DIVISOR = 8
-const QUEUE_FRAME_MS = 16.67
+/** Pressure curve from the reference stream renderer. */
+export const QUEUE_BASE_SPEED_CPS = 90
+export const QUEUE_ACCEL_EXPONENT = 1.25
+export const QUEUE_PRESSURE_FACTOR = 0.85
+export const QUEUE_MAX_SPEED_CPS = 600
 /** Hard cap on how far display may trail a live stream, in characters. */
 export const LIVE_LAG_CHAR_CEILING = 32
 const CATCHUP_SECONDS = 0.15
@@ -98,16 +95,32 @@ export const clamp = (value: number, min: number, max: number): number => {
 }
 
 /**
- * Demo per-frame reveal: drain `backlog / 8` characters, at least 1, scaled
- * by frame time. A small queue types one glyph per frame; a burst raises the
- * step so the display does not fall behind.
+ * Reference pressure-buffer reveal for a frame that starts without debt.
  * @param backlog - Unrevealed characters.
  * @param dtMs - Frame delta in ms.
  * @returns Characters to reveal this frame.
  */
 export function computeQueueReveal(backlog: number, dtMs: number): number {
   if (backlog <= 0 || dtMs <= 0) return 0
-  return Math.min(backlog, Math.max(1, Math.ceil((backlog / QUEUE_REVEAL_DIVISOR) * (dtMs / QUEUE_FRAME_MS))))
+  return computeAdaptiveQueueStep(backlog, dtMs, 0).revealChars
+}
+
+export interface AdaptiveQueueStep {
+  readonly revealChars: number
+  readonly debt: number
+  readonly speedCps: number
+}
+
+/** Float-debt queue integration from `ultimate_stream_physics_scroller.html`. */
+export function computeAdaptiveQueueStep(backlog: number, dtMs: number, debt: number): AdaptiveQueueStep {
+  if (backlog <= 0 || dtMs <= 0) return { revealChars: 0, debt: 0, speedCps: 0 }
+  const speedCps = Math.min(
+    QUEUE_MAX_SPEED_CPS,
+    QUEUE_BASE_SPEED_CPS + Math.pow(backlog, QUEUE_ACCEL_EXPONENT) * QUEUE_PRESSURE_FACTOR,
+  )
+  const accumulated = Math.max(0, debt) + speedCps * (dtMs / 1000)
+  const revealChars = Math.min(backlog, Math.floor(accumulated))
+  return { revealChars, debt: revealChars >= backlog ? 0 : accumulated - revealChars, speedCps }
 }
 
 /** Counts user-perceived characters (code points), not UTF-16 units. */
@@ -238,23 +251,27 @@ export function useSmoothStreamContent(
 ): string {
   const config = PRESET_CONFIG[preset]
   const seedCps = defaultCps ?? config.defaultCps
-  const [displayedContent, setDisplayedContent] = useState(content)
+  // A fast provider can fill the first Host render with a large batch. Start
+  // an enabled stream behind that batch so it still enters the reveal queue;
+  // disabled (settled/history) content must remain immediate.
+  const initialContent = enabled ? '' : content
+  const [displayedContent, setDisplayedContent] = useState(initialContent)
 
-  const displayedContentRef = useRef(content)
-  const displayedCountRef = useRef(countChars(content))
-  const targetContentRef = useRef(content)
-  const targetCharsRef = useRef([...content])
-  const targetCountRef = useRef(countChars(content))
+  const displayedContentRef = useRef(initialContent)
+  const displayedCountRef = useRef(countChars(initialContent))
+  const targetContentRef = useRef(initialContent)
+  const targetCharsRef = useRef([...initialContent])
+  const targetCountRef = useRef(countChars(initialContent))
 
   const emaCpsRef = useRef(seedCps)
   const lastInputTsRef = useRef(0)
-  const lastInputCountRef = useRef(countChars(content))
+  const lastInputCountRef = useRef(countChars(initialContent))
   const chunkSizeEmaRef = useRef(1)
   const arrivalCpsEmaRef = useRef(seedCps)
 
   const rafRef = useRef<number | null>(null)
   const lastFrameTsRef = useRef<number | null>(null)
-  const wakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const queueDebtRef = useRef(0)
   const holdBackRef = useRef(shouldHoldBack)
   const speedOutRef = useRef(speedCpsRef)
   speedOutRef.current = speedCpsRef
@@ -262,13 +279,6 @@ export function useSmoothStreamContent(
   useEffect(() => {
     holdBackRef.current = shouldHoldBack
   }, [shouldHoldBack])
-
-  const clearWakeTimer = useCallback(() => {
-    if (wakeTimerRef.current !== null) {
-      clearTimeout(wakeTimerRef.current)
-      wakeTimerRef.current = null
-    }
-  }, [])
 
   const stopFrameLoop = useCallback(() => {
     if (rafRef.current !== null) {
@@ -278,30 +288,11 @@ export function useSmoothStreamContent(
     lastFrameTsRef.current = null
   }, [])
 
-  const stopScheduling = useCallback(() => {
-    stopFrameLoop()
-    clearWakeTimer()
-  }, [clearWakeTimer, stopFrameLoop])
-
   const startFrameLoopRef = useRef<() => void>(() => {})
-
-  const scheduleFrameWake = useCallback(
-    (delayMs: number) => {
-      clearWakeTimer()
-      wakeTimerRef.current = setTimeout(
-        () => {
-          wakeTimerRef.current = null
-          startFrameLoopRef.current()
-        },
-        Math.max(1, Math.ceil(delayMs)),
-      )
-    },
-    [clearWakeTimer],
-  )
 
   const syncImmediate = useCallback(
     (nextContent: string) => {
-      stopScheduling()
+      stopFrameLoop()
       const chars = [...nextContent]
       const now = performance.now()
       targetContentRef.current = nextContent
@@ -309,6 +300,7 @@ export function useSmoothStreamContent(
       targetCountRef.current = chars.length
       displayedContentRef.current = nextContent
       displayedCountRef.current = chars.length
+      queueDebtRef.current = 0
       setDisplayedContent(nextContent)
       emaCpsRef.current = seedCps
       chunkSizeEmaRef.current = 1
@@ -316,37 +308,30 @@ export function useSmoothStreamContent(
       lastInputTsRef.current = now
       lastInputCountRef.current = chars.length
     },
-    [seedCps, stopScheduling],
+    [seedCps, stopFrameLoop],
   )
 
   const startFrameLoop = useCallback(() => {
-    clearWakeTimer()
     if (rafRef.current !== null) return
 
-    const tick = () => {
+    const tick = (now: number) => {
       const targetCount = targetCountRef.current
       const displayedCount = displayedCountRef.current
       const backlog = targetCount - displayedCount
 
       if (backlog <= 0) {
+        queueDebtRef.current = 0
         stopFrameLoop()
         return
       }
 
-      const now = performance.now()
       if (lastFrameTsRef.current === null) {
         lastFrameTsRef.current = now
         rafRef.current = requestAnimationFrame(tick)
         return
       }
 
-      const commitIntervalMs = Math.min(MAX_COMMIT_INTERVAL_MS, config.minCommitIntervalMs)
       const frameIntervalMs = Math.max(0, now - lastFrameTsRef.current)
-      if (frameIntervalMs < commitIntervalMs) {
-        rafRef.current = requestAnimationFrame(tick)
-        return
-      }
-
       const dtSeconds = Math.max(0.001, Math.min(frameIntervalMs / 1000, 0.12))
       lastFrameTsRef.current = now
 
@@ -355,6 +340,8 @@ export function useSmoothStreamContent(
       const settling = !inputActive && idleMs >= config.settleAfterMs
 
       let revealChars: number
+      let revealSpeedCps: number
+      let nextQueueDebt = 0
       if (steadyCps !== undefined) {
         const step = computeRevealStep(
           config,
@@ -370,9 +357,12 @@ export function useSmoothStreamContent(
           dtSeconds,
         )
         revealChars = Math.min(step.revealChars, backlog)
+        revealSpeedCps = frameIntervalMs > 0 ? (revealChars * 1000) / frameIntervalMs : 0
       } else {
-        // Same rAF queue drain as the silky markdown demo.
-        revealChars = computeQueueReveal(backlog, frameIntervalMs)
+        const step = computeAdaptiveQueueStep(backlog, frameIntervalMs, queueDebtRef.current)
+        revealChars = step.revealChars
+        revealSpeedCps = step.speedCps
+        nextQueueDebt = step.debt
       }
 
       // Performance guard: while degraded and the reply is offscreen, skip
@@ -383,10 +373,14 @@ export function useSmoothStreamContent(
         return
       }
 
+      queueDebtRef.current = nextQueueDebt
+
       const speedOut = speedOutRef.current
-      if (speedOut !== undefined && frameIntervalMs > 0) {
-        const instantCps = (revealChars * 1000) / frameIntervalMs
-        speedOut.current = speedOut.current * 0.92 + instantCps * 0.08
+      if (speedOut !== undefined) speedOut.current = revealSpeedCps
+
+      if (revealChars <= 0) {
+        rafRef.current = requestAnimationFrame(tick)
+        return
       }
 
       const nextCount = displayedCount + revealChars
@@ -406,7 +400,7 @@ export function useSmoothStreamContent(
     }
 
     rafRef.current = requestAnimationFrame(tick)
-  }, [config, scheduleFrameWake, stopFrameLoop, clearWakeTimer, steadyCps])
+  }, [config, stopFrameLoop, steadyCps])
 
   useEffect(() => {
     startFrameLoopRef.current = startFrameLoop
@@ -460,9 +454,9 @@ export function useSmoothStreamContent(
 
   useEffect(() => {
     return () => {
-      stopScheduling()
+      stopFrameLoop()
     }
-  }, [stopScheduling])
+  }, [stopFrameLoop])
 
   return displayedContent
 }

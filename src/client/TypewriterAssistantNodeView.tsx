@@ -75,17 +75,19 @@ function AnimatedMarkdownText({
     if (typing && !streaming && shown.length === text.length) setTyping(false)
   }, [shown, streaming, text, typing])
 
-  if (live) {
-    return (
-      <>
-        {announce && <span className={css.visuallyHidden} aria-live="polite">{text}</span>}
-        <FollowHost active={ownFollow} speedCpsRef={speedCpsRef}>
-          <MarkdownText text={shown} streaming codeLabels={codeLabels} />
-        </FollowHost>
-      </>
-    )
-  }
-  return <MarkdownText text={text} codeLabels={codeLabels} fileMentions={fileMentions} />
+  return (
+    <>
+      {live && announce && <span className={css.visuallyHidden} aria-live="polite">{text}</span>}
+      <FollowHost active={live && ownFollow} speedCpsRef={speedCpsRef}>
+        <MarkdownText
+          text={live ? shown : text}
+          streaming={live}
+          codeLabels={codeLabels}
+          fileMentions={live ? undefined : fileMentions}
+        />
+      </FollowHost>
+    </>
+  )
 }
 
 function imageLabels(t: AssistantProps['t']): MessageImageLabels {
@@ -224,6 +226,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
 }) {
   const data = node.data
   const streaming = data.status === 'running'
+  const reduced = usePrefersReducedMotion()
   const { ref: guardRef, shouldHoldBack } = useFpsGuard(streaming)
   const rootSpeedRef = useRef(35)
   const reasoningOwnsSpeed = streaming && data.blocks[data.blocks.length - 1]?.kind === 'reasoning'
@@ -323,7 +326,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
 
   return (
     <div ref={guardRef} className={css.root} data-streaming={streaming || undefined}>
-      <FollowHost active={streaming} speedCpsRef={rootSpeedRef}>
+      <FollowHost active={streaming && !reduced} speedCpsRef={rootSpeedRef}>
         <div className={css.body}>
           {rendered}
           {data.status === 'interrupted' && <span className={css.stopped}>{t('message.stopped')}</span>}

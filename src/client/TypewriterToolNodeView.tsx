@@ -19,6 +19,21 @@ export function isGrowingChatNode(node: unknown): boolean {
   const data = (node as { data: unknown }).data
   if (data === null || typeof data !== 'object') return false
   if ('status' in data && (data as { status: unknown }).status === 'running') return true
+  if (
+    'kind' in data
+    && (data as { kind: unknown }).kind === 'command'
+    && 'outcome' in data
+    && (data as { outcome: unknown }).outcome === null
+  ) return true
+  if ('command' in data) {
+    const command = (data as { command: unknown }).command
+    if (
+      command !== null
+      && typeof command === 'object'
+      && 'outcome' in command
+      && (command as { outcome: unknown }).outcome === null
+    ) return true
+  }
   if ('root' in data) {
     const root = (data as { root: unknown }).root
     if (root !== null && typeof root === 'object' && !('kind' in root)) return true
