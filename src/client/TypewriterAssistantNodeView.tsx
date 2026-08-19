@@ -41,6 +41,15 @@ interface AnimatedMarkdownTextProps extends MarkdownProps {
 
 /** Conservative fallback before the streaming Markdown tail has geometry. */
 const PREDICTIVE_WRAP_FALLBACK_CHARS = 32
+const STREAM_ANNOUNCEMENT_INTERVAL_MS = 800
+const STREAM_ANNOUNCEMENT_MAX_CHARS = 320
+
+interface PendingTextGeometry {
+  root: HTMLElement
+  visibleText: string
+  fontSize: number
+  wrapThresholdWidth: number | null
+}
 
 function approximateInlineWidth(text: string, emPx: number): number {
   let width = 0
@@ -52,22 +61,16 @@ function approximateInlineWidth(text: string, emPx: number): number {
   return width
 }
 
-/** Whether buffered source can reach a new visual line before it drains. */
-function pendingTextCanGrow(root: HTMLElement | null, pending: string): boolean {
-  if (pending === '') return false
-  if (/[\r\n]/u.test(pending)) return true
-  const pendingChars = [...pending]
+function measurePendingTextGeometry(root: HTMLElement, visibleText: string): PendingTextGeometry {
   if (
-    root === null
-    || typeof document.createTreeWalker !== 'function'
+    typeof document.createTreeWalker !== 'function'
     || typeof NodeFilter === 'undefined'
   ) {
-    return pendingChars.length >= PREDICTIVE_WRAP_FALLBACK_CHARS
+    return { root, visibleText, fontSize: 14, wrapThresholdWidth: null }
   }
-
   const rootRect = root.getBoundingClientRect()
   const rootWidth = Math.max(0, rootRect.width, rootRect.right - rootRect.left, root.clientWidth)
-  if (rootWidth <= 0) return pendingChars.length >= PREDICTIVE_WRAP_FALLBACK_CHARS
+  if (rootWidth <= 0) return { root, visibleText, fontSize: 14, wrapThresholdWidth: null }
 
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   let tail: Text | null = null
@@ -76,27 +79,107 @@ function pendingTextCanGrow(root: HTMLElement | null, pending: string): boolean 
   }
   const parent = tail?.parentElement ?? root
   const fontSize = Number.parseFloat(getComputedStyle(parent).fontSize) || 14
-  const pendingWidth = approximateInlineWidth(pending, fontSize)
   if (tail === null || typeof document.createRange !== 'function') {
-    return pendingWidth >= rootWidth
+    return { root, visibleText, fontSize, wrapThresholdWidth: rootWidth }
   }
 
   try {
     const length = tail.textContent?.length ?? 0
-    if (length <= 0) return pendingWidth >= rootWidth
+    if (length <= 0) return { root, visibleText, fontSize, wrapThresholdWidth: rootWidth }
     const range = document.createRange()
     range.setStart(tail, Math.max(0, length - 1))
     range.setEnd(tail, length)
     const tailRect = range.getBoundingClientRect()
     const contentRight = rootRect.right
     if (!Number.isFinite(tailRect.right) || tailRect.right <= rootRect.left || contentRight <= rootRect.left) {
-      return pendingWidth >= rootWidth
+      return { root, visibleText, fontSize, wrapThresholdWidth: rootWidth }
     }
     const remainingWidth = Math.max(0, contentRight - tailRect.right)
-    return pendingWidth >= remainingWidth + fontSize * 0.35
+    return {
+      root,
+      visibleText,
+      fontSize,
+      wrapThresholdWidth: remainingWidth + fontSize * 0.35,
+    }
   } catch {
-    return pendingWidth >= rootWidth
+    return { root, visibleText, fontSize, wrapThresholdWidth: rootWidth }
   }
+}
+
+/** Whether buffered source can reach a new visual line before it drains. */
+function pendingTextCanGrow(
+  root: HTMLElement | null,
+  visibleText: string,
+  pending: string,
+  geometryRef: { current: PendingTextGeometry | null },
+): boolean {
+  if (pending === '') return false
+  if (/[\r\n]/u.test(pending)) return true
+  const pendingChars = [...pending]
+  if (root === null) return pendingChars.length >= PREDICTIVE_WRAP_FALLBACK_CHARS
+
+  let geometry = geometryRef.current
+  if (geometry?.root !== root || geometry.visibleText !== visibleText) {
+    geometry = measurePendingTextGeometry(root, visibleText)
+    geometryRef.current = geometry
+  }
+  if (geometry.wrapThresholdWidth === null) {
+    return pendingChars.length >= PREDICTIVE_WRAP_FALLBACK_CHARS
+  }
+  return approximateInlineWidth(pending, geometry.fontSize) >= geometry.wrapThresholdWidth
+}
+
+function announcementChunkEnd(source: string, start: number): number {
+  const hardEnd = Math.min(source.length, start + STREAM_ANNOUNCEMENT_MAX_CHARS)
+  if (hardEnd === source.length) return hardEnd
+  const softStart = start + Math.floor(STREAM_ANNOUNCEMENT_MAX_CHARS * 0.6)
+  for (let index = hardEnd - 1; index >= softStart; index -= 1) {
+    if (/[\s.,;:!?]/u.test(source[index] ?? '')) return index + 1
+  }
+  return hardEnd
+}
+
+/** Pace screen-reader updates independently from visual reveal frames. */
+function useStreamAnnouncement(text: string, active: boolean): string {
+  const [announcement, setAnnouncement] = useState({ text: '', revision: 0 })
+  const sourceRef = useRef(text)
+  const previousSourceRef = useRef(text)
+  const activeRef = useRef(active)
+  const announcedOffsetRef = useRef(0)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  if (!text.startsWith(previousSourceRef.current) || announcedOffsetRef.current > text.length) {
+    announcedOffsetRef.current = 0
+  }
+  if (!active) announcedOffsetRef.current = text.length
+  previousSourceRef.current = text
+  sourceRef.current = text
+  activeRef.current = active
+
+  useEffect(() => {
+    if (!active) {
+      if (timerRef.current !== null) clearTimeout(timerRef.current)
+      timerRef.current = null
+      return
+    }
+    if (timerRef.current !== null || announcedOffsetRef.current >= text.length) return
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null
+      if (!activeRef.current) return
+      const source = sourceRef.current
+      const start = Math.min(announcedOffsetRef.current, source.length)
+      const end = announcementChunkEnd(source, start)
+      if (end <= start) return
+      announcedOffsetRef.current = end
+      setAnnouncement(previous => ({ text: source.slice(start, end), revision: previous.revision + 1 }))
+    }, STREAM_ANNOUNCEMENT_INTERVAL_MS)
+  }, [active, announcement.revision, text])
+
+  useEffect(() => () => {
+    if (timerRef.current !== null) clearTimeout(timerRef.current)
+  }, [])
+
+  return announcement.text
 }
 
 /**
@@ -129,6 +212,7 @@ function AnimatedMarkdownText({
   const followRootRef = useRef<HTMLDivElement>(null)
   const predictionSourceRef = useRef<string | null>(null)
   const predictionStateRef = useRef(false)
+  const predictionGeometryRef = useRef<PendingTextGeometry | null>(null)
   const speedCpsRef = followSpeedCpsRef ?? localSpeedCpsRef
   const displayed = useSmoothStreamContent(text, {
     enabled: typing && !reduced,
@@ -140,6 +224,17 @@ function AnimatedMarkdownText({
   })
   const shown = reduced ? text : displayed
   const live = typing && !reduced
+  const announcement = useStreamAnnouncement(text, live && announce)
+
+  useEffect(() => {
+    const root = followRootRef.current
+    if (root === null || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (predictionGeometryRef.current?.root === root) predictionGeometryRef.current = null
+    })
+    observer.observe(root)
+    return () => { observer.disconnect() }
+  }, [])
 
   useLayoutEffect(() => {
     if (onPredictiveChange === undefined) return
@@ -148,7 +243,7 @@ function AnimatedMarkdownText({
     const next = !live || !streaming || pending === ''
       ? false
       : sourceChanged
-        ? pendingTextCanGrow(followRootRef.current, pending)
+        ? pendingTextCanGrow(followRootRef.current, shown, pending, predictionGeometryRef)
         : predictionStateRef.current
     predictionSourceRef.current = text
     predictionStateRef.current = next
@@ -163,7 +258,9 @@ function AnimatedMarkdownText({
 
   return (
     <>
-      {live && announce && <span className={css.visuallyHidden} aria-live="polite">{text}</span>}
+      {live && announce && (
+        <span className={css.visuallyHidden} aria-live="polite" aria-atomic="true">{announcement}</span>
+      )}
       <FollowHost
         active={live && ownFollow}
         speedCpsRef={speedCpsRef}
@@ -224,7 +321,6 @@ function AnimatedReasoning({
   shouldHoldBack,
   followSpeedCpsRef,
   followRevealScaleRef,
-  onExpandedChange,
   t,
 }: {
   text: string
@@ -234,7 +330,6 @@ function AnimatedReasoning({
   shouldHoldBack: () => boolean
   followSpeedCpsRef?: { current: number } | undefined
   followRevealScaleRef?: { current: number } | undefined
-  onExpandedChange?: ((expanded: boolean) => void) | undefined
   t: AssistantProps['t']
 }) {
   const reduced = usePrefersReducedMotion()
@@ -255,10 +350,6 @@ function AnimatedReasoning({
     // off, a manual toggle is never wrestled back by the stream.
     if (thinkAutoExpand) setExpanded(running)
   }, [running, thinkAutoExpand])
-
-  useLayoutEffect(() => {
-    onExpandedChange?.(expanded)
-  }, [expanded, onExpandedChange])
 
   useEffect(() => {
     const element = summaryRef.current
@@ -338,14 +429,15 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   const rootPredictiveRef = useRef(false)
   const previousReasoningTailRef = useRef(-1)
   if (reasoningTailIndex !== previousReasoningTailRef.current) {
-    rootPredictiveRef.current = reasoningOwnsSpeed ? thinkAutoExpand : false
+    // Think growth is already paced by its own text reveal. Opening additional
+    // speculative runway here exposes that runway as an empty gap above the
+    // fixed turn status, especially when reasoning arrives in fast bursts.
+    // The follower still smooths real height growth within the measured gap
+    // and catches up any unsafe remainder in the same frame.
+    rootPredictiveRef.current = false
     if (!reasoningOwnsSpeed) rootSpeedRef.current = 35
     previousReasoningTailRef.current = reasoningTailIndex
   }
-  const updateReasoningExpanded = useMemo(
-    () => (expanded: boolean): void => { rootPredictiveRef.current = expanded },
-    [],
-  )
   const updateTextPrediction = useMemo(
     () => (predictive: boolean): void => { rootPredictiveRef.current = predictive },
     [],
@@ -412,7 +504,6 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
             shouldHoldBack={shouldHoldBack}
             followSpeedCpsRef={reasoningOwnsSpeed && index === last ? rootSpeedRef : undefined}
             followRevealScaleRef={reasoningOwnsSpeed && index === last ? rootRevealScaleRef : undefined}
-            onExpandedChange={index === reasoningTailIndex ? updateReasoningExpanded : undefined}
             t={t}
           />,
         )

@@ -598,7 +598,7 @@ describe('assistant renderer', () => {
     expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-collapsed')).toBe(true)
   })
 
-  it('keeps a collapsed streaming Think visually still when its visible height does not grow', async () => {
+  it('keeps a streaming Think visually still when its visible height does not grow', async () => {
     let text = 'examining'
     const view = render(
       <div data-conversation-scroll>
@@ -661,9 +661,219 @@ describe('assistant renderer', () => {
 
     fireEvent.click(view.container.querySelector('[data-disclosure-row]') as HTMLElement)
     expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('true')
-    const beforeExpandedPrediction = -port.scrollTop + currentTranslate(transcript)
+    const beforeExpandedIdle = -port.scrollTop + currentTranslate(transcript)
     await act(() => vi.advanceTimersByTimeAsync(192))
-    expect(-port.scrollTop + currentTranslate(transcript)).toBeLessThan(beforeExpandedPrediction - 0.5)
+    expect(-port.scrollTop + currentTranslate(transcript)).toBeCloseTo(beforeExpandedIdle, 5)
+  })
+
+  it('keeps the streaming Think to Deep diving gap at the natural spacing', async () => {
+    let text = 'examining'
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-transcript>
+            <TypewriterAssistantNodeView
+              {...assistantProps('running', [{ kind: 'reasoning', text }])}
+              thinkAutoExpand
+            />
+          </div>
+          <div role="status">Deep diving...</div>
+        </div>
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    const status = view.container.querySelector('[role="status"]') as HTMLElement
+    const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => 500 + (Number.parseFloat(status.style.marginTop) || 0),
+    })
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 0,
+      bottom: 80 + currentTranslate(transcript),
+    }) as DOMRect)
+    vi.spyOn(status, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return { top: 96 + runway, bottom: 122 + runway } as DOMRect
+    })
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 160, bottom: 240 } as DOMRect)
+    port.scrollTop = 390
+
+    await act(() => vi.advanceTimersByTimeAsync(80))
+    expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('true')
+    const naturalGap = 16
+    const gaps: number[] = []
+    for (let chunk = 0; chunk < 8; chunk += 1) {
+      text += ` more reasoning ${String(chunk)} ${'x'.repeat(80)}`
+      view.rerender(
+        <div data-conversation-scroll>
+          <div data-chat-flow>
+            <div data-chat-transcript>
+              <TypewriterAssistantNodeView
+                {...assistantProps('running', [{ kind: 'reasoning', text }])}
+                thinkAutoExpand
+              />
+            </div>
+            <div role="status">Deep diving...</div>
+          </div>
+          <div data-composer-seat>Composer</div>
+        </div>,
+      )
+      await act(() => vi.advanceTimersByTimeAsync(64))
+      gaps.push(status.getBoundingClientRect().top - transcript.getBoundingClientRect().bottom)
+    }
+
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(naturalGap - 1)
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(naturalGap + 1)
+  })
+
+  it('does not expose follow runway below Think before the port can scroll', async () => {
+    const think = { kind: 'reasoning', text: 'exploring the current project' }
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-anchor-key="context"><span>Context injection</span></div>
+          <div data-chat-anchor-key="tool"><span>Read README.md</span></div>
+          <div data-chat-anchor-key="assistant">
+            <TypewriterAssistantNodeView
+              {...assistantProps('running', [think])}
+              thinkAutoExpand={false}
+            />
+          </div>
+          <div role="status">Deep diving...</div>
+        </div>
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const rows = view.container.querySelectorAll<HTMLElement>('[data-chat-anchor-key]')
+    const thinkRow = rows.item(rows.length - 1)
+    const status = view.container.querySelector('[role="status"]') as HTMLElement
+    const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 800 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => 500 + (Number.parseFloat(status.style.marginTop) || 0),
+    })
+    vi.spyOn(thinkRow, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 76 + currentTranslate(thinkRow),
+      bottom: 100 + currentTranslate(thinkRow),
+      height: 24,
+    }) as DOMRect)
+    vi.spyOn(status, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return { top: 116 + runway, bottom: 142 + runway, height: 26 } as DOMRect
+    })
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({
+      top: 640,
+      bottom: 800,
+      height: 160,
+    } as DOMRect)
+
+    await act(() => vi.advanceTimersByTimeAsync(80))
+
+    expect(port.scrollHeight).toBeLessThan(port.clientHeight)
+    expect(status.getBoundingClientRect().top - thinkRow.getBoundingClientRect().bottom).toBeCloseTo(16, 1)
+  })
+
+  it('removes accumulated status runway left by an earlier plugin bundle', async () => {
+    const think = { kind: 'reasoning', text: 'exploring the current project' }
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-anchor-key="context"><span>Context injection</span></div>
+          <div data-chat-anchor-key="tool"><span>Read README.md</span></div>
+          <div data-chat-anchor-key="assistant">
+            <TypewriterAssistantNodeView
+              {...assistantProps('running', [think])}
+              thinkAutoExpand={false}
+            />
+          </div>
+          <div role="status" style={{ marginTop: 'calc(calc(48px + 48px) + 48px)' }}>
+            Deep diving...
+          </div>
+        </div>
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const rows = view.container.querySelectorAll<HTMLElement>('[data-chat-anchor-key]')
+    const thinkRow = rows.item(rows.length - 1)
+    const status = view.container.querySelector('[role="status"]') as HTMLElement
+    const staleRunway = (): number => status.style.marginTop === ''
+      ? 0
+      : 3 * FOLLOW_STATUS_RUNWAY_PX
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 800 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => 500 + staleRunway(),
+    })
+    vi.spyOn(thinkRow, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 76 + currentTranslate(thinkRow),
+      bottom: 100 + currentTranslate(thinkRow),
+      height: 24,
+    }) as DOMRect)
+    vi.spyOn(status, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = staleRunway()
+      return { top: 116 + runway, bottom: 142 + runway, height: 26 } as DOMRect
+    })
+
+    await act(() => vi.advanceTimersByTimeAsync(80))
+
+    expect(status.style.marginTop).toBe('')
+    expect(status.getBoundingClientRect().top - thinkRow.getBoundingClientRect().bottom).toBeCloseTo(16, 1)
+  })
+
+  it('normalizes accumulated status runway to one owned runway when scrollable', async () => {
+    const think = { kind: 'reasoning', text: 'exploring the current project' }
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-anchor-key="assistant">
+            <TypewriterAssistantNodeView
+              {...assistantProps('running', [think])}
+              thinkAutoExpand={false}
+            />
+          </div>
+          <div role="status" style={{ marginTop: 3 * FOLLOW_STATUS_RUNWAY_PX }}>
+            Deep diving...
+          </div>
+        </div>
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const thinkRow = view.container.querySelector('[data-chat-anchor-key]') as HTMLElement
+    const status = view.container.querySelector('[role="status"]') as HTMLElement
+    const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => 500 + (Number.parseFloat(status.style.marginTop) || 0),
+    })
+    vi.spyOn(thinkRow, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 56 + currentTranslate(thinkRow),
+      bottom: 80 + currentTranslate(thinkRow),
+      height: 24,
+    }) as DOMRect)
+    vi.spyOn(status, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return { top: 96 + runway, bottom: 122 + runway, height: 26 } as DOMRect
+    })
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({
+      top: 180,
+      bottom: 260,
+      height: 80,
+    } as DOMRect)
+    port.scrollTop = 534
+
+    await act(() => vi.advanceTimersByTimeAsync(80))
+
+    expect(status.style.marginTop).toBe(`${String(FOLLOW_STATUS_RUNWAY_PX)}px`)
+    expect(status.getBoundingClientRect().top - thinkRow.getBoundingClientRect().bottom).toBeCloseTo(16, 1)
   })
 
   it('does not flash the conversation port to the top when Think yields to new text', async () => {
@@ -849,6 +1059,48 @@ describe('assistant renderer', () => {
       { kind: 'text', text: 'second' },
     ])} />)
     expect(view.container.querySelectorAll('[aria-live="polite"]')).toHaveLength(1)
+  })
+
+  it('announces streaming text in paced increments instead of rewriting the full response', async () => {
+    const renderText = (text: string) => (
+      <TypewriterAssistantNodeView {...assistantProps('running', [{ kind: 'text', text }])} />
+    )
+    const view = render(renderText(''))
+    const liveRegion = view.container.querySelector('[aria-live="polite"]') as HTMLElement
+
+    view.rerender(renderText('The first phrase'))
+    view.rerender(renderText('The first phrase and the second phrase'))
+    expect(liveRegion.textContent).toBe('')
+
+    await act(() => vi.advanceTimersByTimeAsync(800))
+    expect(liveRegion.textContent).toBe('The first phrase and the second phrase')
+
+    view.rerender(renderText('The first phrase and the second phrase, followed by a third.'))
+    expect(liveRegion.textContent).toBe('The first phrase and the second phrase')
+    await act(() => vi.advanceTimersByTimeAsync(800))
+    expect(liveRegion.textContent).toBe(', followed by a third.')
+  })
+
+  it('reuses visible-tail geometry across source chunks before the next reveal', () => {
+    const renderText = (text: string) => (
+      <TypewriterAssistantNodeView {...assistantProps('running', [{ kind: 'text', text }])} />
+    )
+    const view = render(renderText(''))
+    const followHosts = view.container.querySelectorAll<HTMLElement>(`.${css.follow}`)
+    const textFollowHost = followHosts.item(followHosts.length - 1)
+    Object.defineProperty(textFollowHost, 'clientWidth', { configurable: true, value: 320 })
+    vi.spyOn(textFollowHost, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      right: 320,
+      width: 320,
+    } as DOMRect)
+    const treeWalker = vi.spyOn(document, 'createTreeWalker')
+
+    view.rerender(renderText('one'))
+    view.rerender(renderText('one two'))
+    view.rerender(renderText('one two three'))
+
+    expect(treeWalker).toHaveBeenCalledTimes(1)
   })
 
   it('pins the growing conversation port at the floor while streaming', async () => {

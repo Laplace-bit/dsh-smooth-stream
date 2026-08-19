@@ -269,7 +269,18 @@ interface FollowRunway {
   readonly property: 'marginBottom' | 'marginTop'
 }
 
-const followRunways = new WeakMap<HTMLElement, FollowRunway>()
+/**
+ * The plugin can be reinjected without replacing the conversation DOM. Keep
+ * runway ownership in the page realm so a fresh bundle adopts the existing
+ * margin instead of treating it as host layout and adding another 48px.
+ */
+const FOLLOW_RUNWAYS_SYMBOL = Symbol.for('dsh-smooth-stream.follow-runways')
+const followRunwayRegistry = globalThis as typeof globalThis & {
+  [key: symbol]: WeakMap<HTMLElement, FollowRunway> | undefined
+}
+const followRunways = followRunwayRegistry[FOLLOW_RUNWAYS_SYMBOL]
+  ?? new WeakMap<HTMLElement, FollowRunway>()
+followRunwayRegistry[FOLLOW_RUNWAYS_SYMBOL] = followRunways
 
 interface FollowPaintLimit {
   readonly clientHeight: number
@@ -316,8 +327,43 @@ function restoreRunway(port: HTMLElement): void {
   invalidatePaintLimit(port)
 }
 
+function isLegacyStatusRunway(value: string): boolean {
+  if (value === '') return false
+  const terms = [...value.matchAll(/([\d.]+)px/g)]
+  if (terms.length === 0 || value.replaceAll(/calc|px|[\d.+()\s]/g, '') !== '') return false
+  return terms.every(([, raw]) => {
+    const px = Number(raw)
+    return Number.isFinite(px)
+      && px >= FOLLOW_STATUS_RUNWAY_PX
+      && Math.abs(px % FOLLOW_STATUS_RUNWAY_PX) <= Number.EPSILON
+  })
+}
+
+/** Remove unowned runway residue written by v0.3.3 and earlier bundles. */
+function migrateLegacyStatusRunway(port: HTMLElement, status: HTMLElement | null): void {
+  if (
+    status === null
+    || followRunways.has(port)
+    || !isLegacyStatusRunway(status.style.marginTop)
+  ) return
+  // Harness TurnStatus has no inline margin; exact 48px multiples here are
+  // values emitted by the old runway writer, including reload accumulation.
+  status.style.marginTop = ''
+  invalidatePaintLimit(port)
+}
+
 function ensureRunway(port: HTMLElement, surfaces: readonly HTMLElement[]): void {
   const status = turnStatusOf(port)
+  migrateLegacyStatusRunway(port, status)
+  // A runway is useful only after the natural conversation already has a
+  // scroll floor for its equal message transform to ride. Before that point
+  // applyVisual keeps every surface in normal flow, so adding status margin
+  // would expose the whole runway as empty space below a short/early Think.
+  const naturalHeight = Math.max(0, port.scrollHeight - runwayOffsetOf(port))
+  if (port.clientHeight <= 0 || naturalHeight <= port.clientHeight) {
+    restoreRunway(port)
+    return
+  }
   const composer = port.querySelector<HTMLElement>('[data-composer-seat]')
   const target = status === null
     ? { element: composer === null ? undefined : surfaces.at(-1), property: 'marginBottom' as const }
