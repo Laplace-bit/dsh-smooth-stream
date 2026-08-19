@@ -176,6 +176,31 @@ function statusChromeOf(port: HTMLElement): HTMLElement | null {
 }
 
 /**
+ * Clamp a glide lag to a safe visual bound.
+ *
+ * The lag transform rides on the whole message surface while `animatedH`
+ * interpolates toward `scrollHeight`. When content grows by a full line
+ * mid-stream (a wrap, a new paragraph — common with CJK text), the
+ * interpolation trails and the transform briefly exceeds one line height.
+ * With `scrollTop` pinned at the floor, that over-shift visually overlaps
+ * row N+1 onto row N — the "character overlap" seen with mixed
+ * CJK + long path text. Clamping keeps the transform inside the gap that
+ * layout already made, so text never overlaps; the interpolation simply
+ * snaps the remaining distance on the next frame (lag <= 0.1 fast-path in
+ * the frame loop clears the transform).
+ */
+function clampLag(lag: number, port: HTMLElement): number {
+  if (lag <= 0) return 0
+  // One line is the smallest unit of visual overlap: never shift by more
+  // than a single line height. line-height 28px is the plugin's own
+  // TypewriterAssistantNodeView value; for a degenerate viewport smaller
+  // than ~4 lines the viewport share becomes the tighter bound instead.
+  const viewportCap = Math.max(0, port.clientHeight * 0.25)
+  return Math.min(lag, Math.min(28, viewportCap))
+}
+
+
+/**
  * Render the single smoothed extent `animatedH`. Once the port has scroll
  * room the engine is pinned at the floor and the lag rides
  * `[data-chat-transcript]` (or each message row when the host has no
@@ -202,7 +227,7 @@ function applyVisual(port: HTMLElement, animatedH: number): void {
     }
     port.scrollTop = floor
     port.setAttribute(FOLLOW_OWNED_ATTR, String(port.scrollTop))
-    setShift(shiftRoot, lag, chrome === null ? undefined : statusGapBelow(shiftRoot, chrome))
+    setShift(shiftRoot, clampLag(lag, port), chrome === null ? undefined : statusGapBelow(shiftRoot, chrome))
     return
   }
   const rows = shiftRowsOf(port)
@@ -216,9 +241,10 @@ function applyVisual(port: HTMLElement, animatedH: number): void {
     port.scrollTop = floor
     port.setAttribute(FOLLOW_OWNED_ATTR, String(port.scrollTop))
     const last = rows.length - 1
+    const clampedLag = clampLag(lag, port)
     for (const [index, row] of rows.entries()) {
       const allowance = index === last && chrome !== null ? statusGapBelow(row, chrome) : undefined
-      setShift(row, lag, allowance)
+      setShift(row, clampedLag, allowance)
     }
     return
   }
@@ -334,7 +360,7 @@ export function useConversationFollow(
       if (!hasShiftSurface(next)) return
       const floor = Math.max(0, next.scrollHeight - next.clientHeight)
       if (floor <= 0) return
-      const lag = Math.max(0, next.scrollHeight - animatedH)
+      const lag = clampLag(Math.max(0, next.scrollHeight - animatedH), next)
       next.scrollTop = Math.min(floor, Math.max(0, next.scrollTop - lag))
     }
 
