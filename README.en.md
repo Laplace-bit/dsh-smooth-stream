@@ -2,9 +2,7 @@
 
 English | [中文](README.md)
 
-[![featured on dsh-suite](https://img.shields.io/badge/featured%20on-dsh--suite-4d6bfe)](https://whyihaveyou.github.io/dsh-suite/)
-
-**dsh-smooth-stream** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) community plugin for **silky streaming** in the Web UI: arrival-tracking typewriter reveal, glide-in wraps, no flicker. It is not part of the official DeepSeek distribution.
+**dsh-smooth-stream** brings fluid streaming rendering and silky scrolling to the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) Web UI. Text, Markdown, code blocks, tables, and tool results appear as the reply arrives; as the content grows, the page follows along in one continuous visual rhythm.
 
 Project homepage: <https://laplace-bit.github.io/dsh-smooth-stream/>
 
@@ -14,17 +12,12 @@ Left: default Web UI. Right: dsh-smooth-stream.
 
 ![Left: without the plugin. Right: with dsh-smooth-stream.](docs/compare.gif)
 
-## Current behavior
+## Core experience
 
-- **The whole Agent turn uses one extensible pipeline.** Assistant text, Think, Context, Retry, Command, Bash, Glob, Read, tool calls, and newly registered renderers all enter progressive reveal and bottom-follow through the same boundary, without a tool-name allowlist.
-- **Reveal speed adapts to queue pressure.** Small updates keep a soft cadence while large or fast bursts catch up promptly. Once the producer completes, remaining source is committed immediately instead of continuing to type long after the Agent has stopped.
-- **Markdown remains mounted throughout streaming.** Code blocks, tables, emphasis, and other formatting do not begin as plain text and later swap trees. Historical messages also do not replay their reveal animation when remounted.
-- **Scroll room opens only when a wrap is actually likely.** The predictor combines buffered source with the current line's remaining width before opening its runway. Long replies still absorb line wraps smoothly, while a short same-line answer after Think does not pre-scroll and rebound.
-- **Conversation chrome stays fixed.** `Deep diving...`, the composer, and the to-bottom button never ride the message transform. Fast output and low-frame-rate catch-up cannot paint through the status row or disappear behind the composer.
-- **One continuous spring owns motion.** The engine carries velocity and displacement between frames instead of repeatedly starting native smooth-scroll calls. Line wraps, code, tables, and growing tool rows converge along the same trajectory; completion lands on the natural floor and retires temporary state without a flash or overshoot rebound.
-- **Reader input wins immediately.** A small upward wheel, touch, or keyboard gesture releases automatic follow. Ownership returns only after the reader actually reaches the bottom again.
-- **Think respects the user's preference.** With auto-expand enabled it keeps the Harness disclosure interaction and collapses when thinking ends. With it disabled, collapsed reasoning can keep updating without fake height motion, and a manual toggle is not wrestled back by stream state.
-- **Performance guards preserve the final position.** `prefers-reduced-motion` shows complete content without taking follow. Off-screen DOM commits pause under low FPS, then catch up under control and still finish exactly at the bottom.
+- **Fluid rendering.** Text appears as it arrives while Markdown structure stays active, keeping headings, lists, code blocks, and tables readable throughout the stream.
+- **Silky scrolling.** As the content grows, the page follows along one continuous scroll path and keeps the reader close to the generated output.
+- **Consistent transitions.** Line wraps, code blocks, tables, and tool results use the same motion treatment, so text, reasoning, and tools flow together.
+- **Adaptive cadence.** Reveal speed responds to arrival rate and pending content, staying measured for slow output and catching up with fast output.
 
 ## Install
 
@@ -89,7 +82,7 @@ dsh plugin --profile web update dsh-smooth-stream
 ## FAQ
 
 **Is this an official DeepSeek plugin?**
-No. It is a community plugin for the DeepSeek Harness (`dsh`) Web UI, MIT-licensed, and not part of the official DeepSeek distribution.
+No. It is independently maintained, MIT-licensed software for the DeepSeek Harness (`dsh`) Web UI and is not affiliated with DeepSeek.
 
 **How do I install a DeepSeek Harness plugin?**
 Use the built-in plugin command: `dsh plugin --profile web add dsh-smooth-stream` from a dsh source checkout (see [Install](#install)).
@@ -99,6 +92,8 @@ Yes — `dsh-smooth-stream` is published to [npm](https://www.npmjs.com/package/
 
 **Does it respect `prefers-reduced-motion`?**
 Yes. With reduced motion enabled the finished text is shown at once and the plugin does not take over follow. If the frame rate drops below 30 fps while the reply is off-screen, reveal pauses and catches up later.
+
+[![featured on dsh-suite](https://img.shields.io/badge/featured%20on-dsh--suite-4d6bfe)](https://whyihaveyou.github.io/dsh-suite/)
 
 ## License
 

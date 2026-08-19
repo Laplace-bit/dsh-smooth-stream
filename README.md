@@ -2,9 +2,7 @@
 
 [English](README.en.md) | 中文
 
-[![featured on dsh-suite](https://img.shields.io/badge/featured%20on-dsh--suite-4d6bfe)](https://whyihaveyou.github.io/dsh-suite/)
-
-**dsh-smooth-stream** 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）的社区插件，给 Web 对话做**丝滑流式渲染**：字跟着模型走、换行滑入、不闪。不是官方发行的一部分。
+**dsh-smooth-stream** 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）Web UI 带来流畅的流式渲染和丝滑滚动。文字、Markdown、代码块、表格以及工具结果会随着输出自然呈现；内容逐步增长时，页面平稳跟随，整轮回复保持连贯的视觉节奏。
 
 项目主页：<https://laplace-bit.github.io/dsh-smooth-stream/>
 
@@ -14,17 +12,12 @@
 
 ![左：未使用插件。右：使用 dsh-smooth-stream。](docs/compare.gif)
 
-## 当前实现
+## 核心体验
 
-- **整轮 Agent 输出统一接管。** 助手正文、Think、Context、Retry、Command、Bash、Glob、Read、工具调用以及后续注册的新渲染器，都通过同一个可扩展入口进入渐进揭示和底部跟随，不依赖工具名称白名单。
-- **吐字速度会跟随积压自动变速。** 小批内容保持柔和节拍，大批或高速到达时及时追赶；完成信号到达后立即提交剩余正文，不让 Agent 已结束而文字还长时间继续输出。
-- **流式过程始终使用 Markdown 渲染。** 代码块、表格、强调等不会先显示成纯文本再整体换树，历史消息也不会在重新挂载时重播动画。
-- **换行前才准备滚动空间。** 引擎结合待揭示内容和当前行剩余宽度判断是否可能增高，只在真实换行风险出现时打开预测 runway。长回复仍能平滑吸收换行，Think 后的短同一行正文不会多滚再回弹。
-- **状态区域保持稳定。** `Deep diving...`、输入框和「滚动到底部」按钮不参与消息 transform；高速输出或低帧率下，正文也不会越过状态区域或藏到输入框后面。
-- **滚动使用持续弹簧而不是反复启动原生平滑滚动。** 每帧保留速度和位移状态，换行、代码块、表格及工具卡片增高都沿同一轨迹收敛；结束时落在自然底部并安静撤销临时状态，不闪烁、不越位回弹。
-- **用户输入拥有最高优先级。** 向上滚轮、触控拖动或键盘滚动会在轻微手势时立即解除自动跟随；只有用户真正回到底部后才重新接管。
-- **Think 尊重用户设置。** 自动展开开启时沿用 Harness 的 disclosure 交互并在思考结束后收起；关闭时折叠内容持续更新但不引发虚假高度和上下闪动，手动展开也不会被流状态抢回。
-- **性能保护不会破坏最终状态。** `prefers-reduced-motion` 直接显示完整内容且不接管跟随；低帧率且回复在屏外时暂停 DOM 提交，恢复后受控追赶，最终仍准确停在底部。
+- **流畅渲染。** 文字边到边呈现，Markdown 结构持续更新，标题、列表、代码块和表格在流式过程中保持自然的阅读状态。
+- **丝滑滚动。** 内容逐步变高时，页面沿连续的滚动轨迹平稳跟随，视线始终贴着正在生成的内容。
+- **统一过渡。** 换行、代码块、表格和工具结果使用一致的过渡方式，正文、思考过程与工具输出衔接自然。
+- **自适应节奏。** 渲染速度会根据输出速度和待显示内容调整，让慢速输出从容呈现，快速输出及时跟上。
 
 ## 安装
 
@@ -89,7 +82,7 @@ dsh plugin --profile web update dsh-smooth-stream
 ## 常见问题
 
 **这是 DeepSeek 官方插件吗？**
-不是。它是 DeepSeek Harness（`dsh`）Web UI 的社区插件，MIT 协议开源，不属于 DeepSeek 官方发行。
+不是。它是面向 DeepSeek Harness（`dsh`）Web UI 的独立维护项目，采用 MIT 许可证，和 DeepSeek 没有从属关系。
 
 **dsh 插件怎么安装？**
 用内置插件命令：在 dsh 源码目录运行 `dsh plugin --profile web add dsh-smooth-stream`（见[安装](#安装)）。
@@ -99,6 +92,8 @@ dsh plugin --profile web update dsh-smooth-stream
 
 **支持 `prefers-reduced-motion` 吗？**
 支持。系统开启减少动态效果时直接显示完整文本、不接管跟随；帧率低于 30 fps 且回复在屏外时，揭示自动暂停、恢复后再补上。
+
+[![featured on dsh-suite](https://img.shields.io/badge/featured%20on-dsh--suite-4d6bfe)](https://whyihaveyou.github.io/dsh-suite/)
 
 ## 许可证
 

@@ -1,19 +1,19 @@
 # dsh-smooth-stream
 
-> DeepSeek Harness (dsh) community plugin for silky streaming in the Web UI.
-> DeepSeek Harness (dsh) 社区插件：丝滑流式渲染。
+> Fluid streaming rendering and silky scrolling for DeepSeek Harness replies.
+> 为 DeepSeek Harness 回复带来流畅渲染和丝滑滚动。
 
 ## Summary
 
-dsh-smooth-stream is a free, open-source, MIT-licensed community plugin for DeepSeek Harness (dsh) Web UI. It makes streaming replies feel smooth with arrival-tracking typewriter reveal, live Markdown rendering, glide-in wraps, and no flicker. It is not part of the official DeepSeek distribution.
+dsh-smooth-stream brings fluid streaming rendering and silky scrolling to the DeepSeek Harness (dsh) Web UI. Text, Markdown, code blocks, tables, and tool results appear as the reply arrives; as content grows, the page follows along in one continuous visual rhythm. The project is independently maintained and MIT-licensed.
 
 ## Key facts
 
 - Name: dsh-smooth-stream
-- Latest version: 0.3.2
+- Latest version: 0.3.3
 - License: MIT
 - Author: Laplace-bit
-- Official DeepSeek plugin: No (community plugin)
+- Affiliation: independently maintained; not affiliated with DeepSeek
 - Platform: DeepSeek Harness (dsh) Web UI
 - Programming language: TypeScript / React
 - Repository: https://github.com/Laplace-bit/dsh-smooth-stream
@@ -48,19 +48,16 @@ Host log should show:
 
 ## Features
 
-- Arrival-tracking typewriter reveal: text appears at the rate the model streams it.
-- Live Markdown rendering: code, emphasis, and formatting render while the reply is still coming.
-- Glide-in wraps: new lines and tool cards ease into view instead of jumping.
-- User-controlled scrolling: scroll up to pause follow; follow resumes when back at the bottom.
-- Whole-turn following: tool cards, retries, and workflow runs share the same smooth follow.
-- Accessibility: supports prefers-reduced-motion; pauses reveal at low frame rates when off-screen.
-- User settings: "Auto-expand thinking" toggle in the Web UI settings.
+- Fluid rendering: text appears as it arrives while Markdown structure stays active.
+- Silky scrolling: growing content follows one continuous scroll path.
+- Consistent transitions: line wraps, code blocks, tables, and tool results share the same motion treatment.
+- Adaptive cadence: reveal speed responds to arrival rate and pending content.
 
 ## FAQ
 
 ### Is dsh-smooth-stream an official DeepSeek plugin?
 
-No. It is a community plugin for DeepSeek Harness (dsh) Web UI, MIT-licensed, and not part of the official DeepSeek distribution.
+No. It is independently maintained, MIT-licensed software for the DeepSeek Harness (dsh) Web UI and is not affiliated with DeepSeek.
 
 ### How do I install it?
 

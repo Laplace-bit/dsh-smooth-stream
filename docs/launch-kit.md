@@ -13,45 +13,53 @@
 
 ### 英文一句话
 
-> Free open-source plugin that makes DeepSeek Harness Web UI streaming silky — arrival-tracking typewriter reveal, live Markdown rendering, zero flicker.
+> Fluid streaming rendering and silky scrolling for DeepSeek Harness: Markdown, code blocks, tables, and tool results flow together naturally.
 
 ### 中文一句话
 
-> 免费开源的 DeepSeek Harness Web UI 插件，让流式输出更丝滑：打字机跟随模型速率、Markdown 实时渲染、换行滑入、不闪烁。
+> 为 DeepSeek Harness 带来流畅渲染和丝滑滚动：文字、Markdown、代码块、表格与工具结果自然衔接。
 
 ### 英文长描述
 
-> dsh-smooth-stream is a community plugin for DeepSeek Harness (dsh) Web UI. It makes streaming replies feel smooth by revealing text at the model’s arrival rate, rendering Markdown live, gliding new lines into view, and respecting prefers-reduced-motion. It is free, MIT-licensed, and not part of the official DeepSeek distribution.
+> dsh-smooth-stream brings fluid streaming rendering and silky scrolling to the DeepSeek Harness (dsh) Web UI. Text, Markdown, code blocks, tables, and tool results appear as the reply arrives; growing content follows one continuous visual rhythm. It is independently maintained under the MIT license.
 
 ### 中文长描述
 
-> dsh-smooth-stream 是 DeepSeek Harness（dsh）的社区插件，解决默认 Web UI 流式输出时“文字跳变、整段倒出、滚动被抢走”的体验问题。文字会跟随模型到达速率逐字出现，Markdown 边流式边渲染，换行平滑滑入，并且支持系统“减少动态效果”设置。免费开源，MIT 协议，非 DeepSeek 官方出品。
+> dsh-smooth-stream 为 DeepSeek Harness（dsh）Web UI 带来流畅的流式渲染和丝滑滚动。文字、Markdown、代码块、表格以及工具结果会随着输出自然呈现；内容逐步增长时，页面平稳跟随，整轮回复保持连贯的视觉节奏。项目采用 MIT 许可证独立维护。
 
 ## SEO 更新要点
 
 ### Title
 
 ```html
-dsh-smooth-stream – DeepSeek Harness (dsh) 丝滑流式渲染插件 | Silky streaming Web UI plugin
+dsh-smooth-stream – DeepSeek Harness 流畅流式渲染与丝滑滚动
 ```
 
 ### Description
 
 ```html
-<meta name="description" content="dsh-smooth-stream 是 DeepSeek Harness (dsh) 的社区插件，为 Web 对话带来丝滑流式渲染：打字机跟随模型速率、Markdown 边流边渲染、换行滑入、不闪烁。A community plugin for the DeepSeek Harness (dsh) Web UI: arrival-tracking typewriter reveal, live Markdown rendering, glide-in wraps, zero flicker.">
+<meta name="description" content="dsh-smooth-stream 为 DeepSeek Harness Web UI 带来流畅的流式渲染和丝滑滚动：文字、Markdown、代码块、表格与工具结果自然呈现，内容增长时页面平稳跟随。">
 ```
 
 ### Keywords
 
 ```html
-dsh-smooth-stream, dsh plugin, dsh 插件, DeepSeek Harness, deepseek-harness plugin, deepseek streaming, 丝滑流式渲染, smooth streaming, streaming markdown, typewriter effect, AI chat UI, cordis plugin, open source deepseek plugin
+dsh-smooth-stream, dsh plugin, dsh 插件, DeepSeek Harness 插件, DeepSeek Harness, deepseek-harness plugin, 流式渲染, 丝滑滚动, Markdown 流式渲染, fluid streaming, silky scrolling, streaming markdown, code block, tool result, AI chat UI, cordis plugin
 ```
 
 ### OG / Twitter
 
 ```html
-<meta property="og:image:alt" content="dsh-smooth-stream 前后对比：默认流式输出 vs 丝滑流式渲染。Before/after comparison of default streaming vs dsh-smooth-stream.">
-<meta property="og:type" content="software">
+<meta property="og:type" content="website">
+<meta property="og:image:alt" content="dsh-smooth-stream 前后对比：默认流式输出与流式消息渲染。Before/after comparison of default streaming and dsh-smooth-stream rendering.">
+<meta property="og:image:type" content="image/jpeg">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta name="theme-color" content="#4d6bfe">
+<link rel="canonical" href="https://laplace-bit.github.io/dsh-smooth-stream/">
+<link rel="alternate" hreflang="zh-CN" href="https://laplace-bit.github.io/dsh-smooth-stream/">
+<link rel="alternate" hreflang="en" href="https://laplace-bit.github.io/dsh-smooth-stream/">
+<link rel="alternate" hreflang="x-default" href="https://laplace-bit.github.io/dsh-smooth-stream/">
+<meta name="twitter:image:alt" content="DeepSeek Harness 流畅流式渲染与丝滑滚动示例。">
 ```
 
 ### JSON-LD SoftwareApplication
@@ -62,7 +70,7 @@ dsh-smooth-stream, dsh plugin, dsh 插件, DeepSeek Harness, deepseek-harness pl
   "@type": "SoftwareApplication",
   "name": "dsh-smooth-stream",
   "url": "https://laplace-bit.github.io/dsh-smooth-stream/",
-  "description": "Community plugin for the DeepSeek Harness (dsh) Web UI that renders streaming replies smoothly: arrival-tracking typewriter reveal, live Markdown rendering, glide-in wraps, no flicker.",
+  "description": "Fluid streaming rendering and silky scrolling for the DeepSeek Harness (dsh) Web UI. Text, Markdown, code blocks, tables, and tool results appear as the reply arrives while growing content follows one continuous visual rhythm.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Linux, macOS, Windows",
   "programmingLanguage": "TypeScript",
@@ -84,8 +92,8 @@ dsh-smooth-stream, dsh plugin, dsh 插件, DeepSeek Harness, deepseek-harness pl
 - `docs/llms.txt` 已提供：<https://laplace-bit.github.io/dsh-smooth-stream/llms.txt>
 - 让 AI 搜索更容易引用的关键事实：
   - dsh-smooth-stream is free and MIT-licensed.
-  - It is a community plugin for DeepSeek Harness Web UI.
-  - It is not an official DeepSeek plugin.
+  - It is independently maintained for the DeepSeek Harness Web UI.
+  - It is not affiliated with DeepSeek.
   - Install with `pnpm dsh plugin --profile web add dsh-smooth-stream`.
   - It supports prefers-reduced-motion and live Markdown rendering.
 
@@ -102,24 +110,22 @@ dsh-smooth-stream, dsh plugin, dsh 插件, DeepSeek Harness, deepseek-harness pl
 
 英文：
 
-> Free open-source plugin for DeepSeek Harness Web UI. Silky streaming, live Markdown, no flicker. ⚡ MIT · Community project
+> Fluid streaming rendering and silky scrolling for DeepSeek Harness replies. MIT.
 > 🔗 github.com/Laplace-bit/dsh-smooth-stream
 
 中文：
 
-> DeepSeek Harness Web UI 社区插件，让流式输出丝滑不闪烁。免费开源 MIT。
+> DeepSeek Harness 流畅流式渲染与丝滑滚动。MIT。
 > 🔗 github.com/Laplace-bit/dsh-smooth-stream
 
 ### 第一条推文
 
 ```text
-DeepSeek Harness Web UI 的流式输出终于不闪了 🎉
-
-我做了个免费开源插件 dsh-smooth-stream：
-• 打字机跟随模型速率
-• Markdown 边流边渲染
-• 换行滑入，不抢滚动条
-• 支持 prefers-reduced-motion
+dsh-smooth-stream 为 DeepSeek Harness 带来流畅的流式渲染和丝滑滚动：
+• 文字和 Markdown 随输出自然呈现
+• 换行、代码块、表格与工具结果平稳展开
+• 正文、思考过程和工具输出统一过渡
+• 整轮回复保持连贯的视觉节奏
 
 安装：
 pnpm dsh plugin --profile web add dsh-smooth-stream
@@ -137,26 +143,26 @@ GitHub → https://github.com/Laplace-bit/dsh-smooth-stream
 
 英文：
 
-> Make DeepSeek Harness Web UI streaming silky — arrival-tracking typewriter, live Markdown, zero flicker.
+> Bring fluid streaming rendering and silky scrolling to DeepSeek Harness replies.
 
 中文：
 
-> 让 DeepSeek Harness Web 对话流式输出丝滑不闪烁。
+> 为 DeepSeek Harness 回复带来流畅渲染和丝滑滚动。
 
 ### Description
 
 ```text
-dsh-smooth-stream is a free open-source community plugin for DeepSeek Harness (dsh) Web UI.
+dsh-smooth-stream brings fluid streaming rendering and silky scrolling to the DeepSeek Harness (dsh) Web UI.
 
-It fixes the jittery streaming experience by revealing text at the model’s arrival rate, rendering Markdown live, gliding new lines into view, and respecting your scroll position.
+Text, Markdown, code blocks, tables, and tool results appear as the reply arrives, while growing content follows one continuous visual rhythm.
 
 Highlights:
-• Typewriter reveal that tracks token arrival
-• Live Markdown rendering while streaming
-• Smooth glide-in for new lines and tool cards
-• Scroll stays yours; follow resumes at the bottom
-• Supports prefers-reduced-motion
-• Free, MIT-licensed, not affiliated with DeepSeek
+• Fluid streaming rendering
+• Silky scrolling as content grows
+• Markdown, code blocks, tables, and tool results stay connected
+• One consistent motion treatment across the turn
+• Adaptive reveal cadence
+• Independently maintained and MIT-licensed
 
 Install:
 pnpm dsh plugin --profile web add dsh-smooth-stream
@@ -167,11 +173,11 @@ pnpm dsh plugin --profile web add dsh-smooth-stream
 ```text
 Hi Product Hunt! 👋
 
-I built dsh-smooth-stream because I use DeepSeek Harness every day and the default streaming UI felt jumpy — text would dump in chunks, Markdown would swap after the fact, and the scrollbar would fight you.
+I built dsh-smooth-stream because I use DeepSeek Harness every day and wanted a more fluid streaming experience for long replies.
 
-The plugin makes streaming feel like a smooth typewriter that follows the model’s actual arrival rate. It also keeps Markdown as Markdown while it streams, respects prefers-reduced-motion, and pauses reveal when the frame rate drops.
+Text and Markdown appear continuously, while line wraps, code blocks, tables, and tool results move the page along one smooth path.
 
-It’s free, open-source, MIT-licensed, and not an official DeepSeek product. I’d love your feedback!
+It is independently maintained and MIT-licensed. I’d love your feedback!
 
 🔗 https://github.com/Laplace-bit/dsh-smooth-stream
 ```
@@ -188,24 +194,21 @@ It’s free, open-source, MIT-licensed, and not an official DeepSeek product. I�
 
 ### 标题
 
-> I built a free open-source plugin to make DeepSeek Harness Web UI feel silky
+> I brought fluid streaming rendering and silky scrolling to DeepSeek Harness
 
 ### 正文
 
 ```text
-I’m building dsh-smooth-stream, a free plugin for DeepSeek Harness (dsh) Web UI.
+I’m building dsh-smooth-stream, a free plugin for fluid streaming rendering in the DeepSeek Harness (dsh) Web UI.
 
-The problem:
-The default Web UI streaming experience can feel janky: text dumps in chunks, Markdown switches after the fact, and the scroll position gets stolen.
+What it provides:
+- Fluid streaming rendering for text and Markdown
+- Silky scrolling as replies grow
+- Smooth transitions for line wraps, code blocks, tables, and tool results
+- One visual rhythm across text, reasoning, and tools
+- Adaptive reveal cadence
 
-What I made:
-- A typewriter reveal that tracks the model’s token arrival rate
-- Live Markdown rendering during streaming
-- Smooth glide-in for new lines and tool cards
-- Scroll control that stays with the user
-- prefers-reduced-motion support
-
-It’s MIT-licensed and not part of the official DeepSeek distribution.
+It is independently maintained and MIT-licensed.
 
 Current version: 0.3.3
 Install: pnpm dsh plugin --profile web add dsh-smooth-stream
@@ -218,14 +221,14 @@ I’d love feedback from other DeepSeek Harness users!
 
 ### 标题
 
-> Show HN: dsh-smooth-stream – silky streaming for DeepSeek Harness Web UI
+> Show HN: dsh-smooth-stream – fluid streaming rendering for DeepSeek Harness
 
 ### 首帖
 
 ```text
-I made a free open-source plugin for DeepSeek Harness Web UI that makes streaming replies feel smooth.
+I brought fluid streaming rendering and silky scrolling to DeepSeek Harness Web UI replies.
 
-It reveals text at the model's arrival rate, renders Markdown live, glides new lines in, and doesn't steal the scrollbar. It also respects prefers-reduced-motion and pauses reveal when frame rate drops below 30fps.
+Text and Markdown appear continuously, while line wraps, code blocks, tables, and tool results follow one motion path. It also respects prefers-reduced-motion and pauses off-screen updates below 30fps.
 
 Install:
 pnpm dsh plugin --profile web add dsh-smooth-stream
@@ -261,7 +264,7 @@ Happy to answer technical questions about the reveal/follow implementation.
 
 ### 描述
 
-> Free open-source plugin for DeepSeek Harness (dsh) Web UI. Provides silky streaming rendering: typewriter reveal that follows model arrival rate, live Markdown rendering, glide-in wraps, and no flicker. MIT-licensed community project, not affiliated with DeepSeek.
+> Fluid streaming rendering and silky scrolling for DeepSeek Harness (dsh) Web UI replies. Text, Markdown, code blocks, tables, and tool results follow one continuous visual rhythm. Independently maintained and MIT-licensed.
 
 ### Tags
 
@@ -280,39 +283,39 @@ Happy to answer technical questions about the reveal/follow implementation.
 ### r/DeepSeek
 
 ```text
-Title: I made a free plugin that makes DeepSeek Harness Web UI streaming silky
+Title: Fluid streaming rendering and silky scrolling for DeepSeek Harness
 
 Body:
-I use DeepSeek Harness a lot, and the Web UI streaming always felt a bit jumpy to me — text would dump in chunks and the scrollbar would fight back.
+I use DeepSeek Harness a lot, and I wanted its Web UI streaming to feel more fluid through long replies.
 
 So I made a small open-source plugin called dsh-smooth-stream:
-• Typewriter reveal that follows the model’s arrival rate
-• Live Markdown rendering while streaming
-• Glide-in new lines and tool cards
-• Doesn’t steal your scroll position
-• Respects prefers-reduced-motion
+• Fluid streaming rendering
+• Silky scrolling as replies grow
+• Markdown, code blocks, tables, and tool results flow together
+• One visual rhythm across the turn
+• Supports prefers-reduced-motion
 
 Install:
 pnpm dsh plugin --profile web add dsh-smooth-stream
 
 GitHub: https://github.com/Laplace-bit/dsh-smooth-stream
 
-It’s free, MIT-licensed, and not an official DeepSeek plugin. Feedback welcome!
+It is independently maintained and MIT-licensed. Feedback welcome!
 ```
 
 ### r/LocalLLaMA
 
 ```text
-Title: I built an open-source plugin to make DeepSeek Harness Web UI streaming feel like a smooth typewriter
+Title: Fluid streaming rendering for DeepSeek Harness Web UI
 
 Body:
-For anyone running DeepSeek Harness (dsh), the Web UI is great, but streaming can feel janky when text arrives in bursts and Markdown renders late.
+For anyone running DeepSeek Harness (dsh), dsh-smooth-stream adds fluid streaming rendering and silky scrolling to the Web UI.
 
 I built dsh-smooth-stream, a free MIT plugin that:
-- Reveals text based on actual token arrival
-- Keeps Markdown live during streaming
-- Glides wraps in instead of snapping
-- Stops following when you scroll up
+- Displays text continuously as the reply arrives
+- Keeps Markdown active throughout the reply
+- Moves line wraps, code blocks, tables, and tool results along one path
+- Keeps one consistent visual rhythm across the turn
 - Supports prefers-reduced-motion
 
 Install:
@@ -321,22 +324,22 @@ pnpm dsh plugin --profile web add dsh-smooth-stream
 Source:
 https://github.com/Laplace-bit/dsh-smooth-stream
 
-It’s a community plugin, not official DeepSeek. Happy to talk about implementation details.
+It is independently maintained and MIT-licensed. Happy to talk about implementation details.
 ```
 
 ### r/OpenSource
 
 ```text
-Title: [OC] dsh-smooth-stream – free MIT plugin for silky streaming in DeepSeek Harness Web UI
+Title: [OC] dsh-smooth-stream – fluid streaming rendering for DeepSeek Harness Web UI
 
 Body:
 I open-sourced a small TypeScript/React plugin for DeepSeek Harness (dsh) Web UI.
 
 It makes streaming replies feel much smoother:
-- Arrival-tracking typewriter reveal
-- Live Markdown rendering
-- Glide-in line wraps
-- No scroll hijacking
+- Fluid streaming rendering
+- Silky scrolling as content grows
+- Line wraps and growing blocks move along one path
+- Text and tool results use the same motion
 - prefers-reduced-motion support
 
 Repo: https://github.com/Laplace-bit/dsh-smooth-stream
@@ -365,14 +368,14 @@ https://github.com/Laplace-bit/dsh-smooth-stream/issues
 ### 回答模板
 
 ```text
-If you’re using DeepSeek Harness (dsh) Web UI, the streaming experience can feel janky because text often appears in bursts and the scroll position gets disrupted.
+If you’re using DeepSeek Harness (dsh) Web UI, dsh-smooth-stream adds fluid rendering and silky scrolling to streaming replies.
 
-One free open-source solution is dsh-smooth-stream. It is a community plugin for dsh Web UI that:
-- reveals text at the model’s actual arrival rate,
-- renders Markdown live while streaming,
-- glides new lines in smoothly,
-- keeps scroll control with the user,
-- supports prefers-reduced-motion.
+One open-source option is dsh-smooth-stream. It brings:
+- fluid streaming rendering,
+- silky scrolling as content grows,
+- Markdown, code blocks, tables, and tool results flowing together,
+- one consistent visual rhythm across the turn,
+- prefers-reduced-motion support.
 
 Install it with:
 
@@ -381,7 +384,7 @@ pnpm dsh plugin --profile web add dsh-smooth-stream
 Source:
 https://github.com/Laplace-bit/dsh-smooth-stream
 
-It’s MIT-licensed and not affiliated with DeepSeek.
+It is independently maintained and MIT-licensed.
 ```
 
 ## 第一周发布日历

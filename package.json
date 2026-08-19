@@ -1,7 +1,7 @@
 {
   "name": "dsh-smooth-stream",
   "version": "0.3.3",
-  "description": "DeepSeek Harness (dsh) plugin: silky streaming reveal, no flicker. dsh 丝滑流式渲染插件。",
+  "description": "Fluid streaming rendering and silky scrolling for DeepSeek Harness replies, including Markdown, code blocks, tables, and tool results.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -23,6 +23,11 @@
     "cordis",
     "streaming",
     "smooth-streaming",
+    "fluid-streaming",
+    "streaming-renderer",
+    "markdown-streaming",
+    "smooth-scrolling",
+    "smooth-scroll",
     "smooth-stream",
     "typewriter",
     "typewriter-effect",
