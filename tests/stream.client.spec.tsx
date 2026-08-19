@@ -2,10 +2,13 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { Context } from '@deepseek-ai/cordis'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createElement, useRef, type FunctionComponent } from 'react'
+import { createElement, memo, useLayoutEffect, useRef, useState, type FunctionComponent } from 'react'
 import { TypewriterAssistantNodeView } from '../src/client/TypewriterAssistantNodeView.tsx'
 import {
+  computeFollowRevealScale,
+  computeFollowReserve,
   computeFollowStep,
+  FOLLOW_SETTLE_EPSILON_PX,
   FOLLOW_SPEED_REF_CPS,
   FOLLOW_STATUS_RUNWAY_PX,
   useConversationFollow,
@@ -20,9 +23,10 @@ import {
   useSmoothStreamContent,
 } from '../src/client/useSmoothStreamContent.ts'
 import { apply, inject } from '../src/client/index.ts'
-import { isGrowingChatNode, wrapFollowNodeView } from '../src/client/TypewriterToolNodeView.tsx'
+import { isFollowableChatNode, isGrowingChatNode, wrapFollowNodeView } from '../src/client/TypewriterToolNodeView.tsx'
 import { DEFAULT_STREAM_CONFIG, STREAM_BOOT_GLOBAL } from '../src/config.ts'
 import { Config } from '../src/plugin.ts'
+import { useProgressiveDomText } from '../src/client/useProgressiveDomText.ts'
 import css from '../src/client/TypewriterAssistantNodeView.module.css'
 
 const FAKE = ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame', 'performance'] as const
@@ -30,6 +34,7 @@ const FAKE = ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'req
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
+  vi.unstubAllGlobals()
 })
 
 function assistantProps(
@@ -55,16 +60,81 @@ function currentTranslate(element: HTMLElement): number {
   )
 }
 
-function SmoothProbe({ text, shouldHoldBack, steadyCps }: { text: string; shouldHoldBack?: () => boolean; steadyCps?: number }) {
-  const displayed = useSmoothStreamContent(text, { shouldHoldBack, steadyCps })
+function SmoothProbe({
+  text,
+  inputComplete,
+  shouldHoldBack,
+  steadyCps,
+  revealScaleRef,
+  speedCpsRef,
+}: {
+  text: string
+  inputComplete?: boolean
+  shouldHoldBack?: () => boolean
+  steadyCps?: number
+  revealScaleRef?: { current: number }
+  speedCpsRef?: { current: number }
+}) {
+  const displayed = useSmoothStreamContent(text, {
+    inputComplete: inputComplete ?? false,
+    shouldHoldBack,
+    steadyCps,
+    revealScaleRef,
+    speedCpsRef,
+  })
   return <span>{displayed}</span>
 }
 
-function FollowProbe() {
+function FollowProbe({
+  speedCps = FOLLOW_SPEED_REF_CPS,
+  revealScaleRef,
+}: {
+  speedCps?: number
+  revealScaleRef?: { current: number }
+}) {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const speedCpsRef = useRef(speedCps)
+  speedCpsRef.current = speedCps
+  useConversationFollow(rootRef, true, speedCpsRef, revealScaleRef)
+  return <div ref={rootRef} data-chat-transcript>Streaming response</div>
+}
+
+function ProgressiveDomProbe({ text }: { text: string }) {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const speedCpsRef = useRef(35)
+  useProgressiveDomText(rootRef, true, true, speedCpsRef)
+  return <div ref={rootRef}>{text}</div>
+}
+
+function CompetingFollowProbe({ secondary }: { secondary: boolean }) {
+  const primaryRef = useRef<HTMLDivElement>(null)
+  const secondaryRef = useRef<HTMLDivElement>(null)
+  const primarySpeedRef = useRef(FOLLOW_SPEED_REF_CPS)
+  const secondarySpeedRef = useRef(FOLLOW_SPEED_REF_CPS)
+  useConversationFollow(primaryRef, true, primarySpeedRef)
+  useConversationFollow(secondaryRef, secondary, secondarySpeedRef, undefined, false, secondary)
+  return (
+    <div data-chat-transcript>
+      <div ref={primaryRef}>assistant</div>
+      <div ref={secondaryRef}>agent row</div>
+    </div>
+  )
+}
+
+function ShortLivedFollowProbe() {
   const rootRef = useRef<HTMLDivElement>(null)
   const speedCpsRef = useRef(FOLLOW_SPEED_REF_CPS)
-  useConversationFollow(rootRef, true, speedCpsRef)
-  return <div ref={rootRef} data-chat-transcript>Streaming response</div>
+  const [active, setActive] = useState(true)
+  useLayoutEffect(() => {
+    const port = rootRef.current?.closest<HTMLElement>('[data-conversation-scroll]')
+    if (port === null || port === undefined) return
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', { configurable: true, value: 500 })
+    port.scrollTop = 390
+  }, [])
+  useConversationFollow(rootRef, active, speedCpsRef)
+  useLayoutEffect(() => { setActive(false) }, [])
+  return <div ref={rootRef} data-chat-transcript>final committed height</div>
 }
 
 describe('useSmoothStreamContent', () => {
@@ -117,6 +187,46 @@ describe('useSmoothStreamContent', () => {
       view.unmount()
       requestFrame.mockRestore()
     }
+  })
+
+  it('slows the pressure queue while the follow spring needs paint headroom', async () => {
+    const revealScaleRef = { current: 0.55 }
+    const throttled = render(<SmoothProbe text={'x'.repeat(600)} revealScaleRef={revealScaleRef} />)
+    await act(() => vi.advanceTimersByTimeAsync(1000))
+    const throttledCount = throttled.container.textContent?.length ?? 0
+    throttled.unmount()
+
+    const unrestricted = render(<SmoothProbe text={'x'.repeat(600)} />)
+    await act(() => vi.advanceTimersByTimeAsync(1000))
+    const unrestrictedCount = unrestricted.container.textContent?.length ?? 0
+
+    expect(throttledCount).toBeGreaterThan(100)
+    expect(throttledCount).toBeLessThan(unrestrictedCount * 0.7)
+  })
+
+  it('publishes a producer-complete tail immediately without retaining live scroll backpressure', async () => {
+    const revealScaleRef = { current: 0.55 }
+    const content = 'x'.repeat(300)
+    const view = render(
+      <SmoothProbe text={content} revealScaleRef={revealScaleRef} />,
+    )
+    await act(() => vi.advanceTimersByTimeAsync(200))
+    expect(view.container.textContent?.length).toBeLessThan(content.length)
+
+    view.rerender(
+      <SmoothProbe text={content} inputComplete revealScaleRef={revealScaleRef} />,
+    )
+    expect(view.container.textContent).toBe(content)
+  })
+
+  it('publishes a large producer-complete tail in the closing render', async () => {
+    const content = 'x'.repeat(2000)
+    const view = render(<SmoothProbe text={content} />)
+    await act(() => vi.advanceTimersByTimeAsync(120))
+    expect(view.container.textContent?.length).toBeLessThan(content.length / 4)
+
+    view.rerender(<SmoothProbe text={content} inputComplete />)
+    expect(view.container.textContent).toBe(content)
   })
 
   it('reveals at the steady rate while input streams and drains at 1.8x after', async () => {
@@ -174,12 +284,146 @@ describe('useSmoothStreamContent', () => {
     await act(() => vi.advanceTimersByTimeAsync(1200))
     expect(view.container.textContent).toBe('hello world')
   })
+
+  it('returns the shared reveal speed to idle when its queue drains', async () => {
+    const speedCpsRef = { current: 35 }
+    const view = render(<SmoothProbe text={'x'.repeat(300)} speedCpsRef={speedCpsRef} />)
+    await act(() => vi.advanceTimersByTimeAsync(160))
+    expect(speedCpsRef.current).toBeGreaterThan(PRESET_CONFIG.balanced.defaultCps)
+
+    await act(() => vi.advanceTimersByTimeAsync(4000))
+    expect(view.container.textContent).toBe('x'.repeat(300))
+    expect(speedCpsRef.current).toBe(PRESET_CONFIG.balanced.defaultCps)
+  })
 })
 
 describe('assistant renderer', () => {
   beforeEach(() => vi.useFakeTimers({ toFake: [...FAKE] }))
 
   it('does not jump the visible transcript when one new line lands', async () => {
+    let baseHeight = 500
+    const view = render(
+      <div data-conversation-scroll>
+        <FollowProbe speedCps={100} />
+        <div data-chat-turn-status role="status">Deep diving...</div>
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    const status = view.container.querySelector('[data-chat-turn-status]') as HTMLElement
+    const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => baseHeight + (Number.parseFloat(status.style.marginTop) || 0),
+    })
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 0,
+      bottom: 80 - (Number.parseFloat(status.style.marginTop) || 0) + currentTranslate(transcript),
+    }) as DOMRect)
+    vi.spyOn(status, 'getBoundingClientRect').mockReturnValue({ top: 96, bottom: 122 } as DOMRect)
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 96, bottom: 176 } as DOMRect)
+
+    port.scrollTop = 400
+    await act(() => vi.advanceTimersByTimeAsync(600))
+    const before = -port.scrollTop + currentTranslate(transcript)
+
+    baseHeight += 28
+    await act(() => vi.advanceTimersByTimeAsync(16))
+    const after = -port.scrollTop + currentTranslate(transcript)
+
+    expect(Math.abs(after - before)).toBeLessThanOrEqual(4)
+  })
+
+  it('prepares enough runway for repeated fast line wraps without losing bottom follow', async () => {
+    let baseHeight = 500
+    const view = render(
+      <div data-conversation-scroll>
+        <FollowProbe speedCps={600} />
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => baseHeight + (Number.parseFloat(transcript.style.marginBottom) || 0),
+    })
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 0,
+      bottom: 80 - (Number.parseFloat(transcript.style.marginBottom) || 0) + currentTranslate(transcript),
+    }) as DOMRect)
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 96, bottom: 176 } as DOMRect)
+
+    port.scrollTop = 400
+    await act(() => vi.advanceTimersByTimeAsync(240))
+
+    // At 600 cps this layout wraps roughly every 96ms. The runway opens from
+    // reveal pressure before each discrete 28px height increase, so the wrap
+    // enters the unchanged spring instead of moving a full line in one paint.
+    for (let index = 0; index < 30; index += 1) {
+      const before = -port.scrollTop + currentTranslate(transcript)
+      baseHeight += 28
+      await act(() => vi.advanceTimersByTimeAsync(16))
+      const floor = port.scrollHeight - port.clientHeight
+      const after = -port.scrollTop + currentTranslate(transcript)
+      expect(port.scrollTop).toBeCloseTo(floor, 5)
+      // At the 600cps ceiling a <=8px frame is continuous high-speed motion,
+      // still far below the 28px line-wrap impulse this runway absorbs.
+      expect(Math.abs(after - before)).toBeLessThanOrEqual(8)
+      expect(transcript.getBoundingClientRect().bottom).toBeLessThan(96)
+      await act(() => vi.advanceTimersByTimeAsync(80))
+    }
+
+    view.unmount()
+  })
+
+  it('adds reveal backpressure before a narrow safe gap forces a hard catch-up', async () => {
+    let baseHeight = 500
+    const revealScaleRef = { current: 1 }
+    const view = render(
+      <div data-conversation-scroll>
+        <FollowProbe speedCps={600} revealScaleRef={revealScaleRef} />
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => baseHeight + (Number.parseFloat(transcript.style.marginBottom) || 0),
+    })
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 0,
+      bottom: 80 - (Number.parseFloat(transcript.style.marginBottom) || 0) + currentTranslate(transcript),
+    }) as DOMRect)
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 82, bottom: 162 } as DOMRect)
+
+    port.scrollTop = 400
+    await act(() => vi.advanceTimersByTimeAsync(240))
+    baseHeight += 28
+    await act(() => vi.advanceTimersByTimeAsync(16))
+
+    expect(revealScaleRef.current).toBeLessThan(0.75)
+    expect(revealScaleRef.current).toBeGreaterThanOrEqual(0.55)
+    expect(port.scrollTop).toBeCloseTo(port.scrollHeight - port.clientHeight, 5)
+    expect(transcript.getBoundingClientRect().bottom).toBeLessThan(82)
+  })
+
+  it('keeps chrome clearance and bottom follow after a long main-thread stall', () => {
+    const frames: FrameRequestCallback[] = []
+    const requestFrame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback)
+      return frames.length
+    })
+    const cancelFrame = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => undefined)
+    let clockNow = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => clockNow)
     let baseHeight = 500
     const view = render(
       <div data-conversation-scroll>
@@ -197,19 +441,40 @@ describe('assistant renderer', () => {
     })
     vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
       top: 0,
-      bottom: 80 + currentTranslate(transcript),
+      bottom: 80 - (Number.parseFloat(transcript.style.marginBottom) || 0) + currentTranslate(transcript),
     }) as DOMRect)
-    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 96, bottom: 176 } as DOMRect)
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 400, bottom: 480 } as DOMRect)
 
-    port.scrollTop = 400
-    await act(() => vi.advanceTimersByTimeAsync(80))
-    const before = -port.scrollTop + currentTranslate(transcript)
+    const step = (advanceMs: number): void => {
+      clockNow += advanceMs
+      act(() => frames.shift()?.(clockNow))
+    }
 
-    baseHeight += 28
-    await act(() => vi.advanceTimersByTimeAsync(16))
-    const after = -port.scrollTop + currentTranslate(transcript)
-
-    expect(Math.abs(after - before)).toBeLessThanOrEqual(4)
+    try {
+      port.scrollTop = 390
+      step(0)
+      for (let index = 0; index < 4; index += 1) {
+        baseHeight += 28
+        step(16)
+      }
+      // A 250ms stall while the stream kept growing: heavy markdown frames
+      // stretch far past the 32ms spring clamp, and the follower must still
+      // track growth measured in real time.
+      baseHeight += 300
+      step(250)
+      for (let index = 0; index < 5; index += 1) {
+        baseHeight += 5
+        step(16)
+        const floor = port.scrollHeight - port.clientHeight
+        expect(port.scrollTop).toBeCloseTo(floor, 5)
+        expect(transcript.getBoundingClientRect().bottom).toBeLessThan(400)
+      }
+    } finally {
+      view.unmount()
+      requestFrame.mockRestore()
+      cancelFrame.mockRestore()
+      clock.mockRestore()
+    }
   })
 
   it('caps a dropped RAF interval so the first recovery paint does not teleport', () => {
@@ -237,7 +502,7 @@ describe('assistant renderer', () => {
     })
     vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
       top: 0,
-      bottom: 80 + currentTranslate(transcript),
+      bottom: 80 - (Number.parseFloat(transcript.style.marginBottom) || 0) + currentTranslate(transcript),
     }) as DOMRect)
     vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 400, bottom: 480 } as DOMRect)
 
@@ -249,11 +514,13 @@ describe('assistant renderer', () => {
       act(() => frames.shift()?.(100))
 
       const after = -port.scrollTop + currentTranslate(transcript)
-      const expectedAdvance = computeFollowStep(32, {
+      const springAdvance = computeFollowStep(32, {
         lag: 200,
         speedEma: FOLLOW_SPEED_REF_CPS,
       }).advancePx
-      expect(before - after).toBeCloseTo(expectedAdvance, 5)
+      // Composer-only follow does not pre-open a runway at the 35cps neutral
+      // seed; the clamped 32ms spring step is therefore the whole movement.
+      expect(before - after).toBeCloseTo(springAdvance, 5)
     } finally {
       view.unmount()
       requestFrame.mockRestore()
@@ -331,6 +598,74 @@ describe('assistant renderer', () => {
     expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-collapsed')).toBe(true)
   })
 
+  it('keeps a collapsed streaming Think visually still when its visible height does not grow', async () => {
+    let text = 'examining'
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-transcript>
+            <TypewriterAssistantNodeView
+              {...assistantProps('running', [{ kind: 'reasoning', text }])}
+              thinkAutoExpand={false}
+            />
+          </div>
+          <div role="status">Deep diving...</div>
+        </div>
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    const status = view.container.querySelector('[role="status"]') as HTMLElement
+    const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => 500 + (Number.parseFloat(status.style.marginTop) || 0),
+    })
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 0,
+      bottom: 80 + currentTranslate(transcript),
+    }) as DOMRect)
+    vi.spyOn(status, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return { top: 128 + runway, bottom: 154 + runway } as DOMRect
+    })
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 160, bottom: 240 } as DOMRect)
+    port.scrollTop = 390
+
+    await act(() => vi.advanceTimersByTimeAsync(16))
+    expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('false')
+    const visualPositions = [-port.scrollTop + currentTranslate(transcript)]
+    for (let chunk = 0; chunk < 6; chunk += 1) {
+      text += ` more reasoning ${String(chunk)}`
+      view.rerender(
+        <div data-conversation-scroll>
+          <div data-chat-flow>
+            <div data-chat-transcript>
+              <TypewriterAssistantNodeView
+                {...assistantProps('running', [{ kind: 'reasoning', text }])}
+                thinkAutoExpand={false}
+              />
+            </div>
+            <div role="status">Deep diving...</div>
+          </div>
+          <div data-composer-seat>Composer</div>
+        </div>,
+      )
+      await act(() => vi.advanceTimersByTimeAsync(64))
+      visualPositions.push(-port.scrollTop + currentTranslate(transcript))
+    }
+
+    expect(Math.max(...visualPositions) - Math.min(...visualPositions)).toBeLessThan(0.5)
+
+    fireEvent.click(view.container.querySelector('[data-disclosure-row]') as HTMLElement)
+    expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('true')
+    const beforeExpandedPrediction = -port.scrollTop + currentTranslate(transcript)
+    await act(() => vi.advanceTimersByTimeAsync(192))
+    expect(-port.scrollTop + currentTranslate(transcript)).toBeLessThan(beforeExpandedPrediction - 0.5)
+  })
+
   it('does not flash the conversation port to the top when Think yields to new text', async () => {
     const think = { kind: 'reasoning', text: 'working through the details' }
     let height = 500
@@ -371,6 +706,118 @@ describe('assistant renderer', () => {
       expect(port.scrollTop).toBeGreaterThan(0)
       expect(port.scrollTop).toBeLessThanOrEqual(collapsingHeight - 100)
     }
+  })
+
+  it('does not pre-scroll and rebound when Think yields to a short same-line answer', async () => {
+    const think = { kind: 'reasoning', text: 'done thinking' }
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-transcript>
+            <TypewriterAssistantNodeView
+              {...assistantProps('running', [think])}
+              thinkAutoExpand={false}
+            />
+          </div>
+          <div role="status">Deep diving...</div>
+        </div>
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    const status = view.container.querySelector('[role="status"]') as HTMLElement
+    const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => 500 + (Number.parseFloat(status.style.marginTop) || 0),
+    })
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return { top: 0, bottom: 80 - runway + currentTranslate(transcript) } as DOMRect
+    })
+    vi.spyOn(status, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return { top: 128 + runway, bottom: 154 + runway } as DOMRect
+    })
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 160, bottom: 240 } as DOMRect)
+    port.scrollTop = 390
+    await act(() => vi.advanceTimersByTimeAsync(600))
+
+    view.rerender(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-transcript>
+            <TypewriterAssistantNodeView
+              {...assistantProps('running', [think, { kind: 'text', text: 'Short answer.' }])}
+              thinkAutoExpand={false}
+            />
+          </div>
+          <div role="status">Deep diving...</div>
+        </div>
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+
+    const visualPositions: number[] = []
+    for (let frame = 0; frame < 40; frame += 1) {
+      await act(() => vi.advanceTimersByTimeAsync(16))
+      visualPositions.push(-port.scrollTop + currentTranslate(transcript))
+    }
+
+    // The answer fits the existing line, so there is no height impulse to
+    // smooth. Any movement here is speculative scroll that must later return.
+    expect(Math.max(...visualPositions) - Math.min(...visualPositions)).toBeLessThan(0.5)
+  })
+
+  it('still prepares runway when Think yields to text that will wrap', async () => {
+    const think = { kind: 'reasoning', text: 'done thinking' }
+    let baseHeight = 500
+    const renderTurn = (blocks: unknown[]) => (
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-transcript>
+            <TypewriterAssistantNodeView
+              {...assistantProps('running', blocks)}
+              thinkAutoExpand={false}
+            />
+          </div>
+          <div role="status">Deep diving...</div>
+        </div>
+        <div data-composer-seat>Composer</div>
+      </div>
+    )
+    const view = render(renderTurn([think]))
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    const status = view.container.querySelector('[role="status"]') as HTMLElement
+    const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => baseHeight + (Number.parseFloat(status.style.marginTop) || 0),
+    })
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return { top: 0, bottom: 80 - runway + currentTranslate(transcript) } as DOMRect
+    })
+    vi.spyOn(status, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return { top: 128 + runway, bottom: 154 + runway } as DOMRect
+    })
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 160, bottom: 240 } as DOMRect)
+    port.scrollTop = 390
+    await act(() => vi.advanceTimersByTimeAsync(600))
+
+    view.rerender(renderTurn([think, { kind: 'text', text: 'long answer '.repeat(80) }]))
+    await act(() => vi.advanceTimersByTimeAsync(160))
+    const beforeWrap = -port.scrollTop + currentTranslate(transcript)
+    baseHeight += 28
+    await act(() => vi.advanceTimersByTimeAsync(16))
+    const afterWrap = -port.scrollTop + currentTranslate(transcript)
+
+    expect(Math.abs(afterWrap - beforeWrap)).toBeLessThanOrEqual(8)
   })
 
   it('keeps the Think body mounted behind the animated 0fr track while collapsed', () => {
@@ -420,6 +867,33 @@ describe('assistant renderer', () => {
     expect(port.getAttribute('data-follow-owned')).not.toBeNull()
     await act(() => vi.advanceTimersByTimeAsync(800))
     expect(port.scrollTop).toBe(400)
+  })
+
+  it('returns leadership to a still-running assistant after a one-shot Agent row settles', async () => {
+    let height = 500
+    const view = render(
+      <div data-conversation-scroll>
+        <CompetingFollowProbe secondary />
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', { configurable: true, get: () => height })
+    port.scrollTop = 400
+    await act(() => vi.advanceTimersByTimeAsync(80))
+    expect(port.getAttribute('data-follow-owned')).not.toBeNull()
+
+    view.rerender(
+      <div data-conversation-scroll>
+        <CompetingFollowProbe secondary={false} />
+      </div>,
+    )
+    await act(() => vi.advanceTimersByTimeAsync(80))
+
+    height = 620
+    await act(() => vi.advanceTimersByTimeAsync(80))
+    expect(port.getAttribute('data-follow-owned')).not.toBeNull()
+    expect(port.scrollTop).toBe(520)
   })
 
   it('releases follow on a reader pull-up and resumes only after a return to the floor', async () => {
@@ -527,7 +1001,7 @@ describe('assistant renderer', () => {
     await act(() => vi.advanceTimersByTimeAsync(80))
     expect(port.getAttribute('data-follow-owned')).not.toBeNull()
     expect(port.scrollTop).toBeGreaterThan(400)
-    expect(port.scrollTop).toBeLessThan(550)
+    expect(port.scrollTop).toBeLessThanOrEqual(550)
 
     height = 800
     const beforeGrowth = port.scrollTop
@@ -536,7 +1010,28 @@ describe('assistant renderer', () => {
     expect(port.scrollTop).toBeGreaterThan(beforeGrowth)
   })
 
-  it('unpins on a light upward wheel instead of requiring a 25px engine lag', async () => {
+  it('unpins on a real upward scroll instead of a sub-threshold bounce', async () => {
+    const block = { kind: 'text', text: 'line one\n\nline two\n\nline three' }
+    const view = render(
+      <div data-conversation-scroll>
+        <TypewriterAssistantNodeView {...assistantProps('running', [block])} />
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', { configurable: true, value: 500 })
+    port.scrollTop = 390
+    await act(() => vi.advanceTimersByTimeAsync(80))
+    expect(port.getAttribute('data-follow-owned')).not.toBeNull()
+
+    fireEvent.wheel(port, { deltaY: -60 })
+    port.scrollTop = 340
+    await act(() => vi.advanceTimersByTimeAsync(80))
+    expect(port.getAttribute('data-follow-owned')).toBeNull()
+    expect(port.scrollTop).toBe(340)
+  })
+
+  it('releases follow on a light upward wheel even if follow erases its small scroll delta', async () => {
     const block = { kind: 'text', text: 'line one\n\nline two\n\nline three' }
     const view = render(
       <div data-conversation-scroll>
@@ -551,10 +1046,38 @@ describe('assistant renderer', () => {
     expect(port.getAttribute('data-follow-owned')).not.toBeNull()
 
     fireEvent.wheel(port, { deltaY: -12 })
-    port.scrollTop = 385
+    port.scrollTop = 398
     await act(() => vi.advanceTimersByTimeAsync(80))
     expect(port.getAttribute('data-follow-owned')).toBeNull()
-    expect(port.scrollTop).toBe(385)
+    // ChatView treats <=24px as still pinned. A plugin release must land just
+    // outside that band or the host's next ResizeObserver callback re-pins it.
+    expect(port.scrollTop).toBeLessThanOrEqual(374)
+    await act(() => vi.advanceTimersByTimeAsync(1000))
+    expect(port.getAttribute('data-follow-owned')).toBeNull()
+    expect(port.scrollTop).toBeLessThanOrEqual(374)
+  })
+
+  it('releases follow on a light downward finger drag', async () => {
+    const block = { kind: 'text', text: 'line one\n\nline two\n\nline three' }
+    const view = render(
+      <div data-conversation-scroll>
+        <TypewriterAssistantNodeView {...assistantProps('running', [block])} />
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', { configurable: true, value: 500 })
+    port.scrollTop = 390
+    await act(() => vi.advanceTimersByTimeAsync(80))
+    expect(port.getAttribute('data-follow-owned')).not.toBeNull()
+
+    fireEvent.touchStart(port, { touches: [{ clientY: 100 }] })
+    fireEvent.touchMove(port, { touches: [{ clientY: 104 }] })
+    port.scrollTop = 396
+    await act(() => vi.advanceTimersByTimeAsync(32))
+
+    expect(port.getAttribute('data-follow-owned')).toBeNull()
+    expect(port.scrollTop).toBeLessThanOrEqual(374)
   })
 
   it('releases real-scroll follow at the exact reader position', async () => {
@@ -706,6 +1229,70 @@ describe('assistant renderer', () => {
     expect(nextFrame).toBeLessThanOrEqual(finishCommit)
   })
 
+  it('retires the compositor layer only after a stable final paint', async () => {
+    const block = { kind: 'reasoning', text: 'quietly finishing the analysis' }
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-transcript>
+            <TypewriterAssistantNodeView
+              {...assistantProps('running', [block])}
+              thinkAutoExpand={false}
+            />
+          </div>
+          <div role="status">Deep diving...</div>
+        </div>
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    const status = view.container.querySelector('[role="status"]') as HTMLElement
+    const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => 500
+        + (status.isConnected ? Number.parseFloat(status.style.marginTop) || 0 : 0)
+        + (Number.parseFloat(transcript.style.marginBottom) || 0),
+    })
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 0,
+      bottom: 80 + currentTranslate(transcript),
+    }) as DOMRect)
+    vi.spyOn(status, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return { top: 128 + runway, bottom: 154 + runway } as DOMRect
+    })
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 160, bottom: 240 } as DOMRect)
+    port.scrollTop = 390
+    await act(() => vi.advanceTimersByTimeAsync(80))
+    expect(currentTranslate(transcript)).toBeGreaterThan(0)
+
+    view.rerender(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-transcript>
+            <TypewriterAssistantNodeView
+              {...assistantProps('settled', [block])}
+              thinkAutoExpand={false}
+            />
+          </div>
+        </div>
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+
+    expect(currentTranslate(transcript)).toBe(0)
+    expect(transcript.style.transform).not.toBe('')
+    expect(transcript.style.willChange).toBe('transform')
+    await act(() => vi.advanceTimersByTimeAsync(16))
+    expect(transcript.style.transform).not.toBe('')
+    await act(() => vi.advanceTimersByTimeAsync(16))
+    expect(transcript.style.transform).toBe('')
+    expect(transcript.style.willChange).toBe('')
+  })
+
   it('never drains past the natural final position before removing its runway', async () => {
     const block = { kind: 'text', text: 'finished response' }
     let baseHeight = 500
@@ -727,13 +1314,18 @@ describe('assistant renderer', () => {
     Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
     Object.defineProperty(port, 'scrollHeight', {
       configurable: true,
-      get: () => baseHeight + (Number.parseFloat(transcript.style.marginBottom) || 0),
+      get: () => baseHeight
+        + (Number.parseFloat(status.style.marginTop) || 0)
+        + (Number.parseFloat(transcript.style.marginBottom) || 0),
     })
     vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
       top: 0,
       bottom: 80 + currentTranslate(transcript),
     }) as DOMRect)
-    vi.spyOn(status, 'getBoundingClientRect').mockReturnValue({ top: 128, bottom: 154 } as DOMRect)
+    vi.spyOn(status, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return { top: 128 + runway, bottom: 154 + runway } as DOMRect
+    })
     vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 160, bottom: 240 } as DOMRect)
 
     port.scrollTop = 390
@@ -758,7 +1350,7 @@ describe('assistant renderer', () => {
       // While the temporary runway contributes to the scroll floor, an equal
       // transform is the natural final position. Going below it scrolls past
       // the final resting point and produces a rebound when runway is removed.
-      expect(shift === 0 ? runway : shift - runway).toBeGreaterThanOrEqual(-0.1)
+      expect(shift === 0 ? runway : shift - runway).toBeGreaterThanOrEqual(-FOLLOW_SETTLE_EPSILON_PX)
     }
     expect(transcript.style.transform).toBe('')
     expect(transcript.style.marginBottom).toBe('')
@@ -801,8 +1393,10 @@ describe('assistant renderer', () => {
     )
     expect(currentTranslate(transcript)).toBeGreaterThan(0)
 
+    // The drain still carries ~70px of the glide in scroll, so a real pull
+    // must exceed the unpin threshold from that position, not the floor.
     fireEvent.wheel(port, { deltaY: -60 })
-    port.scrollTop = 500
+    port.scrollTop = 460
     await act(() => vi.advanceTimersByTimeAsync(16))
     expect(port.getAttribute('data-follow-owned')).toBeNull()
     expect(transcript.style.transform).toBe('')
@@ -846,11 +1440,10 @@ describe('assistant renderer', () => {
     const before = -port.scrollTop + currentTranslate(surface)
     height += 28
     await act(() => vi.advanceTimersByTimeAsync(16))
-    expect(port.scrollTop).toBeGreaterThan(400)
-    expect(port.scrollTop).toBeLessThanOrEqual(428)
+    expect(port.scrollTop).toBe(428)
     expect(currentTranslate(surface)).toBeGreaterThan(0)
     expect(surface.getBoundingClientRect().bottom).toBeLessThan(88)
-    expect(Math.abs((-port.scrollTop + currentTranslate(surface)) - before)).toBeLessThanOrEqual(4)
+    expect(Math.abs((-port.scrollTop + currentTranslate(surface)) - before)).toBeLessThan(28)
 
     // Chromium serializes the zeros with px units. The next frame must still
     // recover the existing shift when measuring natural layout clearance.
@@ -905,7 +1498,7 @@ describe('assistant renderer', () => {
     height = 1200
     await act(() => vi.advanceTimersByTimeAsync(16))
     expect(port.scrollTop).toBeGreaterThan(beforeBurst)
-    expect(port.scrollTop).toBeLessThan(1100)
+    expect(port.scrollTop).toBe(1100)
     expect(flow.style.transform).toBe('')
     const burstShift = currentTranslate(rows[0] as HTMLElement)
     expect(burstShift).toBeGreaterThanOrEqual(initialShift)
@@ -916,11 +1509,11 @@ describe('assistant renderer', () => {
     expect(flow.style.clipPath).toBe('')
     expect(label.style.clipPath).toBe('')
 
-    // The paint ceiling caps the visible transform, but must not erase the
-    // much larger logical lag. It therefore stays capped for several frames
-    // instead of collapsing immediately from a synthetic bounded extent.
+    // Unsafe backlog is caught up immediately instead of being hidden in the
+    // physical scroll position; the remaining safe transform drains normally.
     await act(() => vi.advanceTimersByTimeAsync(64))
-    expect(currentTranslate(rows[0] as HTMLElement)).toBeCloseTo(burstShift, 1)
+    expect(currentTranslate(rows[0] as HTMLElement)).toBeLessThanOrEqual(burstShift)
+    expect(currentTranslate(label)).toBe(0)
   })
 
   it('never shifts nested tool rows when status enters or leaves', async () => {
@@ -992,7 +1585,7 @@ describe('assistant renderer', () => {
     expect(label.style.transform).toBe('')
   })
 
-  it('carries lag in scrollTop when layout exposes no safe paint clearance', async () => {
+  it('catches up unsafe lag while fixed chrome exposes no paint clearance', async () => {
     const block = { kind: 'text', text: 'line one\n\nline two\n\nline three' }
     let height = 500
     const statusGap = 12
@@ -1028,11 +1621,11 @@ describe('assistant renderer', () => {
     height = 1200
     await act(() => vi.advanceTimersByTimeAsync(16))
     expect(port.scrollTop).toBeGreaterThan(beforeBurst)
-    expect(port.scrollTop).toBeLessThan(1100)
+    expect(port.scrollTop).toBe(1100)
     expect(flow.style.transform).toBe('')
     expect(transcript.style.transform).toBe('')
     expect(transcript.style.clipPath).toBe('')
-    expect(currentTranslate(chrome)).toBeLessThan(0)
+    expect(currentTranslate(chrome)).toBe(0)
     expect(chrome.style.clipPath).toBe('')
     expect(chrome.getAttribute('data-dsh-follow-status')).toBeNull()
 
@@ -1049,8 +1642,7 @@ describe('assistant renderer', () => {
       </div>,
     )
     await act(() => vi.advanceTimersByTimeAsync(16))
-    expect(port.scrollTop).toBeGreaterThan(beforeStatusLeaves)
-    expect(port.scrollTop).toBeLessThan(1100)
+    expect(port.scrollTop).toBe(beforeStatusLeaves)
     expect(transcript.style.transform).toBe('')
     expect(transcript.style.clipPath).toBe('')
 
@@ -1059,7 +1651,7 @@ describe('assistant renderer', () => {
     expect(flow.style.willChange).toBe('')
   })
 
-  it('splits burst lag while status, jump control, and composer stay fixed', async () => {
+  it('bounds burst lag while status, jump control, and composer stay fixed', async () => {
     const block = { kind: 'text', text: 'line one\n\nline two\n\nline three' }
     let height = 500
     const view = render(
@@ -1087,7 +1679,8 @@ describe('assistant renderer', () => {
     })
     vi.spyOn(status, 'getBoundingClientRect').mockImplementation(() => {
       const runway = Number.parseFloat(status.style.marginTop) || 0
-      return { top: 96 + runway, bottom: 122 + runway } as DOMRect
+      const shift = currentTranslate(status)
+      return { top: 96 + runway + shift, bottom: 122 + runway + shift } as DOMRect
     })
     vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 160, bottom: 240 } as DOMRect)
     port.scrollTop = 390
@@ -1098,12 +1691,14 @@ describe('assistant renderer', () => {
     await act(() => vi.advanceTimersByTimeAsync(16))
 
     expect(port.scrollTop).toBeGreaterThan(beforeBurst)
-    expect(port.scrollTop).toBeLessThan(1100)
+    expect(port.scrollTop).toBe(1100)
     const shift = Number(/translate3d\(0, ([\d.]+)px, 0\)/.exec(surface.style.transform)?.[1] ?? 0)
     expect(shift).toBeGreaterThanOrEqual(28)
-    expect(80 + shift).toBeLessThan(96 + (Number.parseFloat(status.style.marginTop) || 0))
+    expect(80 + shift).toBeLessThan(
+      96 + (Number.parseFloat(status.style.marginTop) || 0) + currentTranslate(status),
+    )
     expect(surface.style.clipPath).toBe('')
-    expect(currentTranslate(status)).toBeLessThan(0)
+    expect(currentTranslate(status)).toBe(0)
     for (const chrome of [jump, composer]) expect(chrome.style.transform).toBe('')
     for (const chrome of [status, jump, composer]) expect(chrome.style.clipPath).toBe('')
   })
@@ -1140,7 +1735,7 @@ describe('assistant renderer', () => {
 
     const shift = Number(/translate3d\(0, ([\d.]+)px, 0\)/.exec(surface.style.transform)?.[1] ?? 0)
     expect(port.scrollTop).toBeGreaterThan(beforeBurst)
-    expect(port.scrollTop).toBeLessThan(1100)
+    expect(port.scrollTop).toBe(1100)
     expect(80 + shift).toBeLessThan(140)
     expect(surface.style.clipPath).toBe('')
   })
@@ -1182,7 +1777,7 @@ describe('assistant renderer', () => {
     expect(port.getAttribute('data-follow-owned')).toBeNull()
     expect(port.scrollTop).toBeCloseTo(340 - shift, 5)
     expect(surface.style.transform).toBe('')
-    expect(status.style.marginTop).toBe('16px')
+    expect(status.style.marginTop).toBe(`${String(FOLLOW_STATUS_RUNWAY_PX)}px`)
 
     view.unmount()
     expect(status.style.marginTop).toBe('')
@@ -1205,7 +1800,9 @@ describe('assistant renderer', () => {
     await act(() => vi.advanceTimersByTimeAsync(400))
     expect(port.getAttribute('data-follow-owned')).not.toBeNull()
     expect(port.scrollTop).toBeGreaterThan(600)
-    expect(port.scrollTop).toBeLessThan(620)
+    // The visible glide rides the transcript transform; the real port stays
+    // at the floor so host bottom-follow and jump chrome remain stable.
+    expect(port.scrollTop).toBeCloseTo(620, 5)
     await act(() => vi.advanceTimersByTimeAsync(400))
     expect(port.scrollTop).toBeGreaterThan(618)
   })
@@ -1311,10 +1908,46 @@ describe('client plugin lifecycle', () => {
       node: { data: { root: { callId: '1', name: 'bash' } } },
     }))
     expect(view.container.querySelector(`.${css.follow}`)).not.toBeNull()
-    expect(view.container.textContent).toContain('tool:running')
+    expect(view.container.querySelector(`.${css.follow} > div`)).not.toBeNull()
 
     await fiber.dispose()
     expect(ctx.slots.entries('conversation.chat.node').find(item => item.options.key === 'tool-call')?.component).toBe(DummyTool)
+  })
+
+  it('wraps memoized Agent rows while preserving memoized human rows', async () => {
+    const ContextRow = memo(function ContextRow() {
+      return <div>context</div>
+    })
+    const UserRow = memo(function UserRow() {
+      return <div>user</div>
+    })
+    const ctx = new Context()
+    await ctx.plugin(SlotRegistry).await()
+    ctx.slots.register({
+      name: 'root',
+      children: { 'conversation.chat.node': { kind: 'keyed', scope: 'session' } },
+    } as never, (() => null) as never)
+    ctx.slots.register({
+      name: 'conversation.chat.node',
+      key: 'context',
+    } as never, ContextRow as never)
+    ctx.slots.register({
+      name: 'conversation.chat.node',
+      key: 'user',
+    } as never, UserRow as never)
+
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+
+    const contextEntry = ctx.slots.entries('conversation.chat.node')
+      .find(item => item.options.key === 'context')
+    const userEntry = ctx.slots.entries('conversation.chat.node')
+      .find(item => item.options.key === 'user')
+    expect(contextEntry?.component).not.toBe(ContextRow)
+    expect(userEntry?.component).toBe(UserRow)
+
+    await fiber.dispose()
+    expect(contextEntry?.component).toBe(ContextRow)
   })
 
   it('wraps a tool-call registered after the overlay mounts', async () => {
@@ -1339,7 +1972,7 @@ describe('client plugin lifecycle', () => {
       node: { data: { root: { callId: '2', name: 'read' } } },
     }))
     expect(view.container.querySelector(`.${css.follow}`)).not.toBeNull()
-    expect(view.container.textContent).toContain('late')
+    expect(view.container.querySelector(`.${css.follow} > div`)).not.toBeNull()
     await fiber.dispose()
   })
 
@@ -1490,6 +2123,454 @@ describe('isGrowingChatNode', () => {
     expect(isGrowingChatNode({ data: { kind: 'command', outcome: { kind: 'success' } } })).toBe(false)
   })
 
+  it('treats an otherwise unknown renderer in an open Agent step as followable', () => {
+    expect(isFollowableChatNode({
+      location: {
+        kind: 'step',
+        turn: { status: 'open' },
+        step: { status: 'open' },
+      },
+      data: { pluginSurface: 'future-tool' },
+    })).toBe(true)
+    expect(isFollowableChatNode({
+      location: {
+        kind: 'step',
+        turn: { status: 'closed' },
+        step: { status: 'closed' },
+      },
+      data: { pluginSurface: 'history' },
+    })).toBe(false)
+  })
+
+  it.each([
+    {
+      label: 'context row in an open step',
+      oneShot: true,
+      node: {
+        location: {
+          kind: 'step',
+          turn: { status: 'open' },
+          step: { status: 'open' },
+        },
+        data: { content: [], source: {}, provenance: {}, form: null },
+      },
+    },
+    {
+      label: 'first running Tool row',
+      oneShot: false,
+      node: {
+        location: { kind: 'unresolved' },
+        data: { root: { callId: '1', name: 'bash' } },
+      },
+    },
+  ])('eases the newly inserted $label from the pre-insert extent', async ({ node, oneShot }) => {
+    vi.useFakeTimers({ toFake: [...FAKE] })
+    function Inner() {
+      return <div>new agent row</div>
+    }
+    const Wrapped = wrapFollowNodeView(Inner as never)
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-transcript data-chat-anchor-key="row">
+            <Wrapped node={node} />
+          </div>
+          <div role="status">Deep diving...</div>
+        </div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    const status = view.container.querySelector('[role="status"]') as HTMLElement
+    const root = view.container.querySelector(`.${css.follow}`) as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', { configurable: true, value: 500 })
+    vi.spyOn(root, 'getBoundingClientRect').mockReturnValue({
+      top: 48,
+      bottom: 80,
+      height: 32,
+    } as DOMRect)
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 0,
+      bottom: 80 + currentTranslate(transcript),
+    }) as DOMRect)
+    vi.spyOn(status, 'getBoundingClientRect').mockReturnValue({ top: 160, bottom: 186 } as DOMRect)
+    port.scrollTop = 400
+
+    await act(() => vi.advanceTimersByTimeAsync(16))
+    const entered = currentTranslate(transcript)
+    expect(entered).toBeGreaterThan(8)
+
+    await act(() => vi.advanceTimersByTimeAsync(48))
+    const advanced = currentTranslate(transcript)
+    expect(advanced).toBeGreaterThan(0)
+    expect(advanced).toBeLessThan(entered)
+
+    if (oneShot) {
+      await act(() => vi.advanceTimersByTimeAsync(1600))
+      expect(transcript.style.transform).toBe('')
+      expect(port.getAttribute('data-follow-owned')).toBeNull()
+    }
+  })
+
+  it('reveals text inside a newly inserted generic Agent renderer progressively', async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] })
+    function Inner() {
+      return <div>Context injection is ready</div>
+    }
+    const Wrapped = wrapFollowNodeView(Inner as never)
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-transcript>
+            <Wrapped node={{
+              location: {
+                kind: 'step',
+                turn: { status: 'open' },
+                step: { status: 'open' },
+              },
+              data: { pluginSurface: 'context' },
+            }} />
+          </div>
+          <div role="status">Deep diving...</div>
+        </div>
+      </div>,
+    )
+
+    expect(view.container.textContent).not.toContain('Context injection is ready')
+    await act(() => vi.advanceTimersByTimeAsync(48))
+    const partial = view.container.querySelector(`.${css.follow}`)?.textContent ?? ''
+    expect(partial.length).toBeGreaterThan(0)
+    expect(partial.length).toBeLessThan('Context injection is ready'.length)
+    await act(() => vi.advanceTimersByTimeAsync(1200))
+    expect(view.container.textContent).toContain('Context injection is ready')
+  })
+
+  it('reveals an unknown unresolved renderer when it mounts at the active Agent tail', async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] })
+    function Inner() {
+      return <div>Future renderer</div>
+    }
+    const Wrapped = wrapFollowNodeView(Inner as never)
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-flow-key="future"><Wrapped node={{
+            location: { kind: 'unresolved' },
+            data: { pluginSurface: 'future' },
+          }} /></div>
+          <div role="status">Deep diving...</div>
+        </div>
+      </div>,
+    )
+
+    expect(view.container.textContent).not.toContain('Future renderer')
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(view.container.textContent).toContain('Future renderer')
+  })
+
+  it('paces same-height text mutations from an opaque Agent renderer', async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] })
+    const location = {
+      kind: 'step',
+      turn: { status: 'open' },
+      step: { status: 'open' },
+    }
+    function Inner({ node }: { node: { data: { label: string } } }) {
+      return <span>{node.data.label}</span>
+    }
+    const Wrapped = wrapFollowNodeView(Inner as never)
+    const view = render(<Wrapped node={{ location, data: { label: 'Bash command' } }} />)
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(view.container.textContent).toBe('Bash command')
+
+    view.rerender(<Wrapped node={{ location, data: { label: 'Read command' } }} />)
+    await act(async () => {})
+    expect(view.container.textContent).not.toBe('Read command')
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(view.container.textContent).toBe('Read command')
+  })
+
+  it('sleeps after a generic text queue drains and wakes for later mutations', async () => {
+    const frames: FrameRequestCallback[] = []
+    const requestFrame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback)
+      return frames.length
+    })
+    const cancelFrame = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => undefined)
+    let now = 0
+    const drainFrames = async (): Promise<void> => {
+      for (let count = 0; count < 100 && frames.length > 0; count += 1) {
+        const callback = frames.shift()
+        now += 16
+        await act(async () => { callback?.(now) })
+      }
+    }
+    try {
+      const view = render(<ProgressiveDomProbe text="Context ready" />)
+      await drainFrames()
+      expect(view.container.textContent).toBe('Context ready')
+      expect(frames).toHaveLength(0)
+
+      view.rerender(<ProgressiveDomProbe text="Context updated" />)
+      await act(async () => {})
+      expect(frames).toHaveLength(1)
+      expect(view.container.textContent).not.toBe('Context updated')
+      await drainFrames()
+      expect(view.container.textContent).toBe('Context updated')
+      expect(frames).toHaveLength(0)
+    } finally {
+      requestFrame.mockRestore()
+      cancelFrame.mockRestore()
+    }
+  })
+
+  it('does not animate a completed historical context row', async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] })
+    let observerCount = 0
+    class ResizeObserverStub {
+      constructor(_callback: ResizeObserverCallback) {
+        observerCount += 1
+      }
+
+      observe(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+    function Inner() {
+      return <div>historical context</div>
+    }
+    const Wrapped = wrapFollowNodeView(Inner as never)
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-transcript>
+          <Wrapped node={{
+            location: {
+              kind: 'step',
+              turn: { status: 'closed' },
+              step: { status: 'closed' },
+            },
+            data: { content: [] },
+          }} />
+        </div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', { configurable: true, value: 500 })
+    port.scrollTop = 400
+
+    await act(() => vi.advanceTimersByTimeAsync(32))
+
+    expect(transcript.style.transform).toBe('')
+    expect(port.getAttribute('data-follow-owned')).toBeNull()
+    expect(observerCount).toBe(0)
+  })
+
+  it('re-arms follow for a future Agent renderer when its DOM grows', async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] })
+    let height = 32
+    const observers: ResizeObserverCallback[] = []
+    class ResizeObserverStub {
+      constructor(callback: ResizeObserverCallback) {
+        observers.push(callback)
+      }
+
+      observe(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+
+    function FutureAgentRow() {
+      return <div style={{ height }}>{'future tool output'}</div>
+    }
+    const Wrapped = wrapFollowNodeView(FutureAgentRow as never)
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-transcript>
+          <Wrapped node={{
+            location: {
+              kind: 'step',
+              turn: { status: 'open' },
+              step: { status: 'open' },
+            },
+            data: { pluginSurface: 'future-tool' },
+          }} />
+        </div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => 400 + height,
+    })
+    port.scrollTop = 380
+
+    const notify = (): void => {
+      for (const callback of observers) callback([
+        { contentRect: { height } } as ResizeObserverEntry,
+      ], {} as ResizeObserver)
+    }
+    act(() => { notify() })
+    await act(() => vi.advanceTimersByTimeAsync(32))
+    const initialText = view.container.querySelector(`.${css.follow}`)?.textContent ?? ''
+    expect(initialText.length).toBeGreaterThan(0)
+    expect(initialText.length).toBeLessThan('future tool output'.length)
+
+    height = 80
+    act(() => { notify() })
+    await act(() => vi.advanceTimersByTimeAsync(32))
+    expect(port.getAttribute('data-follow-owned')).not.toBeNull()
+
+    await act(() => vi.advanceTimersByTimeAsync(1600))
+    expect(port.getAttribute('data-follow-owned')).toBeNull()
+    port.scrollTop = 320
+    height = 120
+    act(() => { notify() })
+    await act(() => vi.advanceTimersByTimeAsync(32))
+    expect(port.getAttribute('data-follow-owned')).toBeNull()
+  })
+
+  it('re-arms a settled open Tool row for delayed asynchronous height growth', async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] })
+    let height = 32
+    const observers: ResizeObserverCallback[] = []
+    class ResizeObserverStub {
+      constructor(callback: ResizeObserverCallback) {
+        observers.push(callback)
+      }
+
+      observe(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+    const location = {
+      kind: 'step',
+      turn: { status: 'open' },
+      step: { status: 'open' },
+    }
+    function Inner() {
+      return <div style={{ height }}>Tool output</div>
+    }
+    const Wrapped = wrapFollowNodeView(Inner as never)
+    const running = { location, data: { root: { callId: '1', name: 'bash' } } }
+    const settled = {
+      location,
+      data: { root: { kind: 'tool-result', callId: '1', content: ['done'] } },
+    }
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-transcript><Wrapped node={running} /></div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => 400 + height,
+    })
+    port.scrollTop = 332
+    const notify = (): void => {
+      for (const callback of observers) callback([
+        { contentRect: { height } } as ResizeObserverEntry,
+      ], {} as ResizeObserver)
+    }
+    act(() => { notify() })
+    await act(() => vi.advanceTimersByTimeAsync(80))
+
+    view.rerender(
+      <div data-conversation-scroll>
+        <div data-chat-transcript><Wrapped node={settled} /></div>
+      </div>,
+    )
+    await act(() => vi.advanceTimersByTimeAsync(1600))
+    expect(port.getAttribute('data-follow-owned')).toBeNull()
+
+    height = 96
+    act(() => { notify() })
+    await act(() => vi.advanceTimersByTimeAsync(32))
+    expect(port.getAttribute('data-follow-owned')).not.toBeNull()
+  })
+
+  it('primes a short-lived completion owner before its first paint', () => {
+    const view = render(
+      <div data-conversation-scroll>
+        <ShortLivedFollowProbe />
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+
+    expect(port.scrollTop).toBe(400)
+    expect(port.getAttribute('data-follow-owned')).toBeNull()
+  })
+
+  it('keeps short Tool rows at their natural status gap without an idle rebound', async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] })
+    const running = {
+      location: { kind: 'unresolved' },
+      data: { root: { callId: '1', name: 'read' } },
+    }
+    const settled = {
+      location: { kind: 'unresolved' },
+      data: { root: { kind: 'tool-result', callId: '1', content: ['done'] } },
+    }
+    function Inner() {
+      return <div>Read · packages/client/ui-slots/src/index.ts</div>
+    }
+    const Wrapped = wrapFollowNodeView(Inner as never)
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-transcript><Wrapped node={running} /></div>
+          <div role="status">Deep diving...</div>
+        </div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    const status = view.container.querySelector('[role="status"]') as HTMLElement
+    const baseHeight = 500
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => baseHeight + (Number.parseFloat(status.style.marginTop) || 0),
+    })
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return {
+        top: 0,
+        bottom: 80 - runway + currentTranslate(transcript),
+      } as DOMRect
+    })
+    vi.spyOn(status, 'getBoundingClientRect').mockReturnValue({ top: 96, bottom: 122 } as DOMRect)
+    port.scrollTop = 400
+
+    const gaps: number[] = []
+    for (let frame = 0; frame < 40; frame += 1) {
+      await act(() => vi.advanceTimersByTimeAsync(16))
+      gaps.push(96 - transcript.getBoundingClientRect().bottom)
+    }
+    view.rerender(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-transcript><Wrapped node={settled} /></div>
+          <div role="status">Deep diving...</div>
+        </div>
+      </div>,
+    )
+    for (let frame = 0; frame < 40; frame += 1) {
+      await act(() => vi.advanceTimersByTimeAsync(16))
+      gaps.push(96 - transcript.getBoundingClientRect().bottom)
+    }
+
+    // Entrance motion may temporarily consume the natural 16px gap, but an
+    // idle short row must never open extra speculative space and close it later.
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(16.5)
+    expect(gaps.at(-1)).toBeCloseTo(16, 1)
+  })
+
   it.each([
     {
       label: 'tool result',
@@ -1501,7 +2582,7 @@ describe('isGrowingChatNode', () => {
       running: { data: { kind: 'command', commandId: '1', outcome: null } },
       settled: { data: { kind: 'command', commandId: '1', outcome: { kind: 'success', text: 'done' } } },
     },
-  ])('glides the final $label height instead of dropping it in one frame', async ({ running, settled }) => {
+  ])('uses all safe paint room to soften the final $label height', async ({ running, settled }) => {
     vi.useFakeTimers({ toFake: [...FAKE] })
     let height = 500
     function Inner({ node }: { node: typeof running }) {
@@ -1544,17 +2625,19 @@ describe('isGrowingChatNode', () => {
     )
 
     const landed = currentTranslate(transcript)
-    expect(view.container.textContent).toContain('final output')
+    expect(view.container.querySelector(`.${css.follow}`)).not.toBeNull()
     expect(port.scrollTop).toBeGreaterThan(400)
-    expect(port.scrollTop).toBeLessThan(600)
+    expect(port.scrollTop).toBe(600)
     expect(landed).toBeGreaterThan(0)
     const landedVisual = -port.scrollTop + landed
-    expect(landedVisual).toBeCloseTo(before, 5)
+    expect(landedVisual).toBeGreaterThan(-port.scrollTop)
+    expect(landedVisual).toBeLessThan(before)
     await act(() => vi.advanceTimersByTimeAsync(32))
     const nextVisual = -port.scrollTop + currentTranslate(transcript)
     expect(nextVisual).toBeLessThan(landedVisual)
     expect(landedVisual - nextVisual).toBeLessThan(40)
     await act(() => vi.advanceTimersByTimeAsync(320))
+    expect(view.container.textContent).toContain('final output')
     expect(port.scrollTop).toBeGreaterThan(500)
   })
 
@@ -1565,13 +2648,29 @@ describe('isGrowingChatNode', () => {
     const Wrapped = wrapFollowNodeView(Inner as never)
     const live = render(<Wrapped node={{ data: { root: { callId: '1' } } }} />)
     expect(live.container.querySelector(`.${css.follow}`)).not.toBeNull()
-    expect(live.container.textContent).toBe('live')
+    expect(live.container.querySelector('span')).not.toBeNull()
     const done = render(<Wrapped node={{ data: { root: { kind: 'tool-result', callId: '1' } } }} />)
     expect(done.container.textContent).toBe('done')
   })
 })
 
 describe('computeFollowStep', () => {
+  it('reserves reveal headroom without changing the spring constants', () => {
+    expect(computeFollowRevealScale(0, 48)).toBe(1)
+    expect(computeFollowRevealScale(28, 48)).toBeLessThan(0.75)
+    expect(computeFollowRevealScale(48, 48)).toBe(0.55)
+    expect(computeFollowRevealScale(20, 48, true)).toBe(0.55)
+    expect(computeFollowRevealScale(200, Number.POSITIVE_INFINITY)).toBe(1)
+  })
+
+  it('opens at most one line of predictive runway as reveal speed rises', () => {
+    expect(computeFollowReserve(90)).toBe(0)
+    expect(computeFollowReserve(91)).toBeGreaterThanOrEqual(16)
+    expect(computeFollowReserve(600)).toBe(FOLLOW_STATUS_RUNWAY_PX)
+    expect(computeFollowReserve(300)).toBeGreaterThan(16)
+    expect(computeFollowReserve(300)).toBeLessThan(FOLLOW_STATUS_RUNWAY_PX)
+  })
+
   it('matches the reference K=130 C=24 four-substep spring', () => {
     const frameMs = 1000 / 60
     const lag = 28

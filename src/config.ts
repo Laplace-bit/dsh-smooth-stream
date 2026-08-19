@@ -7,12 +7,12 @@
 
 import type { StreamSmoothingPreset } from './client/useSmoothStreamContent.ts'
 
-/** Streaming render direction of the assistant node view. */
+/** Legacy render-mode value retained so existing overlays remain valid. */
 export type StreamMode = 'typewriter' | 'teleprompter'
 
 /** Plugin configuration validated by the Host schema and bridged to the browser half. */
 export interface StreamConfig {
-  /** Render direction: horizontal per-character reveal or uniform upward glide. */
+  /** Compatibility field; both values use the current adaptive reveal engine. */
   readonly mode: StreamMode
   /** Smoothing preset for the reveal cadence. */
   readonly preset: StreamSmoothingPreset
@@ -26,10 +26,7 @@ export interface StreamConfig {
    * smooth-damp, not a cruise speed.
    */
   readonly scrollSpeedPxPerSec: number
-  /**
-   * Follow velocity ceiling in CSS pixels per second, so a huge first lag
-   * does not teleport. Ordinary wraps stay well below this.
-   */
+  /** Unused at runtime; retained so existing overlays continue to load. */
   readonly maxScrollSpeedPxPerSec: number
 }
 

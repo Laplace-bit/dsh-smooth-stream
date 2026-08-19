@@ -28,8 +28,21 @@ type AssistantProps = ChatNodeViewProps<'assistant-step'>
 const STREAM_MODES: readonly string[] = ['typewriter', 'teleprompter']
 const STREAM_PRESETS: readonly string[] = ['realtime', 'balanced', 'silky']
 
-/** Human-authored rows stay on the built-in renderer; `assistant-step` is replaced. */
+/**
+ * The assistant renderer owns its own character queue and conversation
+ * follower, so wrapping it again would create two scroll owners. Human input
+ * stays immediate; every Agent-owned output renderer goes through the same
+ * generic follow boundary. This is deliberately keyed by the owner that
+ * provides the renderer, not by individual tool names, so new Context,
+ * Command, and Tool rows are covered automatically.
+ */
 const SKIP_WRAP = new Set(['assistant-step', 'user', 'steering', 'command-input'])
+
+/** React function/class or an exotic component such as memo/forwardRef/lazy. */
+function isWrappableComponent(value: unknown): value is ComponentType<FollowWrapProps> {
+  return typeof value === 'function'
+    || (value !== null && typeof value === 'object' && '$$typeof' in value)
+}
 
 /**
  * Read the Host-bridged boot config. The inline script is produced by this
@@ -60,16 +73,19 @@ function readBootConfig(): StreamConfig {
 }
 
 /**
- * Wrap every keyed Chat row except `assistant-step` in place. A second
+ * Wrap every Agent-owned keyed Chat row except the assistant renderer in
+ * place. A second
  * register with the same `children` table throws because the child slot is
  * already declared, and only the winning entry receives `renderSlot`;
  * swapping `entry.component` keeps the original children, locale, and inject
  * seats. `assistant-step` is replaced below so text and Think use the
- * typewriter reveal.
+ * typewriter reveal. The wrapper owns only the shared layout-growth/follow
+ * lifecycle; the Harness keeps each renderer's controls, disclosures, and
+ * cards intact.
  * @param ctx - Browser context carrying the slot registry.
  * @returns Restorer that puts the original components back.
  */
-function wrapGrowingChatRows(ctx: ClientContext): () => void {
+function wrapAgentChatRows(ctx: ClientContext): () => void {
   const restores: Array<() => void> = []
   const wrapped = new WeakSet<object>()
 
@@ -78,7 +94,7 @@ function wrapGrowingChatRows(ctx: ClientContext): () => void {
       const key = entry.options.key
       if (key === undefined || SKIP_WRAP.has(key)) continue
       const current = entry.component
-      if (typeof current !== 'function' || wrapped.has(current)) continue
+      if (!isWrappableComponent(current) || wrapped.has(current)) continue
       const inner = current as ComponentType<FollowWrapProps>
       const next = wrapFollowNodeView(inner)
       wrapped.add(next)
@@ -145,8 +161,9 @@ class PreferenceCell {
 /**
  * Register the typewriter renderer after the conversation package declares the
  * keyed Chat node seat. A lower priority shadows the built-in assistant row;
- * every other growing row is wrapped in place so Tool cards, retries, and
- * workflow runs share conversation follow. The Host-bridged configuration
+ * every other keyed renderer is wrapped in place so Context, commands, Tool
+ * cards, retries, and workflow runs share one extensible follow boundary. The
+ * Host-bridged configuration
  * selects the render direction, smoothing preset, and glide speed; the
  * plugin-owned settings RPC supplies the live auto-expand preference when the
  * settings surface is composed.
@@ -199,7 +216,7 @@ export function apply(ctx: ClientContext): void {
     })
   }
   ctx.slots.inject('conversation.chat.node', () => {
-    const unwrap = wrapGrowingChatRows(ctx)
+    const unwrap = wrapAgentChatRows(ctx)
     const unshadow = ctx.slots.register({
       name: 'conversation.chat.node',
       key: 'assistant-step',

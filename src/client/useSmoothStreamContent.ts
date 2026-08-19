@@ -13,7 +13,7 @@
  * competes with visible frames when the frame rate is degraded.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 export type StreamSmoothingPreset = 'realtime' | 'balanced' | 'silky'
 
@@ -112,13 +112,19 @@ export interface AdaptiveQueueStep {
 }
 
 /** Float-debt queue integration from `ultimate_stream_physics_scroller.html`. */
-export function computeAdaptiveQueueStep(backlog: number, dtMs: number, debt: number): AdaptiveQueueStep {
+export function computeAdaptiveQueueStep(
+  backlog: number,
+  dtMs: number,
+  debt: number,
+  revealScale = 1,
+): AdaptiveQueueStep {
   if (backlog <= 0 || dtMs <= 0) return { revealChars: 0, debt: 0, speedCps: 0 }
   const speedCps = Math.min(
     QUEUE_MAX_SPEED_CPS,
     QUEUE_BASE_SPEED_CPS + Math.pow(backlog, QUEUE_ACCEL_EXPONENT) * QUEUE_PRESSURE_FACTOR,
   )
-  const accumulated = Math.max(0, debt) + speedCps * (dtMs / 1000)
+  const effectiveScale = clamp(revealScale, 0.05, 1)
+  const accumulated = Math.max(0, debt) + speedCps * effectiveScale * (dtMs / 1000)
   const revealChars = Math.min(backlog, Math.floor(accumulated))
   return { revealChars, debt: revealChars >= backlog ? 0 : accumulated - revealChars, speedCps }
 }
@@ -159,6 +165,20 @@ export function computeSettleDrain(config: StreamSmoothingPresetConfig, input: S
   const drainTargetMs = clamp(input.backlog * 8, config.settleDrainMinMs, config.settleDrainMaxMs)
   const settleCps = (input.backlog * 1000) / drainTargetMs
   return clamp(Math.max(settleCps, overflowCps), config.flushCps, config.maxFlushCps)
+}
+
+/** Fixed velocity that closes a producer-complete queue within its deadline. */
+export function computeCompletionDrain(
+  config: StreamSmoothingPresetConfig,
+  backlog: number,
+): number {
+  if (backlog <= 0) return 0
+  const drainTargetMs = clamp(backlog * 8, config.settleDrainMinMs, config.settleDrainMaxMs)
+  const deadlineCps = (backlog * 1000) / drainTargetMs
+  return Math.max(
+    deadlineCps,
+    computeSettleDrain(config, { backlog, inputActive: false, settling: true }),
+  )
 }
 
 /**
@@ -219,14 +239,16 @@ export function computeRevealStep(config: StreamSmoothingPresetConfig, input: Re
 
 export interface UseSmoothStreamContentOptions {
   enabled?: boolean
+  /** The producer has completed; drain queued text without live backpressure. */
+  inputComplete?: boolean
   preset?: StreamSmoothingPreset
   /** Performance guard veto: while true, reveal commits are held back. */
   shouldHoldBack?: (() => boolean) | undefined
   /**
    * Fixed reveal rate in chars/s. When set, the reveal runs at this steady
    * pace while the input streams (instead of tracking the arrival rate) and
-   * drains the leftover backlog at {@link SETTLE_DRAIN_MULTIPLIER} once the
-   * input ends.
+   * drains an inferred idle backlog at {@link SETTLE_DRAIN_MULTIPLIER}.
+   * Explicit producer completion still uses the bounded completion drain.
    */
   steadyCps?: number | undefined
   /**
@@ -236,6 +258,8 @@ export interface UseSmoothStreamContentOptions {
   defaultCps?: number | undefined
   /** Written each commit with the live arrival-rate EMA for the follow lerp. */
   speedCpsRef?: { current: number } | undefined
+  /** Live multiplier from the follow spring when safe visual lag is filling. */
+  revealScaleRef?: { current: number } | undefined
 }
 
 /**
@@ -247,7 +271,16 @@ export interface UseSmoothStreamContentOptions {
  */
 export function useSmoothStreamContent(
   content: string,
-  { enabled = true, preset = 'balanced', shouldHoldBack, steadyCps, defaultCps, speedCpsRef }: UseSmoothStreamContentOptions = {},
+  {
+    enabled = true,
+    inputComplete = false,
+    preset = 'balanced',
+    shouldHoldBack,
+    steadyCps,
+    defaultCps,
+    speedCpsRef,
+    revealScaleRef,
+  }: UseSmoothStreamContentOptions = {},
 ): string {
   const config = PRESET_CONFIG[preset]
   const seedCps = defaultCps ?? config.defaultCps
@@ -272,9 +305,14 @@ export function useSmoothStreamContent(
   const rafRef = useRef<number | null>(null)
   const lastFrameTsRef = useRef<number | null>(null)
   const queueDebtRef = useRef(0)
+  const settleCpsRef = useRef<number | null>(null)
   const holdBackRef = useRef(shouldHoldBack)
   const speedOutRef = useRef(speedCpsRef)
   speedOutRef.current = speedCpsRef
+  const revealScaleOutRef = useRef(revealScaleRef)
+  revealScaleOutRef.current = revealScaleRef
+  const inputCompleteRef = useRef(inputComplete)
+  inputCompleteRef.current = inputComplete
 
   useEffect(() => {
     holdBackRef.current = shouldHoldBack
@@ -301,6 +339,9 @@ export function useSmoothStreamContent(
       displayedContentRef.current = nextContent
       displayedCountRef.current = chars.length
       queueDebtRef.current = 0
+      settleCpsRef.current = null
+      const speedOut = speedOutRef.current
+      if (speedOut !== undefined) speedOut.current = seedCps
       setDisplayedContent(nextContent)
       emaCpsRef.current = seedCps
       chunkSizeEmaRef.current = 1
@@ -310,6 +351,15 @@ export function useSmoothStreamContent(
     },
     [seedCps, stopFrameLoop],
   )
+
+  // Producer completion is authoritative. Publish the accumulated source in
+  // the same commit instead of leaving a visible typewriter tail after the
+  // Agent has already stopped; the conversation follower still glides any
+  // resulting layout height before paint.
+  useLayoutEffect(() => {
+    if (!enabled || !inputComplete || displayedContentRef.current === content) return
+    syncImmediate(content)
+  }, [content, enabled, inputComplete, syncImmediate])
 
   const startFrameLoop = useCallback(() => {
     if (rafRef.current !== null) return
@@ -321,6 +371,9 @@ export function useSmoothStreamContent(
 
       if (backlog <= 0) {
         queueDebtRef.current = 0
+        settleCpsRef.current = null
+        const speedOut = speedOutRef.current
+        if (speedOut !== undefined) speedOut.current = seedCps
         stopFrameLoop()
         return
       }
@@ -336,13 +389,26 @@ export function useSmoothStreamContent(
       lastFrameTsRef.current = now
 
       const idleMs = now - lastInputTsRef.current
-      const inputActive = idleMs <= config.activeInputWindowMs
-      const settling = !inputActive && idleMs >= config.settleAfterMs
+      const producerComplete = inputCompleteRef.current
+      const inputActive = !producerComplete && idleMs <= config.activeInputWindowMs
+      const settling = producerComplete || (!inputActive && idleMs >= config.settleAfterMs)
+      if (!producerComplete) settleCpsRef.current = null
 
       let revealChars: number
       let revealSpeedCps: number
       let nextQueueDebt = 0
-      if (steadyCps !== undefined) {
+      if (producerComplete) {
+        // Backpressure protects live layout. Once input has ended, retaining
+        // that scale only makes a completed response keep typing onscreen.
+        // Keep one drain velocity for the whole completion tail. Recomputing
+        // it from the shrinking backlog creates an exponential slow tail.
+        const settleCps = settleCpsRef.current ?? computeCompletionDrain(config, backlog)
+        settleCpsRef.current = settleCps
+        const accumulated = Math.max(0, queueDebtRef.current) + settleCps * dtSeconds
+        revealChars = Math.min(backlog, Math.floor(accumulated))
+        revealSpeedCps = settleCps
+        nextQueueDebt = revealChars >= backlog ? 0 : accumulated - revealChars
+      } else if (steadyCps !== undefined) {
         const step = computeRevealStep(
           config,
           {
@@ -359,7 +425,12 @@ export function useSmoothStreamContent(
         revealChars = Math.min(step.revealChars, backlog)
         revealSpeedCps = frameIntervalMs > 0 ? (revealChars * 1000) / frameIntervalMs : 0
       } else {
-        const step = computeAdaptiveQueueStep(backlog, frameIntervalMs, queueDebtRef.current)
+        const step = computeAdaptiveQueueStep(
+          backlog,
+          frameIntervalMs,
+          queueDebtRef.current,
+          revealScaleOutRef.current?.current ?? 1,
+        )
         revealChars = step.revealChars
         revealSpeedCps = step.speedCps
         nextQueueDebt = step.debt
@@ -430,6 +501,7 @@ export function useSmoothStreamContent(
     targetContentRef.current = content
     targetCharsRef.current.push(...appendedChars)
     targetCountRef.current += appendedCount
+    settleCpsRef.current = null
 
     const hadSample = lastInputTsRef.current > 0
     const deltaChars = targetCountRef.current - lastInputCountRef.current

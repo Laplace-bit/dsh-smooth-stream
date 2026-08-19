@@ -1,0 +1,61 @@
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+body { font: 14px/1.5 -apple-system, "PingFang SC", sans-serif; background: #f7f7f8; color: #111; }
+
+.root { display: flex; flex-direction: column; height: 100%; }
+
+.toolbar {
+  display: flex; gap: 8px; align-items: center; padding: 8px 12px;
+  background: #1e1e2e; color: #ddd; flex-wrap: wrap;
+}
+.toolbar button {
+  font: inherit; padding: 4px 10px; border: 0; border-radius: 6px;
+  background: #4c4f69; color: #fff; cursor: pointer;
+}
+.toolbar button.primary { background: #1a98ff; }
+.toolbar button:disabled { opacity: .4; cursor: default; }
+.toolbar label { font-size: 12px; opacity: .8; }
+.toolbar input[type="range"] { width: 120px; }
+
+.stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1px; background: #dfe1e6; font-variant-numeric: tabular-nums;
+  font-size: 12px; border-bottom: 1px solid #dfe1e6;
+}
+.stats .cell { background: #fff; padding: 4px 10px; }
+.stats .cell b { display: block; font-size: 15px; }
+.stats .cell.bad { background: #ffe2e2; color: #a00; }
+.stats .cell.warn { background: #fff3d6; }
+
+.scrollBody { flex: 1; overflow-y: auto; position: relative; background: #fff; }
+.scrollBody:focus { outline: none; }
+
+.column { max-width: 720px; margin: 0 auto; padding: 16px 20px; }
+
+.msg { margin: 10px 0; padding: 10px 14px; border-radius: 10px; }
+.msg.user { background: #e8f1ff; }
+.msg.assistant { background: #f4f4f5; }
+
+.streamText { white-space: pre-wrap; word-break: break-all; line-height: 28px; font-size: 16px; }
+
+.statusRow {
+  display: flex; align-items: center; gap: 8px; padding: 10px 4px;
+  color: #666; font-size: 13px;
+}
+.dots::after { content: '…'; animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+
+.composerSeat {
+  position: sticky; bottom: 0; background: #fff; border-top: 1px solid #e3e3e6;
+  padding: 10px 16px; display: flex; gap: 8px;
+}
+.composerSeat input {
+  flex: 1; font: inherit; padding: 8px 12px; border: 1px solid #d3d5da;
+  border-radius: 8px;
+}
+
+.toBottomBtn {
+  position: absolute; right: 20px; bottom: 84px; z-index: 5;
+  padding: 6px 12px; border: 0; border-radius: 999px; background: #1a98ff;
+  color: #fff; box-shadow: 0 2px 8px rgb(0 0 0 / 20%); cursor: pointer;
+}

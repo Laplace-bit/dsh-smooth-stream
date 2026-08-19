@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { IconThinkOutline14, JsonBlock, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ImageGallery, type ImageLoader, type MessageImageLabels } from '@deepseek-ai/dsh-client-ui-attachment'
 import type { ChatNodeViewProps, TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -32,8 +32,71 @@ interface AnimatedMarkdownTextProps extends MarkdownProps {
   announce: boolean
   /** True on the last text block: that block owns conversation follow. */
   ownFollow: boolean
+  followSpeedCpsRef?: { current: number } | undefined
+  followRevealScaleRef?: { current: number } | undefined
+  onPredictiveChange?: ((predictive: boolean) => void) | undefined
   preset: StreamSmoothingPreset
   shouldHoldBack: () => boolean
+}
+
+/** Conservative fallback before the streaming Markdown tail has geometry. */
+const PREDICTIVE_WRAP_FALLBACK_CHARS = 32
+
+function approximateInlineWidth(text: string, emPx: number): number {
+  let width = 0
+  for (const char of text) {
+    if (/\s/u.test(char)) width += emPx * 0.33
+    else if (/^[\x00-\x7f]$/u.test(char)) width += emPx * 0.56
+    else width += emPx
+  }
+  return width
+}
+
+/** Whether buffered source can reach a new visual line before it drains. */
+function pendingTextCanGrow(root: HTMLElement | null, pending: string): boolean {
+  if (pending === '') return false
+  if (/[\r\n]/u.test(pending)) return true
+  const pendingChars = [...pending]
+  if (
+    root === null
+    || typeof document.createTreeWalker !== 'function'
+    || typeof NodeFilter === 'undefined'
+  ) {
+    return pendingChars.length >= PREDICTIVE_WRAP_FALLBACK_CHARS
+  }
+
+  const rootRect = root.getBoundingClientRect()
+  const rootWidth = Math.max(0, rootRect.width, rootRect.right - rootRect.left, root.clientWidth)
+  if (rootWidth <= 0) return pendingChars.length >= PREDICTIVE_WRAP_FALLBACK_CHARS
+
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let tail: Text | null = null
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    if ((node.textContent ?? '').length > 0) tail = node as Text
+  }
+  const parent = tail?.parentElement ?? root
+  const fontSize = Number.parseFloat(getComputedStyle(parent).fontSize) || 14
+  const pendingWidth = approximateInlineWidth(pending, fontSize)
+  if (tail === null || typeof document.createRange !== 'function') {
+    return pendingWidth >= rootWidth
+  }
+
+  try {
+    const length = tail.textContent?.length ?? 0
+    if (length <= 0) return pendingWidth >= rootWidth
+    const range = document.createRange()
+    range.setStart(tail, Math.max(0, length - 1))
+    range.setEnd(tail, length)
+    const tailRect = range.getBoundingClientRect()
+    const contentRight = rootRect.right
+    if (!Number.isFinite(tailRect.right) || tailRect.right <= rootRect.left || contentRight <= rootRect.left) {
+      return pendingWidth >= rootWidth
+    }
+    const remainingWidth = Math.max(0, contentRight - tailRect.right)
+    return pendingWidth >= remainingWidth + fontSize * 0.35
+  } catch {
+    return pendingWidth >= rootWidth
+  }
 }
 
 /**
@@ -54,20 +117,43 @@ function AnimatedMarkdownText({
   streaming,
   announce,
   ownFollow,
+  followSpeedCpsRef,
+  followRevealScaleRef,
+  onPredictiveChange,
   preset,
   shouldHoldBack,
 }: AnimatedMarkdownTextProps) {
   const reduced = usePrefersReducedMotion()
   const [typing, setTyping] = useState(streaming)
-  const speedCpsRef = useRef(35)
+  const localSpeedCpsRef = useRef(35)
+  const followRootRef = useRef<HTMLDivElement>(null)
+  const predictionSourceRef = useRef<string | null>(null)
+  const predictionStateRef = useRef(false)
+  const speedCpsRef = followSpeedCpsRef ?? localSpeedCpsRef
   const displayed = useSmoothStreamContent(text, {
     enabled: typing && !reduced,
+    inputComplete: !streaming,
     preset,
     shouldHoldBack,
     speedCpsRef,
+    revealScaleRef: followRevealScaleRef,
   })
   const shown = reduced ? text : displayed
   const live = typing && !reduced
+
+  useLayoutEffect(() => {
+    if (onPredictiveChange === undefined) return
+    const pending = text.slice(shown.length)
+    const sourceChanged = predictionSourceRef.current !== text
+    const next = !live || !streaming || pending === ''
+      ? false
+      : sourceChanged
+        ? pendingTextCanGrow(followRootRef.current, pending)
+        : predictionStateRef.current
+    predictionSourceRef.current = text
+    predictionStateRef.current = next
+    onPredictiveChange(next)
+  }, [live, onPredictiveChange, shown, streaming, text])
 
   // The stream closed: keep revealing the remaining queue, then swap to the
   // settled parse exactly once. The markdown tree stays mounted until then.
@@ -78,7 +164,13 @@ function AnimatedMarkdownText({
   return (
     <>
       {live && announce && <span className={css.visuallyHidden} aria-live="polite">{text}</span>}
-      <FollowHost active={live && ownFollow} speedCpsRef={speedCpsRef}>
+      <FollowHost
+        active={live && ownFollow}
+        speedCpsRef={speedCpsRef}
+        revealScaleRef={followRevealScaleRef}
+        predictive={streaming}
+        hostRef={followRootRef}
+      >
         <MarkdownText
           text={live ? shown : text}
           streaming={live}
@@ -131,6 +223,8 @@ function AnimatedReasoning({
   thinkAutoExpand,
   shouldHoldBack,
   followSpeedCpsRef,
+  followRevealScaleRef,
+  onExpandedChange,
   t,
 }: {
   text: string
@@ -139,6 +233,8 @@ function AnimatedReasoning({
   thinkAutoExpand: boolean
   shouldHoldBack: () => boolean
   followSpeedCpsRef?: { current: number } | undefined
+  followRevealScaleRef?: { current: number } | undefined
+  onExpandedChange?: ((expanded: boolean) => void) | undefined
   t: AssistantProps['t']
 }) {
   const reduced = usePrefersReducedMotion()
@@ -149,15 +245,20 @@ function AnimatedReasoning({
     preset,
     shouldHoldBack,
     speedCpsRef: followSpeedCpsRef,
+    revealScaleRef: followRevealScaleRef,
   })
   const shown = running && !reduced ? displayed : text
   const summary = running ? latestLine(shown) : firstLine(text)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     // Only the running state owns disclosure while auto-expand is on; with it
     // off, a manual toggle is never wrestled back by the stream.
     if (thinkAutoExpand) setExpanded(running)
   }, [running, thinkAutoExpand])
+
+  useLayoutEffect(() => {
+    onExpandedChange?.(expanded)
+  }, [expanded, onExpandedChange])
 
   useEffect(() => {
     const element = summaryRef.current
@@ -229,10 +330,26 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   const reduced = usePrefersReducedMotion()
   const { ref: guardRef, shouldHoldBack } = useFpsGuard(streaming)
   const rootSpeedRef = useRef(35)
-  const reasoningOwnsSpeed = streaming && data.blocks[data.blocks.length - 1]?.kind === 'reasoning'
-  useEffect(() => {
+  const rootRevealScaleRef = useRef(1)
+  const reasoningTailIndex = streaming && data.blocks[data.blocks.length - 1]?.kind === 'reasoning'
+    ? data.blocks.length - 1
+    : -1
+  const reasoningOwnsSpeed = reasoningTailIndex !== -1
+  const rootPredictiveRef = useRef(false)
+  const previousReasoningTailRef = useRef(-1)
+  if (reasoningTailIndex !== previousReasoningTailRef.current) {
+    rootPredictiveRef.current = reasoningOwnsSpeed ? thinkAutoExpand : false
     if (!reasoningOwnsSpeed) rootSpeedRef.current = 35
-  }, [reasoningOwnsSpeed])
+    previousReasoningTailRef.current = reasoningTailIndex
+  }
+  const updateReasoningExpanded = useMemo(
+    () => (expanded: boolean): void => { rootPredictiveRef.current = expanded },
+    [],
+  )
+  const updateTextPrediction = useMemo(
+    () => (predictive: boolean): void => { rootPredictiveRef.current = predictive },
+    [],
+  )
   const turn = node.location.kind === 'turn' || node.location.kind === 'step'
     ? node.location.turn
     : undefined
@@ -276,6 +393,9 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
             streaming={streaming}
             announce={index === last}
             ownFollow={!streaming && index === lastFollow}
+            followSpeedCpsRef={index === lastFollow ? rootSpeedRef : undefined}
+            followRevealScaleRef={index === lastFollow ? rootRevealScaleRef : undefined}
+            onPredictiveChange={index === lastFollow ? updateTextPrediction : undefined}
             preset={preset}
             shouldHoldBack={shouldHoldBack}
           />,
@@ -291,6 +411,8 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
             thinkAutoExpand={thinkAutoExpand}
             shouldHoldBack={shouldHoldBack}
             followSpeedCpsRef={reasoningOwnsSpeed && index === last ? rootSpeedRef : undefined}
+            followRevealScaleRef={reasoningOwnsSpeed && index === last ? rootRevealScaleRef : undefined}
+            onExpandedChange={index === reasoningTailIndex ? updateReasoningExpanded : undefined}
             t={t}
           />,
         )
@@ -326,7 +448,12 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
 
   return (
     <div ref={guardRef} className={css.root} data-streaming={streaming || undefined}>
-      <FollowHost active={streaming && !reduced} speedCpsRef={rootSpeedRef}>
+      <FollowHost
+        active={streaming && !reduced}
+        speedCpsRef={rootSpeedRef}
+        revealScaleRef={rootRevealScaleRef}
+        predictiveRef={rootPredictiveRef}
+      >
         <div className={css.body}>
           {rendered}
           {data.status === 'interrupted' && <span className={css.stopped}>{t('message.stopped')}</span>}
