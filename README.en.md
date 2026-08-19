@@ -14,15 +14,17 @@ Left: default Web UI. Right: dsh-smooth-stream.
 
 ![Left: without the plugin. Right: with dsh-smooth-stream.](docs/compare.gif)
 
-## What it does
+## Current behavior
 
-- **Reveal tracks the model.** Assistant text appears at a cadence that follows the arrival rate. Fast bursts do not dump a whole paragraph; a slow stream does not sit still and then jump.
-- **Markdown stays markdown.** Code, emphasis, and the rest render while the reply is still coming. There is no plain-text tail that later swaps into formatted markdown.
-- **Wraps glide in.** A new line or a growing tool card eases into view instead of snapping the transcript up by a line.
-- **You keep the scroll.** Scroll up to read earlier text and the overlay lets go. Follow resumes only when you return to the bottom — the to-bottom button counts.
-- **Think stays the built-in row.** Reasoning uses the usual disclosure. It opens while thinking is the live tail and closes when thinking ends; the chevron still toggles by hand.
-- **The rest of the turn moves with it.** Running tool cards, model retries, and workflow runs share the same follow, so the whole turn slides instead of only the assistant text.
-- **It backs off when it should.** `prefers-reduced-motion` shows the finished text at once and does not take follow. If the frame rate drops below 30 fps and the reply is off-screen, reveal pauses and catches up when the view is healthy again.
+- **The whole Agent turn uses one extensible pipeline.** Assistant text, Think, Context, Retry, Command, Bash, Glob, Read, tool calls, and newly registered renderers all enter progressive reveal and bottom-follow through the same boundary, without a tool-name allowlist.
+- **Reveal speed adapts to queue pressure.** Small updates keep a soft cadence while large or fast bursts catch up promptly. Once the producer completes, remaining source is committed immediately instead of continuing to type long after the Agent has stopped.
+- **Markdown remains mounted throughout streaming.** Code blocks, tables, emphasis, and other formatting do not begin as plain text and later swap trees. Historical messages also do not replay their reveal animation when remounted.
+- **Scroll room opens only when a wrap is actually likely.** The predictor combines buffered source with the current line's remaining width before opening its runway. Long replies still absorb line wraps smoothly, while a short same-line answer after Think does not pre-scroll and rebound.
+- **Conversation chrome stays fixed.** `Deep diving...`, the composer, and the to-bottom button never ride the message transform. Fast output and low-frame-rate catch-up cannot paint through the status row or disappear behind the composer.
+- **One continuous spring owns motion.** The engine carries velocity and displacement between frames instead of repeatedly starting native smooth-scroll calls. Line wraps, code, tables, and growing tool rows converge along the same trajectory; completion lands on the natural floor and retires temporary state without a flash or overshoot rebound.
+- **Reader input wins immediately.** A small upward wheel, touch, or keyboard gesture releases automatic follow. Ownership returns only after the reader actually reaches the bottom again.
+- **Think respects the user's preference.** With auto-expand enabled it keeps the Harness disclosure interaction and collapses when thinking ends. With it disabled, collapsed reasoning can keep updating without fake height motion, and a manual toggle is not wrestled back by stream state.
+- **Performance guards preserve the final position.** `prefers-reduced-motion` shows complete content without taking follow. Off-screen DOM commits pause under low FPS, then catch up under control and still finish exactly at the bottom.
 
 ## Install
 
@@ -60,7 +62,7 @@ The bundle installs with `preset: balanced`. Change it in the profile `cordis.pa
 | `balanced` | Default |
 | `silky` | More buffer, slower catch-up |
 
-`maxScrollSpeedPxPerSec` (default `1000`) is a ceiling so the first large lag does not teleport.
+Legacy `mode`, `revealCharsPerSec`, `scrollSpeedPxPerSec`, and `maxScrollSpeedPxPerSec` fields are still accepted so existing profiles keep loading; the current adaptive engine uses only `preset` to tune cadence.
 
 ## User settings
 

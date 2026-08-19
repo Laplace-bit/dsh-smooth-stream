@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>dsh-smooth-stream – DeepSeek Harness (dsh) 丝滑流式渲染插件 | Silky streaming Web UI plugin</title>
 <meta name="description" content="dsh-smooth-stream 是 DeepSeek Harness (dsh) 的社区插件，为 Web 对话带来丝滑流式渲染：打字机跟随模型速率、Markdown 边流边渲染、换行滑入、不闪烁。A community plugin for the DeepSeek Harness (dsh) Web UI: arrival-tracking typewriter reveal, live Markdown rendering, glide-in wraps, zero flicker.">
-<meta name="keywords" content="dsh-smooth-stream, dsh plugin, dsh 插件, DeepSeek Harness, deepseek-harness plugin, deepseek streaming, 丝滑流式渲染, smooth streaming, streaming markdown, typewriter effect, AI chat UI, cordis plugin">
+<meta name="keywords" content="dsh-smooth-stream, dsh plugin, dsh 插件, DeepSeek Harness, deepseek-harness plugin, deepseek streaming, 丝滑流式渲染, smooth streaming, streaming markdown, typewriter effect, AI chat UI, cordis plugin, open source deepseek plugin">
 <meta name="author" content="Laplace-bit">
 <link rel="canonical" href="https://laplace-bit.github.io/dsh-smooth-stream/">
 
@@ -17,6 +17,7 @@
 <meta property="og:image" content="https://laplace-bit.github.io/dsh-smooth-stream/og-image.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="710">
+<meta property="og:image:alt" content="dsh-smooth-stream 前后对比：默认流式输出 vs 丝滑流式渲染。Before/after comparison of default streaming vs dsh-smooth-stream.">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:locale:alternate" content="en_US">
 
@@ -37,13 +38,14 @@
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Linux, macOS, Windows",
   "programmingLanguage": "TypeScript",
-  "softwareVersion": "0.1.0",
+  "softwareVersion": "0.3.2",
   "isAccessibleForFree": true,
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "license": "https://spdx.org/licenses/MIT",
   "author": { "@type": "Person", "name": "Laplace-bit", "url": "https://github.com/Laplace-bit" },
   "sameAs": [
     "https://github.com/Laplace-bit/dsh-smooth-stream",
+    "https://www.npmjs.com/package/dsh-smooth-stream",
     "https://github.com/deepseek-ai/deepseek-harness"
   ]
 }
@@ -61,7 +63,7 @@
     {
       "@type": "Question",
       "name": "怎么安装 dsh-smooth-stream 插件？",
-      "acceptedAnswer": { "@type": "Answer", "text": "在 DeepSeek Harness 源码目录运行：pnpm dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream。首次安装需要按 pnpm ≥10 提示在 ~/.dsh/profiles/web/pnpm-workspace.yaml 中允许 dsh-smooth-stream 的构建脚本，然后重新执行同一条命令。" }
+      "acceptedAnswer": { "@type": "Answer", "text": "在 DeepSeek Harness 源码目录运行：pnpm dsh plugin --profile web add dsh-smooth-stream。如果 PATH 上已有 dsh，也可以运行 dsh plugin --profile web add dsh-smooth-stream。npm 包自带预构建 lib/，无需额外授权构建脚本。" }
     },
     {
       "@type": "Question",
@@ -76,7 +78,7 @@
     {
       "@type": "Question",
       "name": "Can dsh-smooth-stream be installed from npm?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Currently the plugin is installed from GitHub via the dsh plugin command (github:Laplace-bit/dsh-smooth-stream). Watch the GitHub repository for npm availability." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. dsh-smooth-stream is published to npm. Run pnpm dsh plugin --profile web add dsh-smooth-stream (or dsh plugin --profile web add dsh-smooth-stream). The package ships prebuilt lib/, so no pnpm >=10 build-script allowance is needed." }
     }
   ]
 }
@@ -164,8 +166,8 @@ A community plugin for the DeepSeek Harness (dsh) Web UI — silky streaming: ar
 <section id="install">
 <div class="wrap">
 <h2>安装 <small>Install</small></h2>
-<pre><code>pnpm dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream</code></pre>
-<p class="note">首次 <code>add</code> 失败是正常的：pnpm ≥10 会拦截 <code>prepare</code> 脚本，按提示把 <code>dsh-smooth-stream</code> 加入 <code>~/.dsh/profiles/web/pnpm-workspace.yaml</code> 的 <code>onlyBuiltDependencies</code>，再执行一次同一条命令。然后 <code>pnpm dsh web</code> 启动，Host 日志出现 <code>[dsh-smooth-stream] plugin loaded!</code> 即成功。</p>
+<pre><code>pnpm dsh plugin --profile web add dsh-smooth-stream</code></pre>
+<p class="note">npm 包自带预构建的 <code>lib/</code>，不需要 pnpm ≥10 的构建脚本授权；如果 <code>PATH</code> 上已经有 <code>dsh</code>，可直接运行 <code>dsh plugin --profile web add dsh-smooth-stream</code>。然后 <code>pnpm dsh web</code> 启动，Host 日志出现 <code>[dsh-smooth-stream] plugin loaded!</code> 即成功。</p>
 </div>
 </section>
 
@@ -178,7 +180,7 @@ A community plugin for the DeepSeek Harness (dsh) Web UI — silky streaming: ar
 <tr><td><code>balanced</code></td><td>默认 / Default</td></tr>
 <tr><td><code>silky</code></td><td>缓冲更大，追上更慢 / More buffer, slower catch-up</td></tr>
 </table>
-<p class="note"><code>maxScrollSpeedPxPerSec</code>（默认 1000）限制滚动速度上限，避免首次大滞后时瞬移。</p>
+<p class="note">旧版 <code>mode</code>、<code>revealCharsPerSec</code>、<code>scrollSpeedPxPerSec</code> 和 <code>maxScrollSpeedPxPerSec</code> 字段仍可加载以兼容已有 profile；当前自适应引擎仅使用 <code>preset</code> 调整节拍。</p>
 </div>
 </section>
 
@@ -191,7 +193,7 @@ A community plugin for the DeepSeek Harness (dsh) Web UI — silky streaming: ar
 </details>
 <details>
 <summary>怎么安装 dsh 插件？</summary>
-<p>在 DeepSeek Harness 源码目录运行 <code>pnpm dsh plugin --profile web add github:Laplace-bit/dsh-smooth-stream</code>，按上面的 pnpm 授权说明重跑一次即可。</p>
+<p>在 DeepSeek Harness 源码目录运行 <code>pnpm dsh plugin --profile web add dsh-smooth-stream</code>（或 PATH 上的 <code>dsh plugin --profile web add dsh-smooth-stream</code>）。</p>
 </details>
 <details>
 <summary>Is it an official DeepSeek plugin?</summary>
@@ -203,14 +205,14 @@ A community plugin for the DeepSeek Harness (dsh) Web UI — silky streaming: ar
 </details>
 <details>
 <summary>Can it be installed from npm?</summary>
-<p>Currently the plugin installs from GitHub via <code>dsh plugin add github:Laplace-bit/dsh-smooth-stream</code>. Watch the repository for npm availability.</p>
+<p>Yes. <code>dsh-smooth-stream</code> is published to npm; <code>dsh plugin --profile web add dsh-smooth-stream</code> installs the prebuilt package.</p>
 </details>
 </div>
 </section>
 
 <footer>
 <div class="wrap">
-<p><a href="https://github.com/Laplace-bit/dsh-smooth-stream">dsh-smooth-stream</a> · <a href="https://github.com/Laplace-bit/dsh-smooth-stream/blob/main/LICENSE">MIT License</a> · 适用于 <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness (dsh)</a></p>
+<p><a href="https://github.com/Laplace-bit/dsh-smooth-stream">dsh-smooth-stream</a> · <a href="https://github.com/Laplace-bit/dsh-smooth-stream/blob/main/LICENSE">MIT License</a> · <a href="llms.txt">llms.txt</a> · <a href="launch-kit.md">Launch Kit</a> · 适用于 <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness (dsh)</a></p>
 </div>
 </footer>
 

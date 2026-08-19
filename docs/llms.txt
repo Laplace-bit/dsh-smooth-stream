@@ -1,0 +1,82 @@
+# dsh-smooth-stream
+
+> DeepSeek Harness (dsh) community plugin for silky streaming in the Web UI.
+> DeepSeek Harness (dsh) 社区插件：丝滑流式渲染。
+
+## Summary
+
+dsh-smooth-stream is a free, open-source, MIT-licensed community plugin for DeepSeek Harness (dsh) Web UI. It makes streaming replies feel smooth with arrival-tracking typewriter reveal, live Markdown rendering, glide-in wraps, and no flicker. It is not part of the official DeepSeek distribution.
+
+## Key facts
+
+- Name: dsh-smooth-stream
+- Latest version: 0.3.2
+- License: MIT
+- Author: Laplace-bit
+- Official DeepSeek plugin: No (community plugin)
+- Platform: DeepSeek Harness (dsh) Web UI
+- Programming language: TypeScript / React
+- Repository: https://github.com/Laplace-bit/dsh-smooth-stream
+- Homepage: https://laplace-bit.github.io/dsh-smooth-stream/
+- npm: https://www.npmjs.com/package/dsh-smooth-stream
+
+## Install
+
+From a DeepSeek Harness source checkout:
+
+```sh
+pnpm dsh plugin --profile web add dsh-smooth-stream
+```
+
+If `dsh` is already on PATH:
+
+```sh
+dsh plugin --profile web add dsh-smooth-stream
+```
+
+Start the UI:
+
+```sh
+pnpm dsh web
+```
+
+Host log should show:
+
+```
+[dsh-smooth-stream] plugin loaded!
+```
+
+## Features
+
+- Arrival-tracking typewriter reveal: text appears at the rate the model streams it.
+- Live Markdown rendering: code, emphasis, and formatting render while the reply is still coming.
+- Glide-in wraps: new lines and tool cards ease into view instead of jumping.
+- User-controlled scrolling: scroll up to pause follow; follow resumes when back at the bottom.
+- Whole-turn following: tool cards, retries, and workflow runs share the same smooth follow.
+- Accessibility: supports prefers-reduced-motion; pauses reveal at low frame rates when off-screen.
+- User settings: "Auto-expand thinking" toggle in the Web UI settings.
+
+## FAQ
+
+### Is dsh-smooth-stream an official DeepSeek plugin?
+
+No. It is a community plugin for DeepSeek Harness (dsh) Web UI, MIT-licensed, and not part of the official DeepSeek distribution.
+
+### How do I install it?
+
+Run `pnpm dsh plugin --profile web add dsh-smooth-stream` from a DeepSeek Harness source checkout, or `dsh plugin --profile web add dsh-smooth-stream` if `dsh` is already on PATH.
+
+### Can I install it from npm?
+
+Yes. `dsh-smooth-stream` is published to npm. The npm package ships prebuilt `lib/`, so no pnpm >=10 build-script allowance is needed.
+
+### Does it respect prefers-reduced-motion?
+
+Yes. With reduced motion enabled, the plugin shows the finished text at once and does not take over scrolling. If the frame rate drops below 30 fps while the reply is off-screen, reveal pauses and catches up later.
+
+## Links
+
+- GitHub: https://github.com/Laplace-bit/dsh-smooth-stream
+- Homepage: https://laplace-bit.github.io/dsh-smooth-stream/
+- npm: https://www.npmjs.com/package/dsh-smooth-stream
+- Issues: https://github.com/Laplace-bit/dsh-smooth-stream/issues
