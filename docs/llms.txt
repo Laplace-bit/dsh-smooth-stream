@@ -10,7 +10,7 @@ dsh-smooth-stream brings fluid streaming rendering and silky scrolling to the De
 ## Key facts
 
 - Name: dsh-smooth-stream
-- Latest version: 0.3.3
+- Latest version: 0.3.4
 - License: MIT
 - Author: Laplace-bit
 - Affiliation: independently maintained; not affiliated with DeepSeek
@@ -18,6 +18,8 @@ dsh-smooth-stream brings fluid streaming rendering and silky scrolling to the De
 - Programming language: TypeScript / React
 - Repository: https://github.com/Laplace-bit/dsh-smooth-stream
 - Homepage: https://laplace-bit.github.io/dsh-smooth-stream/
+- Installation guide: https://laplace-bit.github.io/dsh-smooth-stream/install.html
+- Technical article and reproducible algorithm benchmark: https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html
 - npm: https://www.npmjs.com/package/dsh-smooth-stream
 
 ## Install

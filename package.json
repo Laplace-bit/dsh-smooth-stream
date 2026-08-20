@@ -78,6 +78,7 @@
     }
   },
   "scripts": {
+    "benchmark": "node scripts/run-stream-benchmark.mjs",
     "build": "tsdown",
     "build:repro": "esbuild repro/main.tsx --bundle --format=esm --platform=browser --loader:.css=local-css --outfile=repro/bundle.js",
     "prepare": "tsdown",

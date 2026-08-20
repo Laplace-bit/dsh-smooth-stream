@@ -6,6 +6,8 @@
 
 项目主页：<https://laplace-bit.github.io/dsh-smooth-stream/>
 
+[安装指南](https://laplace-bit.github.io/dsh-smooth-stream/install.html) · [工作原理与可复现基准](https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html)
+
 ## 效果
 
 左：默认 Web UI。右：dsh-smooth-stream。

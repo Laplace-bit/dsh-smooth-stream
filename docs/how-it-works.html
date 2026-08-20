@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How dsh-smooth-stream renders and follows streaming replies</title>
+<meta name="description" content="A reproducible look at the adaptive reveal queue and time-based spring used by dsh-smooth-stream for DeepSeek Harness streaming replies.">
+<meta name="keywords" content="DeepSeek Harness streaming, streaming Markdown, smooth scrolling algorithm, adaptive text reveal, spring scrolling, dsh-smooth-stream benchmark">
+<meta name="author" content="Laplace-bit">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta name="theme-color" content="#4d6bfe">
+<link rel="canonical" href="https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html">
+<link rel="alternate" hreflang="en" href="https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html">
+<link rel="alternate" hreflang="zh-CN" href="https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html">
+<link rel="alternate" hreflang="x-default" href="https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="dsh-smooth-stream">
+<meta property="og:title" content="How dsh-smooth-stream renders and follows streaming replies">
+<meta property="og:description" content="Adaptive reveal pressure, a continuous spring, and a benchmark you can run locally.">
+<meta property="og:url" content="https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html">
+<meta property="og:image" content="https://laplace-bit.github.io/dsh-smooth-stream/og-image.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="710">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="DeepSeek Harness streaming reply comparison with dsh-smooth-stream.">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="How dsh-smooth-stream handles streaming motion">
+<meta name="twitter:description" content="The reveal queue, time-based spring, backpressure, and reproducible results.">
+<meta name="twitter:image" content="https://laplace-bit.github.io/dsh-smooth-stream/og-image.jpg">
+<meta name="twitter:image:alt" content="DeepSeek Harness streaming reply comparison with dsh-smooth-stream.">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "How dsh-smooth-stream renders and follows streaming replies",
+  "description": "A reproducible look at the adaptive reveal queue and time-based spring used by dsh-smooth-stream.",
+  "url": "https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html",
+  "datePublished": "2026-08-20",
+  "dateModified": "2026-08-20",
+  "inLanguage": ["en", "zh-CN"],
+  "author": { "@type": "Person", "name": "Laplace-bit", "url": "https://github.com/Laplace-bit" },
+  "about": { "@type": "SoftwareApplication", "name": "dsh-smooth-stream", "softwareVersion": "0.3.4" },
+  "isAccessibleForFree": true
+}
+</script>
+
+<style>
+:root{--ink:#1c2333;--muted:#5b6472;--brand:#4d6bfe;--bg:#fbfcff;--line:#e5e9f2;--code:#f4f6fb}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.72 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ink);background:var(--bg)}
+.wrap{max-width:860px;margin:0 auto;padding:0 20px}
+header{background:#fff;border-bottom:1px solid var(--line);padding:28px 0 36px}
+nav{font-size:.9rem;margin-bottom:24px}nav a{margin-right:18px}
+h1{font-size:2rem;line-height:1.25;margin:0 0 12px;letter-spacing:0}
+.lead{font-size:1.08rem;color:var(--muted);max-width:48em;margin:0}
+main{padding:18px 0 50px}section{padding:24px 0;border-bottom:1px solid var(--line)}section:last-child{border:0}
+h2{font-size:1.35rem;margin:0 0 12px;letter-spacing:0}h3{font-size:1.06rem;margin:20px 0 8px;letter-spacing:0}
+p,ul{margin:9px 0}li{margin:5px 0}
+table{border-collapse:collapse;width:100%;background:#fff;border:1px solid var(--line);font-size:.92rem;margin:14px 0}
+th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line)}th{background:var(--code)}tr:last-child td{border:0}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow:auto;font-size:.9rem}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}p code,li code{background:var(--code);border-radius:4px;padding:1px 5px;font-size:.88em}
+.callout{border-left:3px solid var(--brand);background:#fff;padding:10px 15px;color:var(--muted)}
+.zh{color:var(--muted)}a{color:var(--brand)}
+footer{border-top:1px solid var(--line);padding:24px 0 40px;color:var(--muted);font-size:.88rem}
+@media(max-width:600px){h1{font-size:1.65rem}table{font-size:.82rem}th,td{padding:7px}}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+<nav><a href="./">dsh-smooth-stream</a><a href="install.html">Install</a><a href="https://github.com/Laplace-bit/dsh-smooth-stream">Source</a></nav>
+<h1>How streaming motion works</h1>
+<p class="lead">dsh-smooth-stream separates two jobs that are often mixed together: deciding how much new content to reveal, and moving the viewport as that content changes height.</p>
+<p class="lead zh">dsh-smooth-stream 将两件事分开处理：决定每次呈现多少新内容，以及内容高度变化时如何移动视口。</p>
+</div></header>
+
+<main class="wrap">
+<section>
+<h2>1. Reveal follows queue pressure</h2>
+<p>Model output does not arrive at a stable rate. Small chunks should keep a measured cadence; a growing queue has to catch up. The reveal engine calculates a speed from the current backlog and carries fractional character debt between frames. At 60Hz, the same function produces these decisions:</p>
+<table>
+<thead><tr><th>Pending characters</th><th>Target speed</th><th>Characters this frame</th></tr></thead>
+<tbody>
+<tr><td>8</td><td>101.4 chars/s</td><td>1</td></tr>
+<tr><td>32</td><td>154.7 chars/s</td><td>2</td></tr>
+<tr><td>128</td><td>456.0 chars/s</td><td>7</td></tr>
+<tr><td>512+</td><td>600.0 chars/s</td><td>10</td></tr>
+</tbody>
+</table>
+<p class="zh">积压少时保持从容节奏，积压增加后逐步加速；速度有上限，避免一次把长段内容倾倒到页面。</p>
+</section>
+
+<section>
+<h2>2. One spring owns the vertical motion</h2>
+<p>Each layout change updates the target height. A damped spring carries its position and velocity into the next frame, so new wraps, code blocks, tables, and tool results feed one continuous trajectory. Physical time is clamped after a long main-thread stall instead of replaying the entire missed interval in one paint.</p>
+<p>The same initial lag settles in nearly the same wall-clock time at 60Hz and 120Hz:</p>
+<table>
+<thead><tr><th>Initial lag</th><th>60Hz</th><th>120Hz</th></tr></thead>
+<tbody>
+<tr><td>16px</td><td>750ms</td><td>725ms</td></tr>
+<tr><td>48px</td><td>883ms</td><td>858ms</td></tr>
+<tr><td>96px</td><td>967ms</td><td>950ms</td></tr>
+<tr><td>192px</td><td>1067ms</td><td>1033ms</td></tr>
+</tbody>
+</table>
+<p class="zh">刷新率改变时帧数会变化，但实际运动时间接近，因此 60Hz 与 120Hz 下保持相似手感。</p>
+</section>
+
+<section>
+<h2>3. Reveal and follow share pressure</h2>
+<p>The follower keeps a small amount of measured room for the next wrap. When safe visual lag fills, it scales reveal pressure from <code>1.0</code> toward <code>0.55</code>. This slows incoming layout growth instead of letting text outrun the scroll spring.</p>
+<table>
+<thead><tr><th>Lag inside a 48px capacity</th><th>Reveal scale</th></tr></thead>
+<tbody><tr><td>0–12px</td><td>1.000</td></tr><tr><td>24px</td><td>0.775</td></tr><tr><td>36–48px</td><td>0.550</td></tr></tbody>
+</table>
+</section>
+
+<section>
+<h2>Reproduce the benchmark</h2>
+<pre><code>git clone https://github.com/Laplace-bit/dsh-smooth-stream.git
+cd dsh-smooth-stream
+pnpm install
+pnpm benchmark</code></pre>
+<p>The checked-in result was recorded on Apple M5, Node.js v22.22.1, macOS arm64. The median of seven measured runs was 47.3 million queue decisions/s and 89.3 million spring decisions/s after two warm-up runs.</p>
+<p class="callout"><b>Scope:</b> this microbenchmark measures pure TypeScript decisions only. It does not measure React commits, Markdown parsing, browser layout, paint, device thermals, or network time. Those require a Performance trace in a real DeepSeek Harness session. The high operation counts only show that the two math functions are not the likely UI bottleneck.</p>
+<p>Raw result: <a href="https://github.com/Laplace-bit/dsh-smooth-stream/blob/main/benchmarks/results/2026-08-20-apple-m5.json">2026-08-20-apple-m5.json</a>. Benchmark source: <a href="https://github.com/Laplace-bit/dsh-smooth-stream/blob/main/benchmarks/stream-engine.ts">stream-engine.ts</a>.</p>
+</section>
+
+<section>
+<h2>What should be measured next</h2>
+<p>The useful end-to-end follow-up is a shared Chrome Performance trace for the same long Markdown fixture on desktop and a lower-power mobile device. That trace should report scripting, style/layout, paint, dropped frames, and the exact Harness/plugin versions. Until that exists, this project will not publish a broad “X% faster” claim.</p>
+</section>
+</main>
+
+<footer><div class="wrap"><a href="./">Project home</a> · <a href="install.html">Install guide</a> · <a href="https://github.com/Laplace-bit/dsh-smooth-stream/issues/7">Performance discussion</a> · MIT License</div></footer>
+</body>
+</html>
