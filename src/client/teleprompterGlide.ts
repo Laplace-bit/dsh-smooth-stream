@@ -327,7 +327,7 @@ function restoreRunway(port: HTMLElement): void {
   invalidatePaintLimit(port)
 }
 
-function isLegacyStatusRunway(value: string): boolean {
+function isLegacyRunway(value: string): boolean {
   if (value === '') return false
   const terms = [...value.matchAll(/([\d.]+)px/g)]
   if (terms.length === 0 || value.replaceAll(/calc|px|[\d.+()\s]/g, '') !== '') return false
@@ -340,21 +340,39 @@ function isLegacyStatusRunway(value: string): boolean {
 }
 
 /** Remove unowned runway residue written by v0.3.3 and earlier bundles. */
-function migrateLegacyStatusRunway(port: HTMLElement, status: HTMLElement | null): void {
+function migrateLegacyRunway(
+  port: HTMLElement,
+  surfaces: readonly HTMLElement[],
+  status: HTMLElement | null,
+  composer: HTMLElement | null,
+): void {
+  if (followRunways.has(port)) return
+  let migrated = false
+  if (status !== null && isLegacyRunway(status.style.marginTop)) {
+    // Harness TurnStatus has no inline margin; exact 48px multiples here are
+    // values emitted by the old runway writer, including reload accumulation.
+    status.style.marginTop = ''
+    migrated = true
+  }
+  const last = surfaces.at(-1)
   if (
     status === null
-    || followRunways.has(port)
-    || !isLegacyStatusRunway(status.style.marginTop)
-  ) return
-  // Harness TurnStatus has no inline margin; exact 48px multiples here are
-  // values emitted by the old runway writer, including reload accumulation.
-  status.style.marginTop = ''
-  invalidatePaintLimit(port)
+    && composer !== null
+    && last !== undefined
+    && isLegacyRunway(last.style.marginBottom)
+  ) {
+    // Without TurnStatus the old writer used the current final message as its
+    // completion runway. Limit migration to that same target topology.
+    last.style.marginBottom = ''
+    migrated = true
+  }
+  if (migrated) invalidatePaintLimit(port)
 }
 
 function ensureRunway(port: HTMLElement, surfaces: readonly HTMLElement[]): void {
   const status = turnStatusOf(port)
-  migrateLegacyStatusRunway(port, status)
+  const composer = port.querySelector<HTMLElement>('[data-composer-seat]')
+  migrateLegacyRunway(port, surfaces, status, composer)
   // A runway is useful only after the natural conversation already has a
   // scroll floor for its equal message transform to ride. Before that point
   // applyVisual keeps every surface in normal flow, so adding status margin
@@ -364,7 +382,6 @@ function ensureRunway(port: HTMLElement, surfaces: readonly HTMLElement[]): void
     restoreRunway(port)
     return
   }
-  const composer = port.querySelector<HTMLElement>('[data-composer-seat]')
   const target = status === null
     ? { element: composer === null ? undefined : surfaces.at(-1), property: 'marginBottom' as const }
     : { element: status, property: 'marginTop' as const }

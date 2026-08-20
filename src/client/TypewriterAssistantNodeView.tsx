@@ -29,7 +29,6 @@ function usePrefersReducedMotion(): boolean {
 
 interface AnimatedMarkdownTextProps extends MarkdownProps {
   streaming: boolean
-  announce: boolean
   /** True on the last text block: that block owns conversation follow. */
   ownFollow: boolean
   followSpeedCpsRef?: { current: number } | undefined
@@ -140,47 +139,137 @@ function announcementChunkEnd(source: string, start: number): number {
 }
 
 /** Pace screen-reader updates independently from visual reveal frames. */
-function useStreamAnnouncement(text: string, active: boolean): string {
-  const [announcement, setAnnouncement] = useState({ text: '', revision: 0 })
+interface StreamAnnouncementState {
+  text: string
+  revision: number
+  present: boolean
+}
+
+/** A commit-driven live region isolated from the visible Markdown subtree. */
+const StreamAnnouncement = memo(function StreamAnnouncement({
+  text,
+  active,
+}: {
+  text: string
+  active: boolean
+}) {
+  const [announcement, setAnnouncement] = useState<StreamAnnouncementState>({
+    text: '',
+    revision: 0,
+    present: active,
+  })
   const sourceRef = useRef(text)
-  const previousSourceRef = useRef(text)
   const activeRef = useRef(active)
-  const announcedOffsetRef = useRef(0)
+  const announcedOffsetRef = useRef(active ? 0 : text.length)
+  const drainSourceRef = useRef<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  if (!text.startsWith(previousSourceRef.current) || announcedOffsetRef.current > text.length) {
-    announcedOffsetRef.current = 0
-  }
-  if (!active) announcedOffsetRef.current = text.length
-  previousSourceRef.current = text
-  sourceRef.current = text
-  activeRef.current = active
-
   useEffect(() => {
-    if (!active) {
-      if (timerRef.current !== null) clearTimeout(timerRef.current)
+    const clearTimer = (): void => {
+      if (timerRef.current === null) return
+      clearTimeout(timerRef.current)
       timerRef.current = null
-      return
     }
-    if (timerRef.current !== null || announcedOffsetRef.current >= text.length) return
-    timerRef.current = setTimeout(() => {
-      timerRef.current = null
-      if (!activeRef.current) return
-      const source = sourceRef.current
+
+    const publishNext = (source: string): boolean => {
       const start = Math.min(announcedOffsetRef.current, source.length)
       const end = announcementChunkEnd(source, start)
-      if (end <= start) return
+      if (end <= start) return false
       announcedOffsetRef.current = end
-      setAnnouncement(previous => ({ text: source.slice(start, end), revision: previous.revision + 1 }))
-    }, STREAM_ANNOUNCEMENT_INTERVAL_MS)
-  }, [active, announcement.revision, text])
+      setAnnouncement(previous => ({
+        text: source.slice(start, end),
+        revision: previous.revision + 1,
+        present: true,
+      }))
+      return end < source.length
+    }
+
+    const hideAfterLinger = (): void => {
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null
+        if (activeRef.current) return
+        drainSourceRef.current = null
+        setAnnouncement(previous => ({ ...previous, present: false }))
+      }, STREAM_ANNOUNCEMENT_INTERVAL_MS)
+    }
+
+    const drainNext = (): void => {
+      const source = drainSourceRef.current
+      if (source === null) return
+      if (!publishNext(source)) {
+        hideAfterLinger()
+        return
+      }
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null
+        if (activeRef.current) return
+        drainNext()
+      }, STREAM_ANNOUNCEMENT_INTERVAL_MS)
+    }
+
+    const scheduleLive = (): void => {
+      if (timerRef.current !== null || announcedOffsetRef.current >= sourceRef.current.length) return
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null
+        if (!activeRef.current) return
+        const source = sourceRef.current
+        if (publishNext(source)) scheduleLive()
+      }, STREAM_ANNOUNCEMENT_INTERVAL_MS)
+    }
+
+    const wasActive = activeRef.current
+    const previousSource = sourceRef.current
+    const continuingDrain = !active && !wasActive && drainSourceRef.current !== null
+    if (
+      !continuingDrain
+      && (!text.startsWith(previousSource) || announcedOffsetRef.current > text.length)
+    ) {
+      announcedOffsetRef.current = 0
+    }
+    sourceRef.current = text
+    activeRef.current = active
+
+    if (active) {
+      if (!wasActive) {
+        clearTimer()
+        drainSourceRef.current = null
+        setAnnouncement(previous => ({
+          text: '',
+          revision: previous.revision + 1,
+          present: true,
+        }))
+      }
+      scheduleLive()
+      return
+    }
+
+    if (!wasActive) {
+      if (drainSourceRef.current === null) announcedOffsetRef.current = text.length
+      return
+    }
+
+    clearTimer()
+    drainSourceRef.current = text
+    drainNext()
+  }, [active, text])
 
   useEffect(() => () => {
     if (timerRef.current !== null) clearTimeout(timerRef.current)
+    timerRef.current = null
   }, [])
 
-  return announcement.text
-}
+  if (!active && !announcement.present) return null
+  const activating = active && !activeRef.current
+  return (
+    <span
+      className={css.visuallyHidden}
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <span key={announcement.revision}>{activating ? '' : announcement.text}</span>
+    </span>
+  )
+})
 
 /**
  * Smooth streaming text arm. While the reply runs, the accumulated source is
@@ -198,7 +287,6 @@ function AnimatedMarkdownText({
   codeLabels,
   fileMentions,
   streaming,
-  announce,
   ownFollow,
   followSpeedCpsRef,
   followRevealScaleRef,
@@ -224,7 +312,6 @@ function AnimatedMarkdownText({
   })
   const shown = reduced ? text : displayed
   const live = typing && !reduced
-  const announcement = useStreamAnnouncement(text, live && announce)
 
   useEffect(() => {
     const root = followRootRef.current
@@ -257,25 +344,20 @@ function AnimatedMarkdownText({
   }, [shown, streaming, text, typing])
 
   return (
-    <>
-      {live && announce && (
-        <span className={css.visuallyHidden} aria-live="polite" aria-atomic="true">{announcement}</span>
-      )}
-      <FollowHost
-        active={live && ownFollow}
-        speedCpsRef={speedCpsRef}
-        revealScaleRef={followRevealScaleRef}
-        predictive={streaming}
-        hostRef={followRootRef}
-      >
-        <MarkdownText
-          text={live ? shown : text}
-          streaming={live}
-          codeLabels={codeLabels}
-          fileMentions={live ? undefined : fileMentions}
-        />
-      </FollowHost>
-    </>
+    <FollowHost
+      active={live && ownFollow}
+      speedCpsRef={speedCpsRef}
+      revealScaleRef={followRevealScaleRef}
+      predictive={streaming}
+      hostRef={followRootRef}
+    >
+      <MarkdownText
+        text={live ? shown : text}
+        streaming={live}
+        codeLabels={codeLabels}
+        fileMentions={live ? undefined : fileMentions}
+      />
+    </FollowHost>
   )
 }
 
@@ -463,6 +545,10 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
     || data.status === 'interrupted'
     || data.blocks.some(block => block.kind !== 'tool-call')
   if (!hasVisible) return null
+  const announcementText = data.blocks
+    .filter(block => block.kind === 'text')
+    .map(block => block.text)
+    .join('\n')
 
   const rendered: ReactNode[] = []
   const last = data.blocks.length - 1
@@ -483,7 +569,6 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
             codeLabels={codeLabels}
             fileMentions={mentions}
             streaming={streaming}
-            announce={index === last}
             ownFollow={!streaming && index === lastFollow}
             followSpeedCpsRef={index === lastFollow ? rootSpeedRef : undefined}
             followRevealScaleRef={index === lastFollow ? rootRevealScaleRef : undefined}
@@ -539,6 +624,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
 
   return (
     <div ref={guardRef} className={css.root} data-streaming={streaming || undefined}>
+      <StreamAnnouncement text={announcementText} active={streaming && !reduced} />
       <FollowHost
         active={streaming && !reduced}
         speedCpsRef={rootSpeedRef}

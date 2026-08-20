@@ -2,12 +2,23 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { Context } from '@deepseek-ai/cordis'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createElement, memo, useLayoutEffect, useRef, useState, type FunctionComponent } from 'react'
+import {
+  Suspense,
+  StrictMode,
+  createElement,
+  memo,
+  startTransition,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FunctionComponent,
+} from 'react'
 import { TypewriterAssistantNodeView } from '../src/client/TypewriterAssistantNodeView.tsx'
 import {
   computeFollowRevealScale,
   computeFollowReserve,
   computeFollowStep,
+  FOLLOW_PAINT_GUARD_PX,
   FOLLOW_SETTLE_EPSILON_PX,
   FOLLOW_SPEED_REF_CPS,
   FOLLOW_STATUS_RUNWAY_PX,
@@ -730,6 +741,58 @@ describe('assistant renderer', () => {
     expect(Math.max(...gaps)).toBeLessThanOrEqual(naturalGap + 1)
   })
 
+  it('limits an expanded Think wrap to the unavoidable safe catch-up', async () => {
+    const lineHeight = 24
+    const naturalGap = 16
+    let naturalHeight = 500
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-transcript>
+            <TypewriterAssistantNodeView
+              {...assistantProps('running', [{ kind: 'reasoning', text: 'examining' }])}
+              thinkAutoExpand
+            />
+          </div>
+          <div role="status">Deep diving...</div>
+        </div>
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    const status = view.container.querySelector('[role="status"]') as HTMLElement
+    const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => naturalHeight + (Number.parseFloat(status.style.marginTop) || 0),
+    })
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 0,
+      bottom: 80 + currentTranslate(transcript),
+    }) as DOMRect)
+    vi.spyOn(status, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return { top: 96 + runway, bottom: 122 + runway } as DOMRect
+    })
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 180, bottom: 260 } as DOMRect)
+    port.scrollTop = 390
+
+    await act(() => vi.advanceTimersByTimeAsync(480))
+    const beforeWrap = -port.scrollTop + currentTranslate(transcript)
+    naturalHeight += lineHeight
+    await act(() => vi.advanceTimersByTimeAsync(16))
+    const afterWrap = -port.scrollTop + currentTranslate(transcript)
+    const catchUp = beforeWrap - afterWrap
+    const unavoidableCatchUp = lineHeight - naturalGap + FOLLOW_PAINT_GUARD_PX
+
+    expect(catchUp).toBeGreaterThanOrEqual(unavoidableCatchUp - 0.5)
+    expect(catchUp).toBeLessThanOrEqual(unavoidableCatchUp + 0.5)
+    expect(status.getBoundingClientRect().top - transcript.getBoundingClientRect().bottom)
+      .toBeGreaterThanOrEqual(FOLLOW_PAINT_GUARD_PX - 0.1)
+  })
+
   it('does not expose follow runway below Think before the port can scroll', async () => {
     const think = { kind: 'reasoning', text: 'exploring the current project' }
     const view = render(
@@ -874,6 +937,39 @@ describe('assistant renderer', () => {
 
     expect(status.style.marginTop).toBe(`${String(FOLLOW_STATUS_RUNWAY_PX)}px`)
     expect(status.getBoundingClientRect().top - thinkRow.getBoundingClientRect().bottom).toBeCloseTo(16, 1)
+  })
+
+  it('removes accumulated message runway left after turn status unmounts', async () => {
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div
+            data-chat-anchor-key="assistant"
+            style={{ marginBottom: 'calc(calc(48px + 48px) + 48px)' }}
+          >
+            <TypewriterAssistantNodeView
+              {...assistantProps('running', [{ kind: 'text', text: 'final answer' }])}
+            />
+          </div>
+        </div>
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const assistantRow = view.container.querySelector('[data-chat-anchor-key]') as HTMLElement
+    const staleRunway = (): number => assistantRow.style.marginBottom === ''
+      ? 0
+      : 3 * FOLLOW_STATUS_RUNWAY_PX
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 800 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => 500 + staleRunway(),
+    })
+
+    await act(() => vi.advanceTimersByTimeAsync(80))
+
+    expect(port.scrollHeight).toBe(500)
+    expect(assistantRow.style.marginBottom).toBe('')
   })
 
   it('does not flash the conversation port to the top when Think yields to new text', async () => {
@@ -1053,12 +1149,14 @@ describe('assistant renderer', () => {
     expect(view.getByText(/second/)).toBeTruthy()
   })
 
-  it('gives only the active final text block an announcement', () => {
+  it('exposes one node-level announcement for multiple text blocks', async () => {
     const view = render(<TypewriterAssistantNodeView {...assistantProps('running', [
       { kind: 'text', text: 'first' },
       { kind: 'text', text: 'second' },
     ])} />)
     expect(view.container.querySelectorAll('[aria-live="polite"]')).toHaveLength(1)
+    await act(() => vi.advanceTimersByTimeAsync(800))
+    expect(view.container.querySelector('[aria-live="polite"]')?.textContent).toBe('first\nsecond')
   })
 
   it('announces streaming text in paced increments instead of rewriting the full response', async () => {
@@ -1079,6 +1177,181 @@ describe('assistant renderer', () => {
     expect(liveRegion.textContent).toBe('The first phrase and the second phrase')
     await act(() => vi.advanceTimersByTimeAsync(800))
     expect(liveRegion.textContent).toBe(', followed by a third.')
+  })
+
+  it('keeps announcement pacing alive through Strict Mode effect replay', async () => {
+    const text = 'Strict Mode must not retire the scheduled announcement.'
+    const view = render(
+      <StrictMode>
+        <TypewriterAssistantNodeView {...assistantProps('running', [{ kind: 'text', text }])} />
+      </StrictMode>,
+    )
+
+    await act(() => vi.advanceTimersByTimeAsync(800))
+
+    expect(view.container.querySelector('[aria-live="polite"]')?.textContent).toBe(text)
+  })
+
+  it('announces the unspoken tail when a reply finishes before the next interval', async () => {
+    const text = 'A short reply that finishes before the first announcement interval.'
+    const view = render(
+      <TypewriterAssistantNodeView {...assistantProps('running', [{ kind: 'text', text }])} />,
+    )
+    expect(view.container.querySelector('[aria-live="polite"]')?.textContent).toBe('')
+
+    view.rerender(
+      <TypewriterAssistantNodeView {...assistantProps('settled', [{ kind: 'text', text }])} />,
+    )
+
+    expect(view.container.querySelector('[aria-live="polite"]')?.textContent).toBe(text)
+    await act(() => vi.advanceTimersByTimeAsync(799))
+    expect(view.container.querySelector('[aria-live="polite"]')?.textContent).toBe(text)
+    await act(() => vi.advanceTimersByTimeAsync(1))
+    expect(view.container.querySelector('[aria-live="polite"]')).toBeNull()
+  })
+
+  it('flushes only the unspoken announcement tail when a longer reply finishes', async () => {
+    const first = 'The already announced first phrase.'
+    const tail = ' The final unspoken phrase.'
+    const renderText = (status: 'running' | 'settled', text: string) => (
+      <TypewriterAssistantNodeView {...assistantProps(status, [{ kind: 'text', text }])} />
+    )
+    const view = render(renderText('running', first))
+    await act(() => vi.advanceTimersByTimeAsync(800))
+    expect(view.container.querySelector('[aria-live="polite"]')?.textContent).toBe(first)
+
+    view.rerender(renderText('running', first + tail))
+    view.rerender(renderText('settled', first + tail))
+
+    expect(view.container.querySelector('[aria-live="polite"]')?.textContent).toBe(tail)
+  })
+
+  it('keeps the previous text announcement alive when ownership moves to Think', async () => {
+    const text = 'Answer text that arrived immediately before the reasoning block.'
+    const view = render(
+      <TypewriterAssistantNodeView {...assistantProps('running', [{ kind: 'text', text }])} />,
+    )
+
+    view.rerender(
+      <TypewriterAssistantNodeView {...assistantProps('running', [
+        { kind: 'text', text },
+        { kind: 'reasoning', text: 'checking' },
+      ])} />,
+    )
+
+    expect(view.container.querySelectorAll('[aria-live="polite"]')).toHaveLength(1)
+    await act(() => vi.advanceTimersByTimeAsync(800))
+    expect(view.container.querySelector('[aria-live="polite"]')?.textContent).toBe(text)
+  })
+
+  it('paces a long completion tail before retiring its live region', async () => {
+    const text = 'x'.repeat(800)
+    const renderText = (status: 'running' | 'settled') => (
+      <TypewriterAssistantNodeView {...assistantProps(status, [{ kind: 'text', text }])} />
+    )
+    const view = render(renderText('running'))
+
+    view.rerender(renderText('settled'))
+    expect(view.container.querySelector('[aria-live="polite"]')?.textContent).toBe('x'.repeat(320))
+
+    await act(() => vi.advanceTimersByTimeAsync(800))
+    expect(view.container.querySelector('[aria-live="polite"]')?.textContent).toBe('x'.repeat(320))
+    await act(() => vi.advanceTimersByTimeAsync(800))
+    expect(view.container.querySelector('[aria-live="polite"]')?.textContent).toBe('x'.repeat(160))
+    await act(() => vi.advanceTimersByTimeAsync(800))
+    expect(view.container.querySelector('[aria-live="polite"]')).toBeNull()
+  })
+
+  it('does not mutate visible Markdown while completion announcements drain', async () => {
+    const text = 'visible settled text '.repeat(40)
+    const renderText = (status: 'running' | 'settled') => (
+      <TypewriterAssistantNodeView {...assistantProps(status, [{ kind: 'text', text }])} />
+    )
+    const view = render(renderText('running'))
+    view.rerender(renderText('settled'))
+    const followHosts = view.container.querySelectorAll<HTMLElement>(`.${css.follow}`)
+    const visibleMarkdown = followHosts.item(followHosts.length - 1)
+    const visibleHtml = visibleMarkdown.innerHTML
+    const mutations: MutationRecord[] = []
+    const observer = new MutationObserver(records => { mutations.push(...records) })
+    observer.observe(visibleMarkdown, { characterData: true, childList: true, subtree: true })
+
+    await act(() => vi.advanceTimersByTimeAsync(800))
+    await Promise.resolve()
+    observer.disconnect()
+
+    expect(followHosts.item(followHosts.length - 1)).toBe(visibleMarkdown)
+    expect(visibleMarkdown.innerHTML).toBe(visibleHtml)
+    expect(mutations).toHaveLength(0)
+  })
+
+  it('keeps draining the committed completion snapshot after inactive text changes', async () => {
+    const completed = 'x'.repeat(800)
+    const renderText = (text: string, status: 'running' | 'settled') => (
+      <TypewriterAssistantNodeView {...assistantProps(status, [{ kind: 'text', text }])} />
+    )
+    const view = render(renderText(completed, 'running'))
+    view.rerender(renderText(completed, 'settled'))
+    expect(view.container.querySelector('[aria-live="polite"]')?.textContent).toBe('x'.repeat(320))
+
+    view.rerender(renderText('edited history', 'settled'))
+    await act(() => vi.advanceTimersByTimeAsync(800))
+
+    expect(view.container.querySelector('[aria-live="polite"]')?.textContent).toBe('x'.repeat(320))
+  })
+
+  it('does not let an abandoned concurrent render stop the committed announcement', async () => {
+    const text = 'The committed stream remains active while a transition suspends.'
+    const uncommitted = 'This text belongs only to the abandoned render.'
+    let update: ((nextText: string, suspend: boolean) => void) | undefined
+    const pending = new Promise<never>(() => {})
+    function SuspendAfterAssistant({ suspend }: { suspend: boolean }) {
+      if (suspend) throw pending
+      return null
+    }
+    function ConcurrentProbe() {
+      const [state, setState] = useState({ text, suspend: false })
+      update = (nextText, suspend) => { setState({ text: nextText, suspend }) }
+      return (
+        <Suspense fallback={<span>pending</span>}>
+          <TypewriterAssistantNodeView
+            {...assistantProps('running', [{ kind: 'text', text: state.text }])}
+          />
+          <SuspendAfterAssistant suspend={state.suspend} />
+        </Suspense>
+      )
+    }
+    const view = render(<ConcurrentProbe />)
+
+    await act(async () => {
+      startTransition(() => { update?.(uncommitted, true) })
+    })
+    expect(view.container.textContent).not.toContain('pending')
+
+    await act(() => vi.advanceTimersByTimeAsync(800))
+    expect(view.container.querySelector('[aria-live="polite"]')?.textContent).toBe(text)
+  })
+
+  it('mutates the live region for consecutive announcement chunks with identical text', async () => {
+    const chunk = 'x'.repeat(320)
+    const renderText = (text: string) => (
+      <TypewriterAssistantNodeView {...assistantProps('running', [{ kind: 'text', text }])} />
+    )
+    const view = render(renderText(chunk))
+    await act(() => vi.advanceTimersByTimeAsync(800))
+    const liveRegion = view.container.querySelector('[aria-live="polite"]') as HTMLElement
+    expect(liveRegion.textContent).toBe(chunk)
+
+    const mutations: MutationRecord[] = []
+    const observer = new MutationObserver(records => { mutations.push(...records) })
+    observer.observe(liveRegion, { characterData: true, childList: true, subtree: true })
+    view.rerender(renderText(chunk + chunk))
+    await act(() => vi.advanceTimersByTimeAsync(800))
+    await Promise.resolve()
+    observer.disconnect()
+
+    expect(liveRegion.textContent).toBe(chunk)
+    expect(mutations.length).toBeGreaterThan(0)
   })
 
   it('reuses visible-tail geometry across source chunks before the next reveal', () => {
