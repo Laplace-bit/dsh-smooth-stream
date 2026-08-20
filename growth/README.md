@@ -56,6 +56,20 @@ Every seven days:
 5. Turn recurring questions and verified bugs into the next tutorial, FAQ, or
    engineering article.
 
+## Search discovery
+
+The Pages site exposes `robots.txt`, `sitemap.xml`, `llms.txt`, and an
+IndexNow key file. After publishing a meaningful documentation update, submit
+only the changed public URLs to:
+
+```text
+https://api.indexnow.org/indexnow
+```
+
+Use host `laplace-bit.github.io`, key
+`91308c16da931ad66f272c523113180e`, and key location
+`https://laplace-bit.github.io/dsh-smooth-stream/91308c16da931ad66f272c523113180e.txt`.
+
 Run a local snapshot with a GitHub token that has push access:
 
 ```sh
