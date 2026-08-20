@@ -1,7 +1,8 @@
 # Product Hunt launch package
 
-Prepared on 2026-08-20. The launch should happen only after the install and
-technical pages are live and their URLs return 200.
+Prepared on 2026-08-20. The launch is paused until a new product-recorded GIF
+or video is available. Do not publish with static gallery images: the product's
+main value is motion and cannot be shown accurately in a still image.
 
 ## Product fields
 
@@ -65,15 +66,13 @@ I also published the algorithm benchmark and its limits. It measures the queue a
 I would value feedback from people who use DeepSeek Harness for long coding sessions, particularly on lower-power devices or remote mobile browsers.
 ```
 
-## Gallery order
+## Gallery status
 
-Product Hunt's current help result recommends 1270x760 gallery images.
+Waiting for a newly recorded GIF or video that shows the actual streaming and
+scroll motion. Finalize the gallery order only after that asset is available.
 
-1. `docs/product-hunt/01-comparison.jpg` — real side-by-side product view.
-2. `docs/compare.gif` — the full motion comparison.
-3. `docs/product-hunt/02-how-it-works.png` — the published technical page and benchmark scope.
-
-Do not add decorative AI-generated screenshots or unverified user quotes.
+Do not substitute static screenshots, decorative AI-generated images, or
+unverified user quotes.
 
 ## Launch-day comment prompts
 
