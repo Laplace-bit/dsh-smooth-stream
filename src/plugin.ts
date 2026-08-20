@@ -42,6 +42,7 @@ export const Config: Schema<Config> = Schema.object({
  * settings provider while the browser edits it through the plugin RPC below.
  */
 export const StreamSettingsSchema: Schema<StreamSettings> = Schema.object({
+  enabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.enabled),
   thinkAutoExpand: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand),
 })
 
@@ -83,6 +84,7 @@ export function apply(ctx: Context, config: Config): void {
           version: STREAM_PACKAGE_VERSION,
           installation: installation.kind,
           writable: connectionCtx.settings.writable,
+          enabled: scope.get().enabled,
           thinkAutoExpand: scope.get().thinkAutoExpand,
           canUpgrade: installation.kind === 'npm',
         }
@@ -92,12 +94,13 @@ export function apply(ctx: Context, config: Config): void {
         if (endpoint === STREAM_SETTINGS_RPC.read) return { ok: true, value: view() }
         if (endpoint === STREAM_SETTINGS_RPC.write) {
           if (typeof payload !== 'object' || payload === null
+            || typeof (payload as { enabled?: unknown }).enabled !== 'boolean'
             || typeof (payload as { thinkAutoExpand?: unknown }).thinkAutoExpand !== 'boolean') {
             return {
               ok: false,
               error: {
                 code: 'settings-rejected',
-                message: 'thinkAutoExpand must be a boolean',
+                message: 'enabled and thinkAutoExpand must be booleans',
                 details: { ns: STREAM_SETTINGS_NS },
               },
             }
@@ -113,7 +116,8 @@ export function apply(ctx: Context, config: Config): void {
             }
           }
           try {
-            await scope.update({ thinkAutoExpand: (payload as { thinkAutoExpand: boolean }).thinkAutoExpand })
+            const next = payload as StreamSettings
+            await scope.update({ enabled: next.enabled, thinkAutoExpand: next.thinkAutoExpand })
           } catch {
             return {
               ok: false,

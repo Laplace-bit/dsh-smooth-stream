@@ -13,7 +13,7 @@ import { SmoothStreamCardController } from './smooth-stream-card-controller.ts'
 import { createSmoothStreamSettingsApi } from './smooth-stream-settings-api.ts'
 import { NS as SETTINGS_NS, en, zh } from './locales.ts'
 import { DEFAULT_STREAM_CONFIG, STREAM_BOOT_GLOBAL, type StreamConfig } from '../config.ts'
-import { DEFAULT_STREAM_SETTINGS } from '../settings.ts'
+import { DEFAULT_STREAM_SETTINGS, type StreamSettings } from '../settings.ts'
 
 /**
  * Cordis services required by the browser half. Only `slots` is load-bearing
@@ -116,15 +116,15 @@ function wrapAgentChatRows(ctx: ClientContext): () => void {
 }
 
 /**
- * A live preference cell read by `useSyncExternalStore`. It starts on the
- * shared default and, once the plugin-owned settings controller is attached,
- * tracks the resolved `thinkAutoExpand` value. A composition (or test) that
- * ships no settings surface keeps the cell on the default.
+ * A live settings cell shared by the renderer lifecycle and React views. It
+ * starts on the shared defaults and follows the plugin-owned controller once
+ * the optional settings services arrive.
  */
-class PreferenceCell {
+class SettingsCell {
   private readonly listeners = new Set<() => void>()
   private card: SmoothStreamCardController | undefined
-  private value = DEFAULT_STREAM_SETTINGS.thinkAutoExpand
+  private value: StreamSettings = DEFAULT_STREAM_SETTINGS
+  private pending = false
 
   /** Re-point the cell at the plugin-owned settings controller. */
   attach(card: SmoothStreamCardController): () => void {
@@ -139,18 +139,31 @@ class PreferenceCell {
     }
   }
 
-  private read(): boolean {
-    return this.card?.getSnapshot().thinkAutoExpand ?? DEFAULT_STREAM_SETTINGS.thinkAutoExpand
+  private read(): StreamSettings {
+    const snapshot = this.card?.getSnapshot()
+    if (snapshot === undefined || snapshot.status !== 'ready') return this.value
+    return { enabled: snapshot.enabled, thinkAutoExpand: snapshot.thinkAutoExpand }
   }
 
   private refresh(): void {
     const next = this.read()
-    if (next === this.value) return
+    const pending = this.card?.getSnapshot().status === 'loading'
+    if (
+      pending === this.pending
+      && next.enabled === this.value.enabled
+      && next.thinkAutoExpand === this.value.thinkAutoExpand
+    ) return
+    this.pending = pending
     this.value = next
     for (const listener of this.listeners) listener()
   }
 
-  readonly getSnapshot = (): boolean => this.value
+  /** False while an available settings service is resolving its authority. */
+  takeoverEnabled(): boolean {
+    return !this.pending && this.value.enabled
+  }
+
+  readonly getSnapshot = (): StreamSettings => this.value
 
   readonly subscribe = (listener: () => void): () => void => {
     this.listeners.add(listener)
@@ -171,7 +184,7 @@ class PreferenceCell {
  */
 export function apply(ctx: ClientContext): void {
   const config = readBootConfig()
-  const preference = new PreferenceCell()
+  const settings = new SettingsCell()
 
   // The card talks to the plugin-owned loopback RPC, so the core settings
   // namespace allowlist cannot make it disappear. The stream still applies
@@ -183,7 +196,7 @@ export function apply(ctx: ClientContext): void {
       // handle, so narrow through unknown to its client contract here.
       createSmoothStreamSettingsApi(settingsCtx.get('connection') as unknown as ConnectionHandle),
     )
-    const detachPreference = preference.attach(card)
+    const detachSettings = settings.attach(card)
     card.start()
     settingsCtx.effect(() => settingsCtx.locale.register(SETTINGS_NS, { zh, en }), 'dsh-smooth-stream: settings dictionaries')
     settingsCtx.slots.inject('settings.plugin.item', () => settingsCtx.slots.register({
@@ -195,15 +208,15 @@ export function apply(ctx: ClientContext): void {
     }, SmoothStreamCard))
     return () => {
       card.stop()
-      detachPreference()
+      detachSettings()
     }
   })
 
   const configured = function StreamConfiguredView(props: AssistantProps) {
-    const thinkAutoExpand = useSyncExternalStore(
-      preference.subscribe,
-      preference.getSnapshot,
-      preference.getSnapshot,
+    const preferences = useSyncExternalStore(
+      settings.subscribe,
+      settings.getSnapshot,
+      settings.getSnapshot,
     )
     return createElement(TypewriterAssistantNodeView, {
       ...props,
@@ -212,21 +225,39 @@ export function apply(ctx: ClientContext): void {
       revealCharsPerSec: config.revealCharsPerSec,
       scrollSpeedPxPerSec: config.scrollSpeedPxPerSec,
       maxScrollSpeedPxPerSec: config.maxScrollSpeedPxPerSec,
-      thinkAutoExpand,
+      thinkAutoExpand: preferences.thinkAutoExpand,
     })
   }
   ctx.slots.inject('conversation.chat.node', () => {
-    const unwrap = wrapAgentChatRows(ctx)
-    const unshadow = ctx.slots.register({
-      name: 'conversation.chat.node',
-      key: 'assistant-step',
-      priority: -100,
-      locale: 'conversation',
-      registrant: 'dsh-smooth-stream',
-    }, configured)
+    let releaseTakeover: (() => void) | undefined
+
+    const syncTakeover = (): void => {
+      if (!settings.takeoverEnabled()) {
+        releaseTakeover?.()
+        releaseTakeover = undefined
+        return
+      }
+      if (releaseTakeover !== undefined) return
+      const unwrap = wrapAgentChatRows(ctx)
+      const unshadow = ctx.slots.register({
+        name: 'conversation.chat.node',
+        key: 'assistant-step',
+        priority: -100,
+        locale: 'conversation',
+        registrant: 'dsh-smooth-stream',
+      }, configured)
+      releaseTakeover = () => {
+        // Stop observing slot changes before the shadow entry is removed.
+        unwrap()
+        unshadow()
+      }
+    }
+
+    const unsubscribe = settings.subscribe(syncTakeover)
+    syncTakeover()
     return () => {
-      unshadow()
-      unwrap()
+      unsubscribe()
+      releaseTakeover?.()
     }
   })
 }

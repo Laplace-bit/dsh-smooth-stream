@@ -19,6 +19,7 @@ const developmentView: StreamSettingsView = {
   version: '0.1.0',
   installation: 'development',
   writable: true,
+  enabled: true,
   thinkAutoExpand: true,
   canUpgrade: false,
 }
@@ -26,6 +27,14 @@ const developmentView: StreamSettingsView = {
 interface BenchOptions {
   view?: StreamSettingsView
   failRead?: boolean
+  readGate?: Promise<void>
+  writeGate?: Promise<void>
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => { resolve = done })
+  return { promise, resolve }
 }
 
 /** Compose only the optional browser services used by the configuration card. */
@@ -34,6 +43,7 @@ async function bench(options: BenchOptions = {}): Promise<{
   slots: SlotRegistry
   coreDescribe: ReturnType<typeof vi.fn>
   call: ReturnType<typeof vi.fn>
+  removeConnection: () => void
 }> {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
@@ -51,23 +61,27 @@ async function bench(options: BenchOptions = {}): Promise<{
     }
     if (endpoint === STREAM_SETTINGS_RPC.read) {
       if (options.failRead === true) throw new Error('RPC unavailable')
+      await options.readGate
       return { ok: true as const, value: view }
     }
     if (endpoint === STREAM_SETTINGS_RPC.write) {
-      const value = (payload as { thinkAutoExpand?: unknown }).thinkAutoExpand
-      if (typeof value !== 'boolean') return { ok: false as const, error: { code: 'internal', message: 'bad payload' } }
-      view = { ...view, thinkAutoExpand: value }
+      const settings = payload as { enabled?: unknown; thinkAutoExpand?: unknown }
+      if (typeof settings.enabled !== 'boolean' || typeof settings.thinkAutoExpand !== 'boolean') {
+        return { ok: false as const, error: { code: 'internal', message: 'bad payload' } }
+      }
+      await options.writeGate
+      view = { ...view, enabled: settings.enabled, thinkAutoExpand: settings.thinkAutoExpand }
       return { ok: true as const, value: view }
     }
     if (endpoint === STREAM_SETTINGS_RPC.upgrade) return { ok: true as const, value: { restartRequired: true } }
     return { ok: false as const, error: { code: 'internal', message: 'unexpected endpoint' } }
   })
-  ctx.provide('connection', {
+  const removeConnection = ctx.provide('connection', {
     api: { settings: { describe: coreDescribe } },
     rpc: { call },
   } as never)
 
-  return { ctx, slots: ctx.get('slots') as SlotRegistry, coreDescribe, call }
+  return { ctx, slots: ctx.get('slots') as SlotRegistry, coreDescribe, call, removeConnection }
 }
 
 function declareCardSlot(slots: SlotRegistry): () => void {
@@ -157,7 +171,7 @@ describe('smooth-stream settings card', () => {
     const face = cardFace(slots)
     await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
 
-    face.edit(false)
+    face.edit({ thinkAutoExpand: false })
     expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ dirty: true, thinkAutoExpand: false })
     face.save()
     await vi.waitFor(() => {
@@ -167,8 +181,130 @@ describe('smooth-stream settings card', () => {
       })
     })
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
+      enabled: true,
       thinkAutoExpand: false,
     })
+  })
+
+  it('shows a master toggle and disables its dependent preference when off', async () => {
+    const { ctx, slots } = await bench({ view: { ...developmentView, enabled: false } })
+    declareCardSlot(slots)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const face = cardFace(slots)
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
+    const card = render(<SmoothStreamCard {...cardProps(face)} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /smooth stream/i }))
+    const enabled = screen.getByRole('checkbox', { name: new RegExp(`^${en.enabled}`) })
+    const thinkAutoExpand = screen.getByRole('checkbox', { name: new RegExp(`^${en.thinkAutoExpand}`) })
+    expect((enabled as HTMLInputElement).checked).toBe(false)
+    expect(thinkAutoExpand.getAttribute('disabled')).not.toBeNull()
+
+    fireEvent.click(enabled)
+    card.rerender(<SmoothStreamCard {...cardProps(face)} />)
+    expect((screen.getByRole('checkbox', { name: new RegExp(`^${en.enabled}`) }) as HTMLInputElement).checked)
+      .toBe(true)
+    expect(screen.getByRole('checkbox', { name: new RegExp(`^${en.thinkAutoExpand}`) }).getAttribute('disabled'))
+      .toBeNull()
+  })
+
+  it('returns conversation rendering to Harness while the master toggle is off', async () => {
+    function BuiltInAssistant() { return null }
+    function BuiltInTool() { return null }
+    const { ctx, slots } = await bench({ view: { ...developmentView, enabled: false } })
+    slots.register({
+      name: 'root',
+      children: {
+        'settings.plugin.item': { kind: 'list', scope: 'root' },
+        'conversation.chat.node': { kind: 'keyed', scope: 'session' },
+      },
+    } as never, () => null)
+    slots.register({ name: 'conversation.chat.node', key: 'assistant-step' } as never, BuiltInAssistant as never)
+    slots.register({ name: 'conversation.chat.node', key: 'tool-call' } as never, BuiltInTool as never)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const face = cardFace(slots)
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      status: 'ready',
+      enabled: false,
+    }))
+
+    expect(slots.entries('conversation.chat.node').filter(entry => entry.options.priority === -100))
+      .toHaveLength(0)
+    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'tool-call')?.component)
+      .toBe(BuiltInTool)
+
+    face.edit({ enabled: true })
+    expect(slots.entries('conversation.chat.node').some(entry => entry.options.priority === -100))
+      .toBe(true)
+    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'tool-call')?.component)
+      .not.toBe(BuiltInTool)
+
+    face.discard()
+    expect(slots.entries('conversation.chat.node').filter(entry => entry.options.priority === -100))
+      .toHaveLength(0)
+    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'tool-call')?.component)
+      .toBe(BuiltInTool)
+  })
+
+  it('does not take over before a saved disabled setting resolves or after its service unloads', async () => {
+    function BuiltInAssistant() { return null }
+    function BuiltInTool() { return null }
+    const read = deferred()
+    const { ctx, slots, removeConnection } = await bench({
+      view: { ...developmentView, enabled: false },
+      readGate: read.promise,
+    })
+    slots.register({
+      name: 'root',
+      children: {
+        'settings.plugin.item': { kind: 'list', scope: 'root' },
+        'conversation.chat.node': { kind: 'keyed', scope: 'session' },
+      },
+    } as never, () => null)
+    slots.register({ name: 'conversation.chat.node', key: 'assistant-step' } as never, BuiltInAssistant as never)
+    slots.register({ name: 'conversation.chat.node', key: 'tool-call' } as never, BuiltInTool as never)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+
+    expect(slots.entries('conversation.chat.node').filter(entry => entry.options.priority === -100))
+      .toHaveLength(0)
+    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'tool-call')?.component)
+      .toBe(BuiltInTool)
+
+    read.resolve()
+    await vi.waitFor(() => expect(cardFace(slots).hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      status: 'ready',
+      enabled: false,
+    }))
+    await removeConnection()
+
+    expect(slots.entries('conversation.chat.node').filter(entry => entry.options.priority === -100))
+      .toHaveLength(0)
+    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'tool-call')?.component)
+      .toBe(BuiltInTool)
+  })
+
+  it('blocks preference edits while a save is in flight', async () => {
+    const write = deferred()
+    const { ctx, slots } = await bench({ writeGate: write.promise })
+    declareCardSlot(slots)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const face = cardFace(slots)
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
+    face.edit({ enabled: false })
+    face.save()
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().saving).toBe(true))
+    face.edit({ enabled: true })
+    expect(face.hooks.smoothStreamCard.getSnapshot().enabled).toBe(false)
+    render(<SmoothStreamCard {...cardProps(face)} />)
+    fireEvent.click(screen.getByRole('button', { name: /smooth stream/i }))
+
+    expect(screen.getByRole('checkbox', { name: new RegExp(`^${en.enabled}`) }).getAttribute('disabled'))
+      .not.toBeNull()
+    expect(screen.getByRole('checkbox', { name: new RegExp(`^${en.thinkAutoExpand}`) }).getAttribute('disabled'))
+      .not.toBeNull()
+
+    write.resolve()
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ saving: false }))
   })
 
   it('shows an unavailable card instead of removing it when its RPC cannot be reached', async () => {

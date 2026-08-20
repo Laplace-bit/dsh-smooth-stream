@@ -92,8 +92,8 @@ describe('smooth-stream host settings', () => {
     const ns = settingsNamespace(STREAM_SETTINGS_NS)
     expect(ctx.settings.get(ns)).toEqual(DEFAULT_STREAM_SETTINGS)
 
-    await ctx.settings.update(ns, { thinkAutoExpand: false })
-    expect(ctx.settings.get(ns)).toEqual({ thinkAutoExpand: false })
+    await ctx.settings.update(ns, { enabled: false, thinkAutoExpand: false })
+    expect(ctx.settings.get(ns)).toEqual({ enabled: false, thinkAutoExpand: false })
 
     await expect(ctx.settings.update(ns, { thinkAutoExpand: 'nope' })).rejects.toThrow()
 
@@ -113,14 +113,19 @@ describe('smooth-stream host settings', () => {
         version: STREAM_PACKAGE_VERSION,
         installation: 'development',
         writable: true,
+        enabled: DEFAULT_STREAM_SETTINGS.enabled,
         thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
         canUpgrade: false,
       },
     })
 
-    const updated = await registration.handler(STREAM_SETTINGS_RPC.write, { thinkAutoExpand: false }, signal())
-    expect(updated).toMatchObject({ ok: true, value: { thinkAutoExpand: false } })
-    expect(ctx.settings.get(settingsNamespace(STREAM_SETTINGS_NS))).toEqual({ thinkAutoExpand: false })
+    const updated = await registration.handler(
+      STREAM_SETTINGS_RPC.write,
+      { enabled: false, thinkAutoExpand: false },
+      signal(),
+    )
+    expect(updated).toMatchObject({ ok: true, value: { enabled: false, thinkAutoExpand: false } })
+    expect(ctx.settings.get(settingsNamespace(STREAM_SETTINGS_NS))).toEqual({ enabled: false, thinkAutoExpand: false })
 
     const malformed = await registration.handler(STREAM_SETTINGS_RPC.write, { thinkAutoExpand: 'false' }, signal())
     expect(malformed).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })

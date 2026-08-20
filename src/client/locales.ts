@@ -6,6 +6,7 @@ export const NS = 'settings.smoothStream'
 /** Locale keys the card renders. */
 export type SmoothStreamLocaleKey =
   | 'title' | 'description'
+  | 'enabled' | 'enabledHint'
   | 'thinkAutoExpand' | 'thinkAutoExpandHint'
   | 'readOnly' | 'loading' | 'unavailable' | 'retry'
   | 'version' | 'developmentVersion'
@@ -17,6 +18,8 @@ export type SmoothStreamLocaleKey =
 export const en: Record<SmoothStreamLocaleKey, string> = {
   title: 'Smooth stream',
   description: 'How replies are revealed while they stream.',
+  enabled: 'Enable smooth streaming',
+  enabledHint: 'Let this plugin render and follow streaming replies. Turn off to use the built-in Harness renderer.',
   thinkAutoExpand: 'Auto-expand thinking',
   thinkAutoExpandHint: 'Open the thinking block while it streams. Turn off to keep it collapsed.',
   readOnly: 'This deployment stores settings read-only.',
@@ -44,6 +47,8 @@ export const en: Record<SmoothStreamLocaleKey, string> = {
 export const zh: Record<SmoothStreamLocaleKey, string> = {
   title: '丝滑流式',
   description: '回复在流式输出时如何逐字展现。',
+  enabled: '启用丝滑流式渲染',
+  enabledHint: '由本插件渲染并跟随流式回复；关闭后使用 Harness 内置渲染。',
   thinkAutoExpand: '自动展开思考',
   thinkAutoExpandHint: '思考块在流式时自动展开；关闭后保持折叠，可手动展开。',
   readOnly: '本部署的设置为只读。',

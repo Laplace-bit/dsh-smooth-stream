@@ -61,12 +61,14 @@ Legacy `mode`, `revealCharsPerSec`, `scrollSpeedPxPerSec`, and `maxScrollSpeedPx
 
 ## User settings
 
-In the Web UI, open **Settings → Plugins → Plugin configuration** to find a **Smooth stream** card with an **"Auto-expand thinking"** toggle:
+In the Web UI, open **Settings → Plugins → Plugin configuration** to find a **Smooth stream** card with:
 
-- **On** (default): reasoning blocks auto-expand while streaming and collapse when thinking ends — the plugin's default behavior.
-- **Off**: reasoning blocks stay collapsed; you can still open one by hand, and the stream state will not wrestle it back.
+- **Enable smooth streaming** (on by default): lets this plugin own reply and tool-row rendering and follow. Turn it off to return rendering completely to the built-in Harness UI.
+- **Auto-expand thinking**: controls whether reasoning opens while it streams. This preference has no effect while the master toggle is off.
 
-This is a durable, user-level preference that applies live without a restart, and is written to the DeepSeek Harness user-settings document rather than the plugin's composed configuration.
+With “Auto-expand thinking” on, reasoning blocks open while streaming and collapse when thinking ends. With it off, reasoning stays collapsed; you can still open a block by hand, and the stream state will not wrestle it back.
+
+These are durable, user-level preferences that apply live without a restart, and are written to the DeepSeek Harness user-settings document rather than the plugin's composed configuration.
 
 ## About & updates
 

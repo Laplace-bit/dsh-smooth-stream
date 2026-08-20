@@ -17,6 +17,11 @@ export const STREAM_SETTINGS_NS = 'smooth-stream'
  */
 export interface StreamSettings {
   /**
+   * Whether this plugin replaces and wraps Harness conversation renderers.
+   * Off returns all rendering ownership to the built-in UI.
+   */
+  enabled: boolean
+  /**
    * Whether a reasoning ("Think") block auto-expands while it is the
    * streaming tail. Off keeps the block collapsed — the user can still open
    * it by hand — and stops the running state from re-owning the disclosure.
@@ -26,5 +31,6 @@ export interface StreamSettings {
 
 /** Defaults shared by the Host schema and the client-side fallback. */
 export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
+  enabled: true,
   thinkAutoExpand: true,
 }

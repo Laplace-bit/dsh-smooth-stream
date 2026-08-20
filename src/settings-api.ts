@@ -21,6 +21,8 @@ export interface StreamSettingsView {
   installation: StreamInstallationKind
   /** Whether the Host settings provider permits a write. */
   writable: boolean
+  /** Whether smooth-stream currently owns conversation rendering. */
+  enabled: boolean
   /** Current resolved preference. */
   thinkAutoExpand: boolean
   /** Whether a fixed npm update command is safe to offer. */

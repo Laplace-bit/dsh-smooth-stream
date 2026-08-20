@@ -1,6 +1,6 @@
 /**
  * The smooth-stream plugin configuration card, rendered inside the Web
- * Settings "plugin configuration" page. One toggle, staged until the user
+ * Settings "plugin configuration" page. Preferences are staged until the user
  * saves — the same shape as the Host-shipped cards, hand-drawn because the
  * Host cards' chrome is not exported for reuse.
  */
@@ -60,13 +60,26 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
                 {!state.writable ? <p className={css.readOnly} role="status">{t('readOnly')}</p> : null}
                 <label className={css.field}>
                   <span className={css.fieldHead}>
+                    <span className={css.label}>{t('enabled')}</span>
+                    <input
+                      type="checkbox"
+                      className={css.toggle}
+                      checked={state.enabled}
+                      disabled={!state.writable || state.saving}
+                      onChange={(event) => { props.edit({ enabled: event.target.checked }) }}
+                    />
+                  </span>
+                  <span className={css.hint}>{t('enabledHint')}</span>
+                </label>
+                <label className={state.enabled ? css.field : `${css.field} ${css.fieldDisabled}`}>
+                  <span className={css.fieldHead}>
                     <span className={css.label}>{t('thinkAutoExpand')}</span>
                     <input
                       type="checkbox"
                       className={css.toggle}
                       checked={state.thinkAutoExpand}
-                      disabled={!state.writable}
-                      onChange={(event) => { props.edit(event.target.checked) }}
+                      disabled={!state.writable || state.saving || !state.enabled}
+                      onChange={(event) => { props.edit({ thinkAutoExpand: event.target.checked }) }}
                     />
                   </span>
                   <span className={css.hint}>{t('thinkAutoExpandHint')}</span>

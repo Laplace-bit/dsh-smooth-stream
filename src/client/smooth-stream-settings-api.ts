@@ -1,6 +1,7 @@
 /** Browser adapter for the Host-owned smooth-stream settings RPC. */
 
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+import type { StreamSettings } from '../settings.ts'
 import {
   STREAM_SETTINGS_RPC,
   STREAM_SETTINGS_RPC_CHANNEL,
@@ -20,6 +21,7 @@ function settingsView(value: unknown): StreamSettingsView {
     || typeof data.version !== 'string'
     || !['npm', 'development', 'unmanaged'].includes(data.installation as string)
     || typeof data.writable !== 'boolean'
+    || typeof data.enabled !== 'boolean'
     || typeof data.thinkAutoExpand !== 'boolean'
     || typeof data.canUpgrade !== 'boolean') {
     throw new Error('dsh-smooth-stream: malformed settings response')
@@ -41,7 +43,7 @@ function accepted(result: Awaited<ReturnType<ConnectionHandle['rpc']['call']>>):
 /** Narrow client contract consumed by the staged settings-card controller. */
 export interface SmoothStreamSettingsApi {
   read(): Promise<StreamSettingsView>
-  write(thinkAutoExpand: boolean): Promise<StreamSettingsView>
+  write(settings: StreamSettings): Promise<StreamSettingsView>
   upgrade(): Promise<StreamUpgradeView>
 }
 
@@ -51,11 +53,11 @@ export function createSmoothStreamSettingsApi(connection: ConnectionHandle): Smo
     async read(): Promise<StreamSettingsView> {
       return settingsView(accepted(await connection.rpc.call(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.read, {})))
     },
-    async write(thinkAutoExpand: boolean): Promise<StreamSettingsView> {
+    async write(settings: StreamSettings): Promise<StreamSettingsView> {
       return settingsView(accepted(await connection.rpc.call(
         STREAM_SETTINGS_RPC_CHANNEL,
         STREAM_SETTINGS_RPC.write,
-        { thinkAutoExpand },
+        settings,
       )))
     },
     async upgrade(): Promise<StreamUpgradeView> {

@@ -1,7 +1,7 @@
 /** Staged form state for the plugin-owned smooth-stream settings RPC. */
 
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
-import { DEFAULT_STREAM_SETTINGS } from '../settings.ts'
+import { DEFAULT_STREAM_SETTINGS, type StreamSettings } from '../settings.ts'
 import type { StreamInstallationKind, StreamSettingsView } from '../settings-api.ts'
 import type { SmoothStreamSettingsApi } from './smooth-stream-settings-api.ts'
 
@@ -12,6 +12,7 @@ export interface SmoothStreamCardState {
   dirty: boolean
   saving: boolean
   failed: boolean
+  enabled: boolean
   thinkAutoExpand: boolean
   version: string | undefined
   installation: StreamInstallationKind
@@ -26,7 +27,7 @@ export interface SmoothStreamCardFace {
   hooks: {
     smoothStreamCard: SnapshotStore<SmoothStreamCardState>
   }
-  edit: (value: boolean) => void
+  edit: (patch: Partial<StreamSettings>) => void
   save: () => void
   discard: () => void
   reload: () => void
@@ -37,7 +38,7 @@ export interface SmoothStreamCardFace {
 export class SmoothStreamCardController {
   private readonly store = createSnapshotStore<SmoothStreamCardState>(this.projection())
   private loaded: StreamSettingsView | undefined
-  private staged: boolean | undefined
+  private staged: StreamSettings | undefined
   private saving = false
   private failed = false
   private upgrading = false
@@ -72,8 +73,9 @@ export class SmoothStreamCardController {
   inject(): SmoothStreamCardFace {
     return {
       hooks: { smoothStreamCard: this.store },
-      edit: (value) => {
-        this.staged = value
+      edit: (patch) => {
+        if (this.saving) return
+        this.staged = { ...this.values(), ...patch }
         this.failed = false
         this.publish()
       },
@@ -96,13 +98,20 @@ export class SmoothStreamCardController {
       dirty: this.staged !== undefined,
       saving: this.saving,
       failed: this.failed,
-      thinkAutoExpand: this.staged ?? this.loaded?.thinkAutoExpand ?? DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+      ...this.values(),
       version: this.loaded?.version,
       installation: this.loaded?.installation ?? 'unmanaged',
       canUpgrade: this.loaded?.canUpgrade ?? false,
       upgrading: this.upgrading,
       upgradeFailed: this.upgradeFailed,
       restartRequired: this.restartRequired,
+    }
+  }
+
+  private values(): StreamSettings {
+    return this.staged ?? {
+      enabled: this.loaded?.enabled ?? DEFAULT_STREAM_SETTINGS.enabled,
+      thinkAutoExpand: this.loaded?.thinkAutoExpand ?? DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
     }
   }
 

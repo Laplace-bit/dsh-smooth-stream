@@ -117,6 +117,14 @@
   padding: 12px 0;
 }
 
+.field + .field {
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.fieldDisabled {
+  opacity: 0.5;
+}
+
 .fieldHead {
   display: flex;
   align-items: center;
