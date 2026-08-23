@@ -2358,7 +2358,10 @@ describe('assistant renderer', () => {
     const surface = view.container.querySelector('[data-chat-transcript]') as HTMLElement
     const status = view.container.querySelector('[data-chat-turn-status]') as HTMLElement
     Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
-    Object.defineProperty(port, 'scrollHeight', { configurable: true, get: () => height })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => height + (Number.parseFloat(status.style.marginTop) || 0),
+    })
     vi.spyOn(surface, 'getBoundingClientRect').mockImplementation(() => {
       const shift = Number(/translate3d\(0, ([\d.]+)px, 0\)/.exec(surface.style.transform)?.[1] ?? 0)
       return { top: 0, bottom: 80 + shift } as DOMRect
@@ -2981,6 +2984,33 @@ describe('isGrowingChatNode', () => {
       requestFrame.mockRestore()
       cancelFrame.mockRestore()
     }
+  })
+
+  it('keeps already-revealed text when the follow flip restores and re-enables', async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] })
+    function FlipProgressiveProbe({ enabled, text }: { enabled: boolean; text: string }) {
+      const rootRef = useRef<HTMLDivElement>(null)
+      const speedCpsRef = useRef(35)
+      useProgressiveDomText(rootRef, enabled, true, speedCpsRef)
+      return <div ref={rootRef}>{text}</div>
+    }
+    const view = render(<FlipProgressiveProbe enabled text="Tool invoked" />)
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(view.container.textContent).toBe('Tool invoked')
+
+    // Tool row settles: structural follow drops, the hook restores full text.
+    view.rerender(<FlipProgressiveProbe enabled={false} text="Tool invoked" />)
+    await act(async () => {})
+    expect(view.container.textContent).toBe('Tool invoked')
+
+    // The live turn tail re-arms follow in the next layout pass. Without a
+    // persistent ledger this re-enable blanks the row from an empty ledger
+    // and replays the already-visible text.
+    view.rerender(<FlipProgressiveProbe enabled text="Tool invoked" />)
+    await act(async () => {})
+    expect(view.container.textContent).toBe('Tool invoked')
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(view.container.textContent).toBe('Tool invoked')
   })
 
   it('does not animate a completed historical context row', async () => {

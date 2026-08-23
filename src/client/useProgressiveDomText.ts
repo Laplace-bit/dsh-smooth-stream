@@ -18,6 +18,15 @@ interface TextRevealRecord {
   shown: number
 }
 
+/**
+ * Persistent reveal ledger per root: the follow wrapper can flip a Tool row
+ * off (structural settle) and straight back on (live tail) in adjacent
+ * layout effects. A fresh effect-local ledger would restore the full text and
+ * then blank-and-replay it; keeping one ledger per root makes re-entry a
+ * no-op for already-shown text and only paces genuinely new mutations.
+ */
+const ledgerByRoot = new WeakMap<HTMLElement, Map<Text, TextRevealRecord>>()
+
 const SKIP_TEXT_SELECTOR = [
   '[aria-hidden="true"]',
   '[aria-live]',
@@ -60,7 +69,11 @@ export function useProgressiveDomText(
     const root = rootRef.current
     if (root === null || typeof document === 'undefined') return
 
-    const records = new Map<Text, TextRevealRecord>()
+    let records = ledgerByRoot.get(root)
+    if (records === undefined) {
+      records = new Map<Text, TextRevealRecord>()
+      ledgerByRoot.set(root, records)
+    }
     const pending = new Set<Text>()
     const internalWrites = new WeakMap<Text, string>()
     let rafId = 0
@@ -221,7 +234,13 @@ export function useProgressiveDomText(
         // React may have committed a terminal replacement in the same mutation
         // phase that disables this hook. Never overwrite that newer renderer
         // value with the previous controlled source during layout cleanup.
-        if (node.isConnected && node.data === controlled) write(node, record.full)
+        if (node.isConnected && node.data === controlled) {
+          write(node, record.full)
+          // The restore presents the full source synchronously; mark the
+          // ledger settled so an immediate re-enable does not blank and
+          // replay already-visible text.
+          records.set(node, { ...record, shown: record.chars.length })
+        }
       }
       pending.clear()
       speedCpsRef.current = 35

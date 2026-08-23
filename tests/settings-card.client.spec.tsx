@@ -182,6 +182,18 @@ describe('smooth-stream settings card', () => {
     expect(inject).toEqual(['slots'])
   })
 
+  it('registers the namespace as the keyed slot key for the configurable tab', async () => {
+    const { ctx, slots } = await bench()
+    slots.register({
+      name: 'root',
+      children: { 'settings.plugin.item': { kind: 'keyed', scope: 'root' } },
+    } as never, () => null)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+
+    expect(slots.entries('settings.plugin.item').map(entry => entry.options.key))
+      .toEqual(['smooth-stream'])
+  })
+
   it('registers the card once the plugin-item slot is declared', async () => {
     const { ctx, slots } = await bench()
     declareCardSlot(slots)
