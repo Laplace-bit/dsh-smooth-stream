@@ -18,6 +18,9 @@ interface TextRevealRecord {
   shown: number
 }
 
+/** Last presented text per root, retained across follow lifecycle flips. */
+const ledgerByRoot = new WeakMap<HTMLElement, Map<Text, TextRevealRecord>>()
+
 const SKIP_TEXT_SELECTOR = [
   '[aria-hidden="true"]',
   '[aria-live]',
@@ -56,11 +59,58 @@ export function useProgressiveDomText(
   onSettled?: (() => void) | undefined,
 ): void {
   useLayoutEffect(() => {
-    if (!enabled) return
     const root = rootRef.current
     if (root === null || typeof document === 'undefined') return
 
-    const records = new Map<Text, TextRevealRecord>()
+    let records = ledgerByRoot.get(root)
+    if (!enabled && records === undefined) return
+    if (records === undefined) {
+      records = new Map<Text, TextRevealRecord>()
+      ledgerByRoot.set(root, records)
+    }
+
+    const forEachText = (from: Node, callback: (text: Text) => void): void => {
+      if (from.nodeType === Node.TEXT_NODE) {
+        callback(from as Text)
+        return
+      }
+      const walker = document.createTreeWalker(from, NodeFilter.SHOW_TEXT)
+      let current = walker.nextNode()
+      while (current !== null) {
+        callback(current as Text)
+        current = walker.nextNode()
+      }
+    }
+
+    const settle = (text: Text): void => {
+      if (!revealable(text, root)) return
+      const chars = [...text.data]
+      records.set(text, { chars, full: text.data, shown: chars.length })
+    }
+
+    const snapshotVisible = (): void => {
+      const current = new Set<Text>()
+      forEachText(root, (text) => {
+        if (!revealable(text, root)) return
+        current.add(text)
+        settle(text)
+      })
+      for (const text of records.keys()) {
+        if (!current.has(text)) records.delete(text)
+      }
+    }
+
+    if (!enabled) {
+      snapshotVisible()
+      const observer = typeof MutationObserver === 'undefined'
+        ? null
+        : new MutationObserver(snapshotVisible)
+      observer?.observe(root, { childList: true, characterData: true, subtree: true })
+      return () => {
+        observer?.disconnect()
+      }
+    }
+
     const pending = new Set<Text>()
     const internalWrites = new WeakMap<Text, string>()
     let rafId = 0
@@ -104,18 +154,22 @@ export function useProgressiveDomText(
     }
 
     const visit = (from: Node, reveal: boolean): void => {
-      if (from.nodeType === Node.TEXT_NODE) {
-        const text = from as Text
-        if (reveal) enqueue(text, text.data, records.get(text))
-        return
-      }
-      const walker = document.createTreeWalker(from, NodeFilter.SHOW_TEXT)
-      let current = walker.nextNode()
-      while (current !== null) {
-        const text = current as Text
-        if (reveal) enqueue(text, text.data, records.get(text))
-        current = walker.nextNode()
-      }
+      forEachText(from, (text) => {
+        if (!revealable(text, root)) return
+        if (reveal) {
+          enqueue(text, text.data, records.get(text))
+          return
+        }
+        settle(text)
+      })
+    }
+
+    const forget = (from: Node): void => {
+      forEachText(from, (text) => {
+        if (root.contains(text)) return
+        records.delete(text)
+        pending.delete(text)
+      })
     }
 
     const scheduleFrame = (): void => {
@@ -187,7 +241,7 @@ export function useProgressiveDomText(
       else scheduleFrame()
     }
 
-    if (revealInitial) visit(root, true)
+    visit(root, revealInitial)
 
     const observer = typeof MutationObserver === 'undefined'
       ? null
@@ -203,6 +257,7 @@ export function useProgressiveDomText(
               enqueue(node, node.data, records.get(node))
               continue
             }
+            for (const removed of mutation.removedNodes) forget(removed)
             for (const added of mutation.addedNodes) visit(added, true)
           }
           if (pending.size === 0) announceSettled()
@@ -221,7 +276,9 @@ export function useProgressiveDomText(
         // React may have committed a terminal replacement in the same mutation
         // phase that disables this hook. Never overwrite that newer renderer
         // value with the previous controlled source during layout cleanup.
-        if (node.isConnected && node.data === controlled) write(node, record.full)
+        if (node.isConnected && node.data === controlled) {
+          write(node, record.full)
+        }
       }
       pending.clear()
       speedCpsRef.current = 35
