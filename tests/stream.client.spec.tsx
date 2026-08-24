@@ -120,6 +120,13 @@ function ProgressiveDomProbe({ text }: { text: string }) {
   return <div ref={rootRef}>{text}</div>
 }
 
+function FollowToggleProgressiveDomProbe({ enabled, text }: { enabled: boolean; text: string }) {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const speedCpsRef = useRef(35)
+  useProgressiveDomText(rootRef, enabled, true, speedCpsRef)
+  return <div ref={rootRef}>{text}</div>
+}
+
 function CompetingFollowProbe({ secondary }: { secondary: boolean }) {
   const primaryRef = useRef<HTMLDivElement>(null)
   const secondaryRef = useRef<HTMLDivElement>(null)
@@ -2988,43 +2995,94 @@ describe('isGrowingChatNode', () => {
 
   it('keeps already-revealed text when the follow flip restores and re-enables', async () => {
     vi.useFakeTimers({ toFake: [...FAKE] })
-    function FlipProgressiveProbe({ enabled, text }: { enabled: boolean; text: string }) {
-      const rootRef = useRef<HTMLDivElement>(null)
-      const speedCpsRef = useRef(35)
-      useProgressiveDomText(rootRef, enabled, true, speedCpsRef)
-      return <div ref={rootRef}>{text}</div>
-    }
-    const view = render(<FlipProgressiveProbe enabled text="Tool invoked" />)
+    const view = render(<FollowToggleProgressiveDomProbe enabled text="Tool invoked" />)
     await act(() => vi.advanceTimersByTimeAsync(400))
     expect(view.container.textContent).toBe('Tool invoked')
 
     // Tool row settles: structural follow drops, the hook restores full text.
-    view.rerender(<FlipProgressiveProbe enabled={false} text="Tool invoked" />)
+    view.rerender(<FollowToggleProgressiveDomProbe enabled={false} text="Tool invoked" />)
     await act(async () => {})
     expect(view.container.textContent).toBe('Tool invoked')
 
-    // The live turn tail re-arms follow in the next layout pass. Without a
-    // persistent ledger this re-enable blanks the row from an empty ledger
-    // and replays the already-visible text.
-    view.rerender(<FlipProgressiveProbe enabled text="Tool invoked" />)
+    // The live turn tail re-arms follow in the next layout pass. Without
+    // retaining the root's activation state, a fresh ledger would blank and
+    // replay the already-visible text.
+    view.rerender(<FollowToggleProgressiveDomProbe enabled text="Tool invoked" />)
     await act(async () => {})
     expect(view.container.textContent).toBe('Tool invoked')
     await act(() => vi.advanceTimersByTimeAsync(400))
     expect(view.container.textContent).toBe('Tool invoked')
   })
 
+  it('keeps text that became visible while follow was disabled', async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] })
+    const view = render(<FollowToggleProgressiveDomProbe enabled text="Tool" />)
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(view.container.textContent).toBe('Tool')
+
+    view.rerender(<FollowToggleProgressiveDomProbe enabled={false} text="Tool" />)
+    await act(async () => {})
+    view.rerender(<FollowToggleProgressiveDomProbe enabled={false} text="Tool result" />)
+    await act(async () => {})
+    expect(view.container.textContent).toBe('Tool result')
+
+    view.rerender(<FollowToggleProgressiveDomProbe enabled text="Tool result" />)
+    await act(async () => {})
+    expect(view.container.textContent).toBe('Tool result')
+  })
+
+  it('paces only new text committed when follow re-enables', async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] })
+    const view = render(<FollowToggleProgressiveDomProbe enabled text="Tool" />)
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(view.container.textContent).toBe('Tool')
+
+    view.rerender(<FollowToggleProgressiveDomProbe enabled={false} text="Tool" />)
+    await act(async () => {})
+    view.rerender(<FollowToggleProgressiveDomProbe enabled text="Tool result" />)
+    await act(async () => {})
+    expect(view.container.textContent).toBe('Tool')
+
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(view.container.textContent).toBe('Tool result')
+  })
+
+  it('keeps initial reveal pacing through StrictMode effect replay', async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] })
+    const text = 'StrictMode should not mark a fresh renderer as already revealed.'
+    const view = render(
+      <StrictMode>
+        <FollowToggleProgressiveDomProbe enabled text={text} />
+      </StrictMode>,
+    )
+
+    expect(view.container.textContent).not.toBe(text)
+    await act(() => vi.advanceTimersByTimeAsync(1600))
+    expect(view.container.textContent).toBe(text)
+  })
+
   it('does not animate a completed historical context row', async () => {
     vi.useFakeTimers({ toFake: [...FAKE] })
-    let observerCount = 0
+    let resizeObserverCount = 0
+    let mutationObserverCount = 0
     class ResizeObserverStub {
       constructor(_callback: ResizeObserverCallback) {
-        observerCount += 1
+        resizeObserverCount += 1
+      }
+
+      observe(): void {}
+      disconnect(): void {}
+    }
+    class MutationObserverStub {
+      constructor(_callback: MutationCallback) {
+        mutationObserverCount += 1
       }
 
       observe(): void {}
       disconnect(): void {}
     }
     vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+    vi.stubGlobal('MutationObserver', MutationObserverStub)
     function Inner() {
       return <div>historical context</div>
     }
@@ -3053,7 +3111,8 @@ describe('isGrowingChatNode', () => {
 
     expect(transcript.style.transform).toBe('')
     expect(port.getAttribute('data-follow-owned')).toBeNull()
-    expect(observerCount).toBe(0)
+    expect(resizeObserverCount).toBe(0)
+    expect(mutationObserverCount).toBe(0)
   })
 
   it('re-arms follow for a future Agent renderer when its DOM grows', async () => {
