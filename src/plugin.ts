@@ -7,8 +7,18 @@ import { DEFAULT_STREAM_CONFIG, type StreamConfig } from './config.ts'
 import { injectStreamConfig } from './boot-config.ts'
 import { STREAM_PACKAGE_NAME, STREAM_PACKAGE_VERSION } from './package-meta.ts'
 import { inspectProfileInstallation, updateNpmProfilePackage } from './profile-installation.ts'
-import { STREAM_SETTINGS_RPC, STREAM_SETTINGS_RPC_CHANNEL, type StreamSettingsView } from './settings-api.ts'
-import { DEFAULT_STREAM_SETTINGS, STREAM_SETTINGS_NS, type StreamSettings } from './settings.ts'
+import {
+  STREAM_SETTINGS_RPC,
+  STREAM_SETTINGS_RPC_CHANNEL,
+  type StreamDebugSettingsView,
+  type StreamSettingsView,
+} from './settings-api.ts'
+import {
+  DEFAULT_STREAM_SETTINGS,
+  STREAM_SETTINGS_NS,
+  type StreamDebugTuning,
+  type StreamSettings,
+} from './settings.ts'
 
 /** Display name shown by the Host loader while the plugin is mounted. */
 export const name = 'dsh-smooth-stream'
@@ -44,6 +54,18 @@ export const Config: Schema<Config> = Schema.object({
 export const StreamSettingsSchema: Schema<StreamSettings> = Schema.object({
   enabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.enabled),
   thinkAutoExpand: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand),
+  debugEnabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.debugEnabled),
+  debugTuning: Schema.object({
+    revealScale: Schema.number().min(0.25).max(2).default(DEFAULT_STREAM_SETTINGS.debugTuning.revealScale),
+    queuePressure: Schema.number().min(0).max(2).default(DEFAULT_STREAM_SETTINGS.debugTuning.queuePressure),
+    maxRevealCps: Schema.number().min(120).max(1000).default(DEFAULT_STREAM_SETTINGS.debugTuning.maxRevealCps),
+    springStiffness: Schema.number().min(40).max(320).default(DEFAULT_STREAM_SETTINGS.debugTuning.springStiffness),
+    springDamping: Schema.number().min(8).max(80).default(DEFAULT_STREAM_SETTINGS.debugTuning.springDamping),
+    springMass: Schema.number().min(0.5).max(3).default(DEFAULT_STREAM_SETTINGS.debugTuning.springMass),
+    runwayPx: Schema.number().min(0).max(120).default(DEFAULT_STREAM_SETTINGS.debugTuning.runwayPx),
+    reserveResponseMs: Schema.number().min(60).max(600).default(DEFAULT_STREAM_SETTINGS.debugTuning.reserveResponseMs),
+    backpressureMinScale: Schema.number().min(0.25).max(1).default(DEFAULT_STREAM_SETTINGS.debugTuning.backpressureMinScale),
+  }),
 })
 
 /**
@@ -80,20 +102,52 @@ export function apply(ctx: Context, config: Config): void {
 
       const view = (): StreamSettingsView => {
         const installation = inspectProfileInstallation(connectionCtx.baseUrl, STREAM_PACKAGE_NAME)
+        const settings = scope.get()
         return {
           version: STREAM_PACKAGE_VERSION,
           installation: installation.kind,
           writable: connectionCtx.settings.writable,
-          enabled: scope.get().enabled,
-          thinkAutoExpand: scope.get().thinkAutoExpand,
+          enabled: settings.enabled,
+          thinkAutoExpand: settings.thinkAutoExpand,
           canUpgrade: installation.kind === 'npm',
         }
+      }
+
+      const debugView = (): StreamDebugSettingsView => {
+        const settings = scope.get()
+        return {
+          debugEnabled: settings.debugEnabled,
+          tuning: { ...settings.debugTuning },
+        }
+      }
+
+      const validDebugTuning = (value: unknown): value is StreamDebugTuning => {
+        if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+        const tuning = value as Record<string, unknown>
+        return typeof tuning.revealScale === 'number'
+          && tuning.revealScale >= 0.25 && tuning.revealScale <= 2
+          && typeof tuning.queuePressure === 'number'
+          && tuning.queuePressure >= 0 && tuning.queuePressure <= 2
+          && typeof tuning.maxRevealCps === 'number'
+          && tuning.maxRevealCps >= 120 && tuning.maxRevealCps <= 1000
+          && typeof tuning.springStiffness === 'number'
+          && tuning.springStiffness >= 40 && tuning.springStiffness <= 320
+          && typeof tuning.springDamping === 'number'
+          && tuning.springDamping >= 8 && tuning.springDamping <= 80
+          && typeof tuning.springMass === 'number'
+          && tuning.springMass >= 0.5 && tuning.springMass <= 3
+          && typeof tuning.runwayPx === 'number'
+          && tuning.runwayPx >= 0 && tuning.runwayPx <= 120
+          && typeof tuning.reserveResponseMs === 'number'
+          && tuning.reserveResponseMs >= 60 && tuning.reserveResponseMs <= 600
+          && typeof tuning.backpressureMinScale === 'number'
+          && tuning.backpressureMinScale >= 0.25 && tuning.backpressureMinScale <= 1
       }
 
       const handle: ConnectionRpcHandler = async (endpoint, payload) => {
         if (endpoint === STREAM_SETTINGS_RPC.read) return { ok: true, value: view() }
         if (endpoint === STREAM_SETTINGS_RPC.write) {
-          if (typeof payload !== 'object' || payload === null
+          if (typeof payload !== 'object' || payload === null || Array.isArray(payload)
             || typeof (payload as { enabled?: unknown }).enabled !== 'boolean'
             || typeof (payload as { thinkAutoExpand?: unknown }).thinkAutoExpand !== 'boolean') {
             return {
@@ -116,8 +170,28 @@ export function apply(ctx: Context, config: Config): void {
             }
           }
           try {
-            const next = payload as StreamSettings
-            await scope.update({ enabled: next.enabled, thinkAutoExpand: next.thinkAutoExpand })
+            const next = payload as {
+              enabled: boolean
+              thinkAutoExpand: boolean
+              debugEnabled?: unknown
+              debugTuning?: unknown
+            }
+            const hasDebug = next.debugEnabled !== undefined || next.debugTuning !== undefined
+            if (hasDebug && (typeof next.debugEnabled !== 'boolean' || !validDebugTuning(next.debugTuning))) {
+              return {
+                ok: false,
+                error: {
+                  code: 'settings-rejected',
+                  message: 'debugEnabled and debugTuning must be provided together and be valid',
+                  details: { ns: STREAM_SETTINGS_NS },
+                },
+              }
+            }
+            await scope.update({
+              enabled: next.enabled,
+              thinkAutoExpand: next.thinkAutoExpand,
+              ...(hasDebug ? { debugEnabled: next.debugEnabled, debugTuning: next.debugTuning } : {}),
+            })
           } catch {
             return {
               ok: false,
@@ -129,6 +203,53 @@ export function apply(ctx: Context, config: Config): void {
             }
           }
           return { ok: true, value: view() }
+        }
+        if (endpoint === STREAM_SETTINGS_RPC.debugRead) return { ok: true, value: debugView() }
+        if (endpoint === STREAM_SETTINGS_RPC.debugWrite) {
+          if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+            return {
+              ok: false,
+              error: {
+                code: 'settings-rejected',
+                message: 'debug settings must be an object',
+                details: { ns: STREAM_SETTINGS_NS },
+              },
+            }
+          }
+          const next = payload as { debugEnabled?: unknown; tuning?: unknown }
+          if (typeof next.debugEnabled !== 'boolean' || !validDebugTuning(next.tuning)) {
+            return {
+              ok: false,
+              error: {
+                code: 'settings-rejected',
+                message: 'debugEnabled and tuning are malformed',
+                details: { ns: STREAM_SETTINGS_NS },
+              },
+            }
+          }
+          if (!connectionCtx.settings.writable) {
+            return {
+              ok: false,
+              error: {
+                code: 'settings-rejected',
+                message: 'smooth-stream debug settings are read-only',
+                details: { ns: STREAM_SETTINGS_NS },
+              },
+            }
+          }
+          try {
+            await scope.update({ debugEnabled: next.debugEnabled, debugTuning: next.tuning })
+          } catch {
+            return {
+              ok: false,
+              error: {
+                code: 'settings-rejected',
+                message: 'smooth-stream debug settings update failed',
+                details: { ns: STREAM_SETTINGS_NS },
+              },
+            }
+          }
+          return { ok: true, value: debugView() }
         }
         if (endpoint === STREAM_SETTINGS_RPC.upgrade) {
           const installation = inspectProfileInstallation(connectionCtx.baseUrl, STREAM_PACKAGE_NAME)

@@ -14,6 +14,8 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { DEFAULT_STREAM_DEBUG_TUNING, type StreamDebugTuning } from '../settings.ts'
+import { debugRuntime } from './debugRuntime.ts'
 
 export type StreamSmoothingPreset = 'realtime' | 'balanced' | 'silky'
 
@@ -117,13 +119,14 @@ export function computeAdaptiveQueueStep(
   dtMs: number,
   debt: number,
   revealScale = 1,
+  tuning: StreamDebugTuning = DEFAULT_STREAM_DEBUG_TUNING,
 ): AdaptiveQueueStep {
   if (backlog <= 0 || dtMs <= 0) return { revealChars: 0, debt: 0, speedCps: 0 }
   const speedCps = Math.min(
-    QUEUE_MAX_SPEED_CPS,
-    QUEUE_BASE_SPEED_CPS + Math.pow(backlog, QUEUE_ACCEL_EXPONENT) * QUEUE_PRESSURE_FACTOR,
+    tuning.maxRevealCps,
+    QUEUE_BASE_SPEED_CPS + Math.pow(backlog, QUEUE_ACCEL_EXPONENT) * tuning.queuePressure,
   )
-  const effectiveScale = clamp(revealScale, 0.05, 1)
+  const effectiveScale = clamp(revealScale * tuning.revealScale, 0.05, 2)
   const accumulated = Math.max(0, debt) + speedCps * effectiveScale * (dtMs / 1000)
   const revealChars = Math.min(backlog, Math.floor(accumulated))
   return { revealChars, debt: revealChars >= backlog ? 0 : accumulated - revealChars, speedCps }
@@ -313,6 +316,7 @@ export function useSmoothStreamContent(
   revealScaleOutRef.current = revealScaleRef
   const inputCompleteRef = useRef(inputComplete)
   inputCompleteRef.current = inputComplete
+  const streamIdRef = useRef(`stream-${Math.random().toString(36).slice(2)}`)
 
   useEffect(() => {
     holdBackRef.current = shouldHoldBack
@@ -374,6 +378,7 @@ export function useSmoothStreamContent(
         settleCpsRef.current = null
         const speedOut = speedOutRef.current
         if (speedOut !== undefined) speedOut.current = seedCps
+        debugRuntime.reportStream(streamIdRef.current, null)
         stopFrameLoop()
         return
       }
@@ -390,6 +395,7 @@ export function useSmoothStreamContent(
 
       const idleMs = now - lastInputTsRef.current
       const producerComplete = inputCompleteRef.current
+      const debugTuning = debugRuntime.activeTuning()
       const inputActive = !producerComplete && idleMs <= config.activeInputWindowMs
       const settling = producerComplete || (!inputActive && idleMs >= config.settleAfterMs)
       if (!producerComplete) settleCpsRef.current = null
@@ -422,7 +428,7 @@ export function useSmoothStreamContent(
           },
           dtSeconds,
         )
-        revealChars = Math.min(step.revealChars, backlog)
+        revealChars = Math.min(Math.round(step.revealChars * debugTuning.revealScale), backlog)
         revealSpeedCps = frameIntervalMs > 0 ? (revealChars * 1000) / frameIntervalMs : 0
       } else {
         const step = computeAdaptiveQueueStep(
@@ -430,11 +436,20 @@ export function useSmoothStreamContent(
           frameIntervalMs,
           queueDebtRef.current,
           revealScaleOutRef.current?.current ?? 1,
+          debugTuning,
         )
         revealChars = step.revealChars
         revealSpeedCps = step.speedCps
         nextQueueDebt = step.debt
       }
+
+      debugRuntime.reportStream(streamIdRef.current, {
+        backlog,
+        speedCps: revealSpeedCps,
+        targetChars: targetCount,
+        displayedChars: displayedCount,
+        active: !producerComplete,
+      })
 
       // Performance guard: while degraded and the reply is offscreen, skip
       // the DOM commit — the backlog keeps accumulating and flushes when the
@@ -527,6 +542,7 @@ export function useSmoothStreamContent(
   useEffect(() => {
     return () => {
       stopFrameLoop()
+      debugRuntime.reportStream(streamIdRef.current, null)
     }
   }, [stopFrameLoop])
 

@@ -1,10 +1,11 @@
 /** Browser adapter for the Host-owned smooth-stream settings RPC. */
 
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
-import type { StreamSettings } from '../settings.ts'
+import type { StreamDebugTuning, StreamSettings } from '../settings.ts'
 import {
   STREAM_SETTINGS_RPC,
   STREAM_SETTINGS_RPC_CHANNEL,
+  type StreamDebugSettingsView,
   type StreamSettingsView,
   type StreamUpgradeView,
 } from '../settings-api.ts'
@@ -35,6 +36,29 @@ function upgradeView(value: unknown): StreamUpgradeView {
   return { restartRequired: true }
 }
 
+function debugSettingsView(value: unknown): StreamDebugSettingsView {
+  const data = record(value)
+  const tuning = record(data?.tuning)
+  if (data === undefined
+    || typeof data.debugEnabled !== 'boolean'
+    || tuning === undefined
+    || typeof tuning.revealScale !== 'number'
+    || typeof tuning.queuePressure !== 'number'
+    || typeof tuning.maxRevealCps !== 'number'
+    || typeof tuning.springStiffness !== 'number'
+    || typeof tuning.springDamping !== 'number'
+    || typeof tuning.springMass !== 'number'
+    || typeof tuning.runwayPx !== 'number'
+    || typeof tuning.reserveResponseMs !== 'number'
+    || typeof tuning.backpressureMinScale !== 'number') {
+    throw new Error('dsh-smooth-stream: malformed debug settings response')
+  }
+  return {
+    debugEnabled: data.debugEnabled,
+    tuning: tuning as unknown as StreamDebugTuning,
+  }
+}
+
 function accepted(result: Awaited<ReturnType<ConnectionHandle['rpc']['call']>>): unknown {
   if (!result.ok) throw new Error(result.error.message)
   return result.value
@@ -43,7 +67,9 @@ function accepted(result: Awaited<ReturnType<ConnectionHandle['rpc']['call']>>):
 /** Narrow client contract consumed by the staged settings-card controller. */
 export interface SmoothStreamSettingsApi {
   read(): Promise<StreamSettingsView>
-  write(settings: StreamSettings): Promise<StreamSettingsView>
+  write(settings: Pick<StreamSettings, 'enabled' | 'thinkAutoExpand'> & Partial<Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>>): Promise<StreamSettingsView>
+  readDebug(): Promise<StreamDebugSettingsView>
+  writeDebug(settings: Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>): Promise<StreamDebugSettingsView>
   upgrade(): Promise<StreamUpgradeView>
 }
 
@@ -53,11 +79,31 @@ export function createSmoothStreamSettingsApi(connection: ConnectionHandle): Smo
     async read(): Promise<StreamSettingsView> {
       return settingsView(accepted(await connection.rpc.call(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.read, {})))
     },
-    async write(settings: StreamSettings): Promise<StreamSettingsView> {
+    async write(settings: Pick<StreamSettings, 'enabled' | 'thinkAutoExpand'> & Partial<Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>>): Promise<StreamSettingsView> {
       return settingsView(accepted(await connection.rpc.call(
         STREAM_SETTINGS_RPC_CHANNEL,
         STREAM_SETTINGS_RPC.write,
-        settings,
+        {
+          enabled: settings.enabled,
+          thinkAutoExpand: settings.thinkAutoExpand,
+          ...(settings.debugEnabled === undefined || settings.debugTuning === undefined
+            ? {}
+            : { debugEnabled: settings.debugEnabled, debugTuning: settings.debugTuning }),
+        },
+      )))
+    },
+    async readDebug(): Promise<StreamDebugSettingsView> {
+      return debugSettingsView(accepted(await connection.rpc.call(
+        STREAM_SETTINGS_RPC_CHANNEL,
+        STREAM_SETTINGS_RPC.debugRead,
+        {},
+      )))
+    },
+    async writeDebug(settings: Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>): Promise<StreamDebugSettingsView> {
+      return debugSettingsView(accepted(await connection.rpc.call(
+        STREAM_SETTINGS_RPC_CHANNEL,
+        STREAM_SETTINGS_RPC.debugWrite,
+        { debugEnabled: settings.debugEnabled, tuning: settings.debugTuning },
       )))
     },
     async upgrade(): Promise<StreamUpgradeView> {

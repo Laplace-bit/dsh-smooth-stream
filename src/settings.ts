@@ -10,6 +10,41 @@
 /** Settings namespace registered by the Host and served through the plugin RPC. */
 export const STREAM_SETTINGS_NS = 'smooth-stream'
 
+/** Runtime knobs exposed only while the diagnostics switch is enabled. */
+export interface StreamDebugTuning {
+  /** Multiplier applied to the reveal cadence (1 = preset default). */
+  revealScale: number
+  /** Multiplier for backlog pressure in the adaptive reveal queue. */
+  queuePressure: number
+  /** Upper bound for reveal cadence, in characters per second. */
+  maxRevealCps: number
+  /** Spring stiffness used by the conversation follower. */
+  springStiffness: number
+  /** Spring damping used by the conversation follower. */
+  springDamping: number
+  /** Spring mass used by the conversation follower. */
+  springMass: number
+  /** Predictive runway before the fixed conversation chrome, in pixels. */
+  runwayPx: number
+  /** Response time for opening/closing the predictive runway, in ms. */
+  reserveResponseMs: number
+  /** Lowest reveal multiplier when visual lag fills the safe paint room. */
+  backpressureMinScale: number
+}
+
+/** Defaults preserve the production engine exactly. */
+export const DEFAULT_STREAM_DEBUG_TUNING: StreamDebugTuning = {
+  revealScale: 1,
+  queuePressure: 0.85,
+  maxRevealCps: 600,
+  springStiffness: 130,
+  springDamping: 24,
+  springMass: 1,
+  runwayPx: 48,
+  reserveResponseMs: 180,
+  backpressureMinScale: 0.55,
+}
+
 /**
  * Preferences a user may set. Deliberately separate from {@link StreamConfig}
  * because the two change at different times: composition-time values go
@@ -27,10 +62,16 @@ export interface StreamSettings {
    * it by hand — and stops the running state from re-owning the disclosure.
    */
   thinkAutoExpand: boolean
+  /** Whether the live renderer diagnostics panel is enabled. */
+  debugEnabled: boolean
+  /** Values edited by the diagnostics panel. */
+  debugTuning: StreamDebugTuning
 }
 
 /** Defaults shared by the Host schema and the client-side fallback. */
 export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   enabled: true,
   thinkAutoExpand: true,
+  debugEnabled: false,
+  debugTuning: DEFAULT_STREAM_DEBUG_TUNING,
 }

@@ -7,6 +7,8 @@ export const STREAM_SETTINGS_RPC_CHANNEL = '/smooth-stream'
 export const STREAM_SETTINGS_RPC = {
   read: 'settings.read',
   write: 'settings.write',
+  debugRead: 'debug.read',
+  debugWrite: 'debug.write',
   upgrade: 'plugin.upgrade',
 } as const
 
@@ -27,6 +29,12 @@ export interface StreamSettingsView {
   thinkAutoExpand: boolean
   /** Whether a fixed npm update command is safe to offer. */
   canUpgrade: boolean
+}
+
+/** Debug-only settings returned by the diagnostics RPC. */
+export interface StreamDebugSettingsView {
+  debugEnabled: boolean
+  tuning: import('./settings.ts').StreamDebugTuning
 }
 
 /** Successful package update acknowledgement; loading the new code needs a restart. */

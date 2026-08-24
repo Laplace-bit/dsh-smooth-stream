@@ -36,6 +36,8 @@ import {
 import { apply, inject } from '../src/client/index.ts'
 import { isFollowableChatNode, isGrowingChatNode, wrapFollowNodeView } from '../src/client/TypewriterToolNodeView.tsx'
 import { DEFAULT_STREAM_CONFIG, STREAM_BOOT_GLOBAL } from '../src/config.ts'
+import { DEFAULT_STREAM_DEBUG_TUNING } from '../src/settings.ts'
+import { debugRuntime } from '../src/client/debugRuntime.ts'
 import { Config } from '../src/plugin.ts'
 import { useProgressiveDomText } from '../src/client/useProgressiveDomText.ts'
 import css from '../src/client/TypewriterAssistantNodeView.module.css'
@@ -44,6 +46,7 @@ const FAKE = ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'req
 
 afterEach(() => {
   cleanup()
+  debugRuntime.resetRuntime()
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
@@ -1453,6 +1456,79 @@ describe('assistant renderer', () => {
     expect(port.scrollTop).toBeGreaterThan(400)
   })
 
+  it('keeps the text-to-status gap natural after the reader returns to the floor', async () => {
+    const block = { kind: 'text', text: 'line one\n\nline two\n\nline three' }
+    let naturalHeight = 500
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-transcript>
+            <TypewriterAssistantNodeView {...assistantProps('running', [block])} />
+          </div>
+          <div data-chat-turn-status="" role="status">Deep diving...</div>
+        </div>
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    const status = view.container.querySelector('[data-chat-turn-status]') as HTMLElement
+    const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => naturalHeight + (Number.parseFloat(status.style.marginTop) || 0),
+    })
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 0,
+      bottom: 80 + currentTranslate(transcript),
+    }) as DOMRect)
+    vi.spyOn(status, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return { top: 96 + runway, bottom: 122 + runway } as DOMRect
+    })
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 160, bottom: 240 } as DOMRect)
+    port.scrollTop = 390
+    await act(() => vi.advanceTimersByTimeAsync(80))
+
+    const untouchedGaps: number[] = []
+    for (let frame = 0; frame < 8; frame += 1) {
+      naturalHeight += 8
+      await act(() => vi.advanceTimersByTimeAsync(16))
+      untouchedGaps.push(status.getBoundingClientRect().top - transcript.getBoundingClientRect().bottom)
+    }
+
+    fireEvent.wheel(port, { deltaY: -80 })
+    port.scrollTop = 320
+    fireEvent.scroll(port)
+    await act(() => vi.advanceTimersByTimeAsync(80))
+    expect(port.getAttribute('data-follow-owned')).toBeNull()
+    expect(status.style.marginTop).toBe('')
+    expect(status.getBoundingClientRect().top - transcript.getBoundingClientRect().bottom).toBeCloseTo(16, 1)
+
+    fireEvent.wheel(port, { deltaY: 80 })
+    port.scrollTop = port.scrollHeight - port.clientHeight
+    fireEvent.scroll(port)
+    await act(() => vi.advanceTimersByTimeAsync(16))
+    const returnGap = status.getBoundingClientRect().top - transcript.getBoundingClientRect().bottom
+
+    const gaps: number[] = []
+    await act(() => vi.advanceTimersByTimeAsync(800))
+    for (let frame = 0; frame < 12; frame += 1) {
+      naturalHeight += 8
+      await act(() => vi.advanceTimersByTimeAsync(16))
+      gaps.push(status.getBoundingClientRect().top - transcript.getBoundingClientRect().bottom)
+    }
+
+    expect(port.getAttribute('data-follow-owned')).not.toBeNull()
+    // Normal line-wrap buffering can briefly add less than one rendered line;
+    // a leaked 48px runway instead opens the screenshot's full blank block.
+    const maximumBufferedGap = 40
+    expect(Math.max(...untouchedGaps)).toBeLessThanOrEqual(maximumBufferedGap)
+    expect(returnGap).toBeLessThanOrEqual(maximumBufferedGap)
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(maximumBufferedGap)
+  })
+
   it('drops follow after the node settles so a light wheel is not pulled back', async () => {
     const block = { kind: 'reasoning', text: 'first line\n\nsecond' }
     const view = render(
@@ -2287,7 +2363,10 @@ describe('assistant renderer', () => {
       const shift = Number(/translate3d\(0, ([\d.]+)px, 0\)/.exec(surface.style.transform)?.[1] ?? 0)
       return { top: 0, bottom: 80 + shift } as DOMRect
     })
-    vi.spyOn(status, 'getBoundingClientRect').mockReturnValue({ top: 96, bottom: 122 } as DOMRect)
+    vi.spyOn(status, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return { top: 96 + runway, bottom: 122 + runway } as DOMRect
+    })
     port.scrollTop = 390
     await act(() => vi.advanceTimersByTimeAsync(32))
     height += 28
@@ -2302,7 +2381,8 @@ describe('assistant renderer', () => {
     expect(port.getAttribute('data-follow-owned')).toBeNull()
     expect(port.scrollTop).toBeCloseTo(340 - shift, 5)
     expect(surface.style.transform).toBe('')
-    expect(status.style.marginTop).toBe(`${String(FOLLOW_STATUS_RUNWAY_PX)}px`)
+    expect(status.style.marginTop).toBe('')
+    expect(status.getBoundingClientRect().top - surface.getBoundingClientRect().bottom).toBeCloseTo(16, 1)
 
     view.unmount()
     expect(status.style.marginTop).toBe('')
@@ -2608,6 +2688,27 @@ describe('computeQueueReveal', () => {
     expect(computeQueueReveal(2, 1000)).toBe(2)
     expect(computeQueueReveal(0, 16)).toBe(0)
   })
+
+  it('applies live diagnostics tuning without changing the production default', () => {
+    const baseline = computeAdaptiveQueueStep(80, 1000 / 60, 0)
+    const explicitDefault = computeAdaptiveQueueStep(
+      80,
+      1000 / 60,
+      0,
+      1,
+      DEFAULT_STREAM_DEBUG_TUNING,
+    )
+    const tuned = computeAdaptiveQueueStep(80, 1000 / 60, 0, 1, {
+      ...DEFAULT_STREAM_DEBUG_TUNING,
+      queuePressure: 1.6,
+      revealScale: 1.4,
+      maxRevealCps: 900,
+    })
+
+    expect(explicitDefault).toEqual(baseline)
+    expect(tuned.speedCps).toBeGreaterThan(baseline.speedCps)
+    expect(tuned.revealChars).toBeGreaterThan(baseline.revealChars)
+  })
 })
 
 describe('computeSettleDrain', () => {
@@ -2844,6 +2945,38 @@ describe('isGrowingChatNode', () => {
       await drainFrames()
       expect(view.container.textContent).toBe('Context updated')
       expect(frames).toHaveLength(0)
+    } finally {
+      requestFrame.mockRestore()
+      cancelFrame.mockRestore()
+    }
+  })
+
+  it('reports real total and displayed characters for opaque DOM text', async () => {
+    const frames: FrameRequestCallback[] = []
+    const requestFrame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback)
+      return frames.length
+    })
+    const cancelFrame = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => undefined)
+    debugRuntime.syncSettings({
+      enabled: true,
+      writable: true,
+      dirty: false,
+      status: 'ready',
+      tuning: DEFAULT_STREAM_DEBUG_TUNING,
+    })
+
+    try {
+      render(<ProgressiveDomProbe text={'x'.repeat(400)} />)
+      await act(async () => { frames.shift()?.(0) })
+      await act(async () => { frames.shift()?.(100) })
+
+      expect(debugRuntime.getSnapshot().metrics).toMatchObject({
+        streamTargetChars: 400,
+        streamDisplayedChars: expect.any(Number),
+      })
+      expect(debugRuntime.getSnapshot().metrics.streamDisplayedChars).toBeGreaterThan(0)
+      expect(debugRuntime.getSnapshot().metrics.streamDisplayedChars).toBeLessThan(400)
     } finally {
       requestFrame.mockRestore()
       cancelFrame.mockRestore()
@@ -3210,6 +3343,21 @@ describe('computeFollowStep', () => {
     const step = computeFollowStep(frameMs, { lag, speedEma: FOLLOW_SPEED_REF_CPS })
 
     expect(step.advancePx).toBeCloseTo(lag - expectedLag, 5)
+  })
+
+  it('uses live diagnostics spring and backpressure tuning', () => {
+    const baseline = computeFollowStep(16, { lag: 28, speedEma: FOLLOW_SPEED_REF_CPS })
+    const stiffer = computeFollowStep(16, { lag: 28, speedEma: FOLLOW_SPEED_REF_CPS }, {
+      ...DEFAULT_STREAM_DEBUG_TUNING,
+      springStiffness: 260,
+    })
+    const lowerBackpressure = computeFollowRevealScale(48, 48, false, {
+      ...DEFAULT_STREAM_DEBUG_TUNING,
+      backpressureMinScale: 0.35,
+    })
+
+    expect(stiffer.advancePx).toBeGreaterThan(baseline.advancePx)
+    expect(lowerBackpressure).toBe(0.35)
   })
 
   it('eases a wrap-sized lag instead of snapping it', () => {

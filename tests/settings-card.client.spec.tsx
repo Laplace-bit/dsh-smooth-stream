@@ -11,9 +11,19 @@ import { apply, inject } from '../src/client/index.ts'
 import { SmoothStreamCard, type SmoothStreamCardProps } from '../src/client/SmoothStreamCard.tsx'
 import type { SmoothStreamCardFace } from '../src/client/smooth-stream-card-controller.ts'
 import { en } from '../src/client/locales.ts'
-import { STREAM_SETTINGS_RPC, STREAM_SETTINGS_RPC_CHANNEL, type StreamSettingsView } from '../src/settings-api.ts'
+import { debugRuntime } from '../src/client/debugRuntime.ts'
+import {
+  STREAM_SETTINGS_RPC,
+  STREAM_SETTINGS_RPC_CHANNEL,
+  type StreamDebugSettingsView,
+  type StreamSettingsView,
+} from '../src/settings-api.ts'
+import { DEFAULT_STREAM_DEBUG_TUNING } from '../src/settings.ts'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  debugRuntime.resetRuntime()
+})
 
 const developmentView: StreamSettingsView = {
   version: '0.1.0',
@@ -24,11 +34,20 @@ const developmentView: StreamSettingsView = {
   canUpgrade: false,
 }
 
+const developmentDebugView: StreamDebugSettingsView = {
+  debugEnabled: false,
+  tuning: DEFAULT_STREAM_DEBUG_TUNING,
+}
+
 interface BenchOptions {
   view?: StreamSettingsView
+  debugView?: StreamDebugSettingsView
   failRead?: boolean
   readGate?: Promise<void>
   writeGate?: Promise<void>
+  failDebugWrite?: boolean
+  failWrite?: boolean
+  debugReadGate?: Promise<void>
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -44,6 +63,7 @@ async function bench(options: BenchOptions = {}): Promise<{
   coreDescribe: ReturnType<typeof vi.fn>
   call: ReturnType<typeof vi.fn>
   removeConnection: () => void
+  setDebugView: (next: StreamDebugSettingsView) => void
 }> {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
@@ -51,6 +71,8 @@ async function bench(options: BenchOptions = {}): Promise<{
   ctx.provide('locale', locale)
 
   let view = options.view ?? developmentView
+  let debugView = options.debugView ?? developmentDebugView
+  let debugReadCount = 0
   const coreDescribe = vi.fn(() => Promise.resolve({
     rpcId: 'settings',
     result: { ok: false, error: { code: 'settings-not-exposed' } },
@@ -65,13 +87,45 @@ async function bench(options: BenchOptions = {}): Promise<{
       return { ok: true as const, value: view }
     }
     if (endpoint === STREAM_SETTINGS_RPC.write) {
-      const settings = payload as { enabled?: unknown; thinkAutoExpand?: unknown }
+      const settings = payload as {
+        enabled?: unknown
+        thinkAutoExpand?: unknown
+        debugEnabled?: unknown
+        debugTuning?: unknown
+      }
       if (typeof settings.enabled !== 'boolean' || typeof settings.thinkAutoExpand !== 'boolean') {
         return { ok: false as const, error: { code: 'internal', message: 'bad payload' } }
       }
+      if (options.failWrite === true) {
+        return { ok: false as const, error: { code: 'settings-rejected', message: 'write failed' } }
+      }
       await options.writeGate
       view = { ...view, enabled: settings.enabled, thinkAutoExpand: settings.thinkAutoExpand }
+      if (typeof settings.debugEnabled === 'boolean' && typeof settings.debugTuning === 'object' && settings.debugTuning !== null) {
+        debugView = { debugEnabled: settings.debugEnabled, tuning: settings.debugTuning as StreamDebugSettingsView['tuning'] }
+      }
       return { ok: true as const, value: view }
+    }
+    if (endpoint === STREAM_SETTINGS_RPC.debugRead) {
+      const readNumber = debugReadCount++
+      const response = debugView
+      if (readNumber === 0) await options.debugReadGate
+      return { ok: true as const, value: response }
+    }
+    if (endpoint === STREAM_SETTINGS_RPC.debugWrite) {
+      const settings = payload as { debugEnabled?: unknown; tuning?: unknown }
+      if (typeof settings.debugEnabled !== 'boolean'
+        || typeof settings.tuning !== 'object' || settings.tuning === null) {
+        return { ok: false as const, error: { code: 'internal', message: 'bad debug payload' } }
+      }
+      if (options.failDebugWrite === true) {
+        return { ok: false as const, error: { code: 'settings-rejected', message: 'write failed' } }
+      }
+      debugView = {
+        debugEnabled: settings.debugEnabled,
+        tuning: settings.tuning as StreamDebugSettingsView['tuning'],
+      }
+      return { ok: true as const, value: debugView }
     }
     if (endpoint === STREAM_SETTINGS_RPC.upgrade) return { ok: true as const, value: { restartRequired: true } }
     return { ok: false as const, error: { code: 'internal', message: 'unexpected endpoint' } }
@@ -81,7 +135,14 @@ async function bench(options: BenchOptions = {}): Promise<{
     rpc: { call },
   } as never)
 
-  return { ctx, slots: ctx.get('slots') as SlotRegistry, coreDescribe, call, removeConnection }
+  return {
+    ctx,
+    slots: ctx.get('slots') as SlotRegistry,
+    coreDescribe,
+    call,
+    removeConnection,
+    setDebugView: (next: StreamDebugSettingsView) => { debugView = next },
+  }
 }
 
 function declareCardSlot(slots: SlotRegistry): () => void {
@@ -126,8 +187,10 @@ describe('smooth-stream settings card', () => {
     declareCardSlot(slots)
     await ctx.plugin({ inject: [...inject], apply }).await()
 
-    expect(slots.entries('settings.plugin.item').map(entry => entry.options.id))
-      .toEqual(['smooth-stream'])
+    expect(slots.entries('settings.plugin.item').map(entry => ({
+      id: entry.options.id,
+      key: entry.options.key,
+    }))).toEqual([{ id: 'smooth-stream', key: 'smooth-stream' }])
   })
 
   it('keeps the plugin entry visible when the core settings API filters third-party namespaces', async () => {
@@ -183,6 +246,146 @@ describe('smooth-stream settings card', () => {
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
       enabled: true,
       thinkAutoExpand: false,
+    })
+  })
+
+  it('stages and persists the diagnostics switch through its compatible endpoint', async () => {
+    const { ctx, slots, call } = await bench()
+    declareCardSlot(slots)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const face = cardFace(slots)
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      status: 'ready',
+      debugAvailable: true,
+    }))
+
+    face.edit({ debugEnabled: true })
+    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ dirty: true, debugEnabled: true })
+    face.save()
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      dirty: false,
+      debugEnabled: true,
+    }))
+    expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.debugWrite, {
+      debugEnabled: true,
+      tuning: DEFAULT_STREAM_DEBUG_TUNING,
+    })
+  })
+
+  it('saves base and diagnostics settings through one atomic settings write', async () => {
+    const { ctx, slots, call } = await bench()
+    declareCardSlot(slots)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const face = cardFace(slots)
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      status: 'ready',
+      debugAvailable: true,
+    }))
+
+    const tuning = { ...DEFAULT_STREAM_DEBUG_TUNING, springDamping: 31 }
+    face.edit({ enabled: false, debugEnabled: true, debugTuning: tuning })
+    face.save()
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      dirty: false,
+      enabled: false,
+      debugEnabled: true,
+      debugTuning: { springDamping: 31 },
+    }))
+
+    expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
+      enabled: false,
+      thinkAutoExpand: true,
+      debugEnabled: true,
+      debugTuning: tuning,
+    })
+    expect(call).not.toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.debugWrite, expect.anything())
+  })
+
+  it('keeps both staged setting groups after an atomic save failure', async () => {
+    const { ctx, slots } = await bench({ failWrite: true })
+    declareCardSlot(slots)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const face = cardFace(slots)
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      status: 'ready',
+      debugAvailable: true,
+    }))
+
+    face.edit({ enabled: false, debugEnabled: true })
+    face.save()
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      dirty: true,
+      failed: true,
+      enabled: false,
+      debugEnabled: true,
+    }))
+    face.discard()
+    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      dirty: false,
+      failed: false,
+      enabled: true,
+      debugEnabled: false,
+    })
+  })
+
+  it('ignores a stale debug read after a settings reload', async () => {
+    const debugRead = deferred()
+    const { ctx, slots, call, setDebugView } = await bench({
+      debugView: developmentDebugView,
+      debugReadGate: debugRead.promise,
+    })
+    declareCardSlot(slots)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const face = cardFace(slots)
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
+    await vi.waitFor(() => expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.debugRead, {}))
+
+    setDebugView({
+      debugEnabled: true,
+      tuning: { ...DEFAULT_STREAM_DEBUG_TUNING, springDamping: 31 },
+    })
+    face.reload()
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      status: 'ready',
+      debugAvailable: true,
+    }))
+    debugRead.resolve()
+    await debugRead.promise
+    await Promise.resolve()
+    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      debugEnabled: true,
+      debugTuning: { springDamping: 31 },
+    })
+  })
+
+  it('retains staged diagnostics after a failed save so they can be retried or discarded', async () => {
+    const { ctx, slots } = await bench({ failDebugWrite: true })
+    declareCardSlot(slots)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const face = cardFace(slots)
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      status: 'ready',
+      debugAvailable: true,
+    }))
+
+    face.edit({
+      debugEnabled: true,
+      debugTuning: { ...DEFAULT_STREAM_DEBUG_TUNING, springDamping: 31 },
+    })
+    face.save()
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      dirty: true,
+      failed: true,
+      debugEnabled: true,
+      debugTuning: { springDamping: 31 },
+    }))
+
+    face.discard()
+    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      dirty: false,
+      failed: false,
+      debugEnabled: false,
+      debugTuning: { springDamping: DEFAULT_STREAM_DEBUG_TUNING.springDamping },
     })
   })
 
@@ -281,6 +484,7 @@ describe('smooth-stream settings card', () => {
       .toHaveLength(0)
     expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'tool-call')?.component)
       .toBe(BuiltInTool)
+    expect(debugRuntime.getSnapshot()).toMatchObject({ enabled: false, dirty: false })
   })
 
   it('blocks preference edits while a save is in flight', async () => {

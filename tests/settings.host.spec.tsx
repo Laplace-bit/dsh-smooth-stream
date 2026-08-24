@@ -93,7 +93,11 @@ describe('smooth-stream host settings', () => {
     expect(ctx.settings.get(ns)).toEqual(DEFAULT_STREAM_SETTINGS)
 
     await ctx.settings.update(ns, { enabled: false, thinkAutoExpand: false })
-    expect(ctx.settings.get(ns)).toEqual({ enabled: false, thinkAutoExpand: false })
+    expect(ctx.settings.get(ns)).toEqual({
+      ...DEFAULT_STREAM_SETTINGS,
+      enabled: false,
+      thinkAutoExpand: false,
+    })
 
     await expect(ctx.settings.update(ns, { thinkAutoExpand: 'nope' })).rejects.toThrow()
 
@@ -125,7 +129,68 @@ describe('smooth-stream host settings', () => {
       signal(),
     )
     expect(updated).toMatchObject({ ok: true, value: { enabled: false, thinkAutoExpand: false } })
-    expect(ctx.settings.get(settingsNamespace(STREAM_SETTINGS_NS))).toEqual({ enabled: false, thinkAutoExpand: false })
+    expect(ctx.settings.get(settingsNamespace(STREAM_SETTINGS_NS))).toEqual({
+      ...DEFAULT_STREAM_SETTINGS,
+      enabled: false,
+      thinkAutoExpand: false,
+    })
+
+    const debugInitial = await registration.handler(STREAM_SETTINGS_RPC.debugRead, {}, signal())
+    expect(debugInitial).toEqual({
+      ok: true,
+      value: {
+        debugEnabled: DEFAULT_STREAM_SETTINGS.debugEnabled,
+        tuning: DEFAULT_STREAM_SETTINGS.debugTuning,
+      },
+    })
+    const debugUpdated = await registration.handler(STREAM_SETTINGS_RPC.debugWrite, {
+      debugEnabled: true,
+      tuning: { ...DEFAULT_STREAM_SETTINGS.debugTuning, springDamping: 31 },
+    }, signal())
+    expect(debugUpdated).toMatchObject({
+      ok: true,
+      value: { debugEnabled: true, tuning: { springDamping: 31 } },
+    })
+    expect(ctx.settings.get(settingsNamespace(STREAM_SETTINGS_NS))).toMatchObject({
+      debugEnabled: true,
+      debugTuning: { springDamping: 31 },
+    })
+
+    const atomicUpdated = await registration.handler(
+      STREAM_SETTINGS_RPC.write,
+      {
+        enabled: true,
+        thinkAutoExpand: true,
+        debugEnabled: false,
+        debugTuning: { ...DEFAULT_STREAM_SETTINGS.debugTuning, springDamping: 34 },
+      },
+      signal(),
+    )
+    expect(atomicUpdated).toMatchObject({ ok: true, value: { enabled: true, thinkAutoExpand: true } })
+    expect(ctx.settings.get(settingsNamespace(STREAM_SETTINGS_NS))).toMatchObject({
+      enabled: true,
+      thinkAutoExpand: true,
+      debugEnabled: false,
+      debugTuning: { springDamping: 34 },
+    })
+
+    const partialDebug = await registration.handler(
+      STREAM_SETTINGS_RPC.write,
+      { enabled: false, thinkAutoExpand: false, debugEnabled: true },
+      signal(),
+    )
+    expect(partialDebug).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
+    expect(ctx.settings.get(settingsNamespace(STREAM_SETTINGS_NS))).toMatchObject({
+      enabled: true,
+      thinkAutoExpand: true,
+      debugEnabled: false,
+    })
+
+    const malformedDebug = await registration.handler(STREAM_SETTINGS_RPC.debugWrite, {
+      debugEnabled: true,
+      tuning: { ...DEFAULT_STREAM_SETTINGS.debugTuning, springMass: 99 },
+    }, signal())
+    expect(malformedDebug).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
 
     const malformed = await registration.handler(STREAM_SETTINGS_RPC.write, { thinkAutoExpand: 'false' }, signal())
     expect(malformed).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })

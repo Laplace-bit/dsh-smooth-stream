@@ -11,9 +11,11 @@ import { wrapFollowNodeView, type FollowWrapProps } from './TypewriterToolNodeVi
 import { SmoothStreamCard } from './SmoothStreamCard.tsx'
 import { SmoothStreamCardController } from './smooth-stream-card-controller.ts'
 import { createSmoothStreamSettingsApi } from './smooth-stream-settings-api.ts'
+import { DebugPanel } from './DebugPanel.tsx'
+import { debugRuntime } from './debugRuntime.ts'
 import { NS as SETTINGS_NS, en, zh } from './locales.ts'
 import { DEFAULT_STREAM_CONFIG, STREAM_BOOT_GLOBAL, type StreamConfig } from '../config.ts'
-import { DEFAULT_STREAM_SETTINGS, type StreamSettings } from '../settings.ts'
+import { DEFAULT_STREAM_SETTINGS, STREAM_SETTINGS_NS, type StreamSettings } from '../settings.ts'
 
 /**
  * Cordis services required by the browser half. Only `slots` is load-bearing
@@ -142,7 +144,7 @@ class SettingsCell {
   private read(): StreamSettings {
     const snapshot = this.card?.getSnapshot()
     if (snapshot === undefined || snapshot.status !== 'ready') return this.value
-    return { enabled: snapshot.enabled, thinkAutoExpand: snapshot.thinkAutoExpand }
+    return this.card?.values() ?? this.value
   }
 
   private refresh(): void {
@@ -152,6 +154,8 @@ class SettingsCell {
       pending === this.pending
       && next.enabled === this.value.enabled
       && next.thinkAutoExpand === this.value.thinkAutoExpand
+      && next.debugEnabled === this.value.debugEnabled
+      && next.debugTuning === this.value.debugTuning
     ) return
     this.pending = pending
     this.value = next
@@ -197,18 +201,48 @@ export function apply(ctx: ClientContext): void {
       createSmoothStreamSettingsApi(settingsCtx.get('connection') as unknown as ConnectionHandle),
     )
     const detachSettings = settings.attach(card)
+    const syncDebug = (): void => {
+      const snapshot = card.getSnapshot()
+      debugRuntime.syncSettings({
+        available: snapshot.debugAvailable,
+        enabled: snapshot.debugEnabled,
+        writable: snapshot.writable && !snapshot.saving,
+        dirty: snapshot.dirty,
+        status: snapshot.status,
+        tuning: snapshot.debugTuning,
+      })
+    }
+    const detachBinding = debugRuntime.bindSettings({
+      edit: patch => { card.inject().edit(patch) },
+      save: () => { card.inject().save() },
+      discard: () => { card.inject().discard() },
+    })
+    const detachDebug = card.subscribe(syncDebug)
+    syncDebug()
     card.start()
     settingsCtx.effect(() => settingsCtx.locale.register(SETTINGS_NS, { zh, en }), 'dsh-smooth-stream: settings dictionaries')
     settingsCtx.slots.inject('settings.plugin.item', () => settingsCtx.slots.register({
       name: 'settings.plugin.item',
       id: 'smooth-stream',
+      key: STREAM_SETTINGS_NS,
       order: 30,
       locale: SETTINGS_NS,
       inject: () => card.inject(),
-    }, SmoothStreamCard))
+    // Older Harness declares this slot as a list (`id`); newer Harness uses a
+    // keyed slot filtered by the Host settings namespace (`key`).
+    } as never, SmoothStreamCard))
+    settingsCtx.slots.inject('conversation.session.header.utilities', () => settingsCtx.slots.register({
+      name: 'conversation.session.header.utilities',
+      id: 'smooth-stream-debug',
+      order: 40,
+      locale: SETTINGS_NS,
+      inject: () => debugRuntime.panelFace(),
+    }, DebugPanel))
     return () => {
       card.stop()
+      detachDebug()
       detachSettings()
+      detachBinding()
     }
   })
 

@@ -84,6 +84,19 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
                   </span>
                   <span className={css.hint}>{t('thinkAutoExpandHint')}</span>
                 </label>
+                <label className={state.debugAvailable ? css.field : `${css.field} ${css.fieldDisabled}`}>
+                  <span className={css.fieldHead}>
+                    <span className={css.label}>{t('debugEnabled')}</span>
+                    <input
+                      type="checkbox"
+                      className={css.toggle}
+                      checked={state.debugEnabled}
+                      disabled={!state.debugAvailable || !state.writable || state.saving}
+                      onChange={(event) => { props.edit({ debugEnabled: event.target.checked }) }}
+                    />
+                  </span>
+                  <span className={css.hint}>{state.debugAvailable ? t('debugEnabledHint') : t('debugUnavailable')}</span>
+                </label>
                 <div className={css.updateRow}>
                   <span className={css.updateCopy}>
                     <span className={css.label}>{t('updates')}</span>

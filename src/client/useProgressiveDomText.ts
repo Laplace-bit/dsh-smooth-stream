@@ -10,6 +10,7 @@
 
 import { useLayoutEffect, type RefObject } from 'react'
 import { computeAdaptiveQueueStep } from './useSmoothStreamContent.ts'
+import { debugRuntime } from './debugRuntime.ts'
 
 interface TextRevealRecord {
   chars: readonly string[]
@@ -67,11 +68,13 @@ export function useProgressiveDomText(
     let debt = 0
     let stopped = false
     let announcedSettled = false
+    const streamId = `dom-${Math.random().toString(36).slice(2)}`
 
     const announceSettled = (): void => {
       lastFrame = null
       debt = 0
       speedCpsRef.current = 35
+      debugRuntime.reportStream(streamId, null)
       if (announcedSettled) return
       announcedSettled = true
       onSettled?.()
@@ -140,7 +143,7 @@ export function useProgressiveDomText(
         const record = records.get(node)
         if (record !== undefined) backlog += record.chars.length - record.shown
       }
-      const step = computeAdaptiveQueueStep(backlog, elapsed, debt)
+      const step = computeAdaptiveQueueStep(backlog, elapsed, debt, 1, debugRuntime.activeTuning())
       debt = step.debt
       speedCpsRef.current = step.speedCps
       let remaining = step.revealChars
@@ -149,6 +152,7 @@ export function useProgressiveDomText(
         const record = records.get(node)
         if (record === undefined || !node.isConnected) {
           pending.delete(node)
+          records.delete(node)
           continue
         }
         const amount = Math.min(remaining, record.chars.length - record.shown)
@@ -159,6 +163,26 @@ export function useProgressiveDomText(
         remaining -= amount
         if (shown >= next.chars.length) pending.delete(node)
       }
+      let targetChars = 0
+      let displayedChars = 0
+      let nextBacklog = 0
+      for (const [node, record] of records) {
+        if (!node.isConnected) {
+          records.delete(node)
+          pending.delete(node)
+          continue
+        }
+        targetChars += record.chars.length
+        displayedChars += record.shown
+        if (pending.has(node)) nextBacklog += record.chars.length - record.shown
+      }
+      debugRuntime.reportStream(streamId, {
+        backlog: nextBacklog,
+        speedCps: step.speedCps,
+        targetChars,
+        displayedChars,
+        active: pending.size > 0,
+      })
       if (pending.size === 0) announceSettled()
       else scheduleFrame()
     }
@@ -201,6 +225,7 @@ export function useProgressiveDomText(
       }
       pending.clear()
       speedCpsRef.current = 35
+      debugRuntime.reportStream(streamId, null)
     }
   }, [enabled, onSettled, revealInitial, rootRef, speedCpsRef])
 }

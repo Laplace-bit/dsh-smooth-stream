@@ -65,10 +65,13 @@ In the Web UI, open **Settings → Plugins → Plugin configuration** to find a 
 
 - **Enable smooth streaming** (on by default): lets this plugin own reply and tool-row rendering and follow. Turn it off to return rendering completely to the built-in Harness UI.
 - **Auto-expand thinking**: controls whether reasoning opens while it streams. This preference has no effect while the master toggle is off.
+- **Show render diagnostics** (off by default): opens a chat-side panel with live rendering, frame-rate, and scroll-follow measurements, plus controls for reveal and spring behavior.
 
 With “Auto-expand thinking” on, reasoning blocks open while streaming and collapse when thinking ends. With it off, reasoning stays collapsed; you can still open a block by hand, and the stream state will not wrestle it back.
 
 These are durable, user-level preferences that apply live without a restart, and are written to the DeepSeek Harness user-settings document rather than the plugin's composed configuration.
+
+Diagnostics controls apply as you move them: reveal multiplier, queue pressure, maximum reveal rate, spring stiffness/damping/mass, predictive runway, runway response time, and minimum backpressure scale. The panel reports FPS, frame time, character backlog, effective reveal rate, progress, visual lag, scroll velocity, and available follow room. You can **Save** a combination, **Discard** unsaved edits, **Restore defaults**, or copy the current tuning and measurements. Turning diagnostics off immediately returns the renderer to its production defaults.
 
 ## About & updates
 

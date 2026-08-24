@@ -1,8 +1,17 @@
 /** Staged form state for the plugin-owned smooth-stream settings RPC. */
 
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
-import { DEFAULT_STREAM_SETTINGS, type StreamSettings } from '../settings.ts'
-import type { StreamInstallationKind, StreamSettingsView } from '../settings-api.ts'
+import {
+  DEFAULT_STREAM_DEBUG_TUNING,
+  DEFAULT_STREAM_SETTINGS,
+  type StreamDebugTuning,
+  type StreamSettings,
+} from '../settings.ts'
+import type {
+  StreamDebugSettingsView,
+  StreamInstallationKind,
+  StreamSettingsView,
+} from '../settings-api.ts'
 import type { SmoothStreamSettingsApi } from './smooth-stream-settings-api.ts'
 
 /** What the smooth-stream card renders. It remains visible while its Host RPC loads. */
@@ -14,6 +23,9 @@ export interface SmoothStreamCardState {
   failed: boolean
   enabled: boolean
   thinkAutoExpand: boolean
+  debugEnabled: boolean
+  debugTuning: StreamDebugTuning
+  debugAvailable: boolean
   version: string | undefined
   installation: StreamInstallationKind
   canUpgrade: boolean
@@ -38,7 +50,9 @@ export interface SmoothStreamCardFace {
 export class SmoothStreamCardController {
   private readonly store = createSnapshotStore<SmoothStreamCardState>(this.projection())
   private loaded: StreamSettingsView | undefined
-  private staged: StreamSettings | undefined
+  private loadedDebug: StreamDebugSettingsView | undefined
+  private stagedBase: Pick<StreamSettings, 'enabled' | 'thinkAutoExpand'> | undefined
+  private stagedDebug: Pick<StreamSettings, 'debugEnabled' | 'debugTuning'> | undefined
   private saving = false
   private failed = false
   private upgrading = false
@@ -75,14 +89,28 @@ export class SmoothStreamCardController {
       hooks: { smoothStreamCard: this.store },
       edit: (patch) => {
         if (this.saving) return
-        this.staged = { ...this.values(), ...patch }
+        if (patch.enabled !== undefined || patch.thinkAutoExpand !== undefined) {
+          this.stagedBase = {
+            ...this.baseValues(),
+            ...(patch.enabled === undefined ? {} : { enabled: patch.enabled }),
+            ...(patch.thinkAutoExpand === undefined ? {} : { thinkAutoExpand: patch.thinkAutoExpand }),
+          }
+        }
+        if (this.loadedDebug !== undefined && (patch.debugEnabled !== undefined || patch.debugTuning !== undefined)) {
+          this.stagedDebug = {
+            ...this.debugValues(),
+            ...(patch.debugEnabled === undefined ? {} : { debugEnabled: patch.debugEnabled }),
+            ...(patch.debugTuning === undefined ? {} : { debugTuning: { ...this.debugValues().debugTuning, ...patch.debugTuning } }),
+          }
+        }
         this.failed = false
         this.publish()
       },
       save: () => { void this.save() },
       discard: () => {
-        if (this.staged === undefined && !this.failed) return
-        this.staged = undefined
+        if (this.stagedBase === undefined && this.stagedDebug === undefined && !this.failed) return
+        this.stagedBase = undefined
+        this.stagedDebug = undefined
         this.failed = false
         this.publish()
       },
@@ -95,10 +123,12 @@ export class SmoothStreamCardController {
     return {
       status: this.loadStatus,
       writable: this.loaded?.writable ?? false,
-      dirty: this.staged !== undefined,
+      dirty: this.stagedBase !== undefined || this.stagedDebug !== undefined,
       saving: this.saving,
       failed: this.failed,
-      ...this.values(),
+      ...this.baseValues(),
+      ...this.debugValues(),
+      debugAvailable: this.loadedDebug !== undefined,
       version: this.loaded?.version,
       installation: this.loaded?.installation ?? 'unmanaged',
       canUpgrade: this.loaded?.canUpgrade ?? false,
@@ -108,40 +138,81 @@ export class SmoothStreamCardController {
     }
   }
 
-  private values(): StreamSettings {
-    return this.staged ?? {
+  private baseValues(): Pick<StreamSettings, 'enabled' | 'thinkAutoExpand'> {
+    return this.stagedBase ?? {
       enabled: this.loaded?.enabled ?? DEFAULT_STREAM_SETTINGS.enabled,
       thinkAutoExpand: this.loaded?.thinkAutoExpand ?? DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
     }
+  }
+
+  private debugValues(): Pick<StreamSettings, 'debugEnabled' | 'debugTuning'> {
+    return this.stagedDebug ?? {
+      debugEnabled: this.loadedDebug?.debugEnabled ?? DEFAULT_STREAM_SETTINGS.debugEnabled,
+      debugTuning: this.loadedDebug?.tuning ?? DEFAULT_STREAM_DEBUG_TUNING,
+    }
+  }
+
+  /** Complete settings projection consumed by the live SettingsCell bridge. */
+  values(): StreamSettings {
+    return { ...this.baseValues(), ...this.debugValues() }
   }
 
   private async load(): Promise<void> {
     const generation = ++this.loadGeneration
     this.loadStatus = 'loading'
     this.loaded = undefined
+    this.loadedDebug = undefined
     this.publish()
     try {
       const view = await this.api.read()
       if (generation !== this.loadGeneration) return
       this.loaded = view
       this.loadStatus = 'ready'
+      this.publish()
+      try {
+        const debug = await this.api.readDebug()
+        if (generation !== this.loadGeneration) return
+        this.loadedDebug = debug
+      } catch {
+        if (generation !== this.loadGeneration) return
+        // Older hosts expose the original settings endpoints only. Keep the
+        // card usable and hide debug-only controls until the host is upgraded.
+        this.loadedDebug = undefined
+      }
     } catch {
       if (generation !== this.loadGeneration) return
       this.loaded = undefined
+      this.loadedDebug = undefined
       this.loadStatus = 'unavailable'
     }
     this.publish()
   }
 
   private async save(): Promise<void> {
-    if (this.staged === undefined || this.saving || this.loaded?.writable !== true) return
-    const value = this.staged
+    if ((this.stagedBase === undefined && this.stagedDebug === undefined)
+      || this.saving || this.loaded?.writable !== true) return
+    const base = this.stagedBase
+    const debug = this.stagedDebug
     this.saving = true
     this.failed = false
     this.publish()
     try {
-      this.loaded = await this.api.write(value)
-      this.staged = undefined
+      if (base !== undefined) {
+        const combined = debug !== undefined && this.loadedDebug !== undefined
+        this.loaded = await this.api.write(combined ? { ...base, ...debug } : base)
+        this.stagedBase = undefined
+        if (combined) {
+          this.loadedDebug = {
+            debugEnabled: debug.debugEnabled,
+            tuning: { ...debug.debugTuning },
+          }
+          this.stagedDebug = undefined
+        }
+      }
+      if (debug !== undefined && this.loadedDebug !== undefined && this.stagedDebug !== undefined) {
+        this.loadedDebug = await this.api.writeDebug(debug)
+        this.stagedDebug = undefined
+      }
     } catch {
       this.failed = true
     }

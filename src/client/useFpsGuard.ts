@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react'
+import { debugRuntime } from './debugRuntime.ts'
 
 const FPS_THRESHOLD = 30
 const FPS_ALPHA = 0.12
@@ -33,6 +34,7 @@ export function useFpsGuard(active: boolean): {
   useEffect(() => {
     if (!active) return
     let rafId = 0
+    let lastDebugReport = 0
     const frame = (now: number) => {
       rafId = requestAnimationFrame(frame)
       const fps = fpsRef.current
@@ -51,11 +53,16 @@ export function useFpsGuard(active: boolean): {
         fps.healthyRun += 1
         if (fps.healthyRun >= RECOVER_FRAMES) fps.degraded = false
       }
+      if (now - lastDebugReport >= 100) {
+        debugRuntime.reportFps(currentFps, fps.emaMs, fps.degraded)
+        lastDebugReport = now
+      }
     }
     rafId = requestAnimationFrame(frame)
     return () => {
       cancelAnimationFrame(rafId)
       fpsRef.current = { emaMs: 0, lastMs: 0, healthyRun: 0, degraded: false }
+      debugRuntime.clearFps()
     }
   }, [active])
 

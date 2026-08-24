@@ -27,6 +27,8 @@
  */
 
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
+import { DEFAULT_STREAM_DEBUG_TUNING, type StreamDebugTuning } from '../settings.ts'
+import { debugRuntime } from './debugRuntime.ts'
 
 /**
  * Programmatic follow marker retained for hosts that recognize external
@@ -115,7 +117,10 @@ const GESTURE_EVENTS = [
 ] as const
 
 /** Visible runway needed for the current reveal pressure. */
-export function computeFollowReserve(speedCps: number, runwayPx = FOLLOW_STATUS_RUNWAY_PX): number {
+export function computeFollowReserve(
+  speedCps: number,
+  runwayPx = FOLLOW_STATUS_RUNWAY_PX,
+): number {
   const available = Math.max(0, runwayPx)
   if (available <= 0) return 0
   if (speedCps <= FOLLOW_RESERVE_MIN_CPS) return 0
@@ -136,17 +141,18 @@ export function computeFollowRevealScale(
   lagPx: number,
   capacityPx: number,
   constrained = false,
+  tuning: StreamDebugTuning = DEFAULT_STREAM_DEBUG_TUNING,
 ): number {
-  if (constrained) return FOLLOW_REVEAL_MIN_SCALE
+  if (constrained) return tuning.backpressureMinScale
   if (!Number.isFinite(capacityPx)) return 1
-  if (capacityPx <= 0) return lagPx > 0 ? FOLLOW_REVEAL_MIN_SCALE : 1
+  if (capacityPx <= 0) return lagPx > 0 ? tuning.backpressureMinScale : 1
   const ratio = Math.min(1, Math.max(0, lagPx / capacityPx))
-  if (ratio >= FOLLOW_BACKPRESSURE_FULL_RATIO) return FOLLOW_REVEAL_MIN_SCALE
+  if (ratio >= FOLLOW_BACKPRESSURE_FULL_RATIO) return tuning.backpressureMinScale
   const progress = Math.min(1, Math.max(0, (
     ratio - FOLLOW_BACKPRESSURE_START_RATIO
   ) / (FOLLOW_BACKPRESSURE_FULL_RATIO - FOLLOW_BACKPRESSURE_START_RATIO)))
   const eased = progress * progress * (3 - 2 * progress)
-  return 1 - (1 - FOLLOW_REVEAL_MIN_SCALE) * eased
+  return 1 - (1 - tuning.backpressureMinScale) * eased
 }
 
 export interface FollowGlideInput {
@@ -173,7 +179,11 @@ export interface FollowGlideStep {
  * @param input - Current visible lag and carried physics velocity.
  * @returns The position advance, its fraction, and next velocity.
  */
-export function computeFollowStep(dtMs: number, input: FollowGlideInput): FollowGlideStep {
+export function computeFollowStep(
+  dtMs: number,
+  input: FollowGlideInput,
+  tuning: StreamDebugTuning = DEFAULT_STREAM_DEBUG_TUNING,
+): FollowGlideStep {
   if (input.lag <= 0.1 || dtMs <= 0) {
     return { advancePx: 0, lerpStep: 0, velocityPxPerSec: 0 }
   }
@@ -186,8 +196,8 @@ export function computeFollowStep(dtMs: number, input: FollowGlideInput): Follow
   for (let slice = 0; slice < slices; slice += 1) {
     for (let substep = 0; substep < FOLLOW_SPRING_SUBSTEPS; substep += 1) {
       const acceleration = (
-        FOLLOW_SPRING_STIFFNESS * lag - FOLLOW_SPRING_DAMPING * velocity
-      ) / FOLLOW_SPRING_MASS
+      tuning.springStiffness * lag - tuning.springDamping * velocity
+    ) / tuning.springMass
       velocity = Math.max(0, velocity + acceleration * subDt)
       const advance = velocity * subDt
       if (advance >= lag) {
@@ -267,6 +277,7 @@ interface FollowRunway {
   readonly offset: number
   readonly original: string
   readonly property: 'marginBottom' | 'marginTop'
+  readonly requestedPx: number
 }
 
 /**
@@ -369,7 +380,11 @@ function migrateLegacyRunway(
   if (migrated) invalidatePaintLimit(port)
 }
 
-function ensureRunway(port: HTMLElement, surfaces: readonly HTMLElement[]): void {
+function ensureRunway(
+  port: HTMLElement,
+  surfaces: readonly HTMLElement[],
+  runwayPx = FOLLOW_STATUS_RUNWAY_PX,
+): void {
   const status = turnStatusOf(port)
   const composer = port.querySelector<HTMLElement>('[data-composer-seat]')
   migrateLegacyRunway(port, surfaces, status, composer)
@@ -378,7 +393,7 @@ function ensureRunway(port: HTMLElement, surfaces: readonly HTMLElement[]): void
   // applyVisual keeps every surface in normal flow, so adding status margin
   // would expose the whole runway as empty space below a short/early Think.
   const naturalHeight = Math.max(0, port.scrollHeight - runwayOffsetOf(port))
-  if (port.clientHeight <= 0 || naturalHeight <= port.clientHeight) {
+  if (runwayPx <= 0 || port.clientHeight <= 0 || naturalHeight <= port.clientHeight) {
     restoreRunway(port)
     return
   }
@@ -391,15 +406,17 @@ function ensureRunway(port: HTMLElement, surfaces: readonly HTMLElement[]): void
   }
   const element = target.element
   const current = followRunways.get(port)
-  if (current?.element === element && current.property === target.property) return
+  if (current?.element === element
+    && current.property === target.property
+    && current.requestedPx === runwayPx) return
   restoreRunway(port)
   const beforeHeight = port.scrollHeight
   const original = element.style[target.property]
   element.style[target.property] = original === ''
-    ? `${FOLLOW_STATUS_RUNWAY_PX}px`
-    : `calc(${original} + ${FOLLOW_STATUS_RUNWAY_PX}px)`
+    ? `${runwayPx}px`
+    : `calc(${original} + ${runwayPx}px)`
   const offset = Math.max(0, port.scrollHeight - beforeHeight)
-  followRunways.set(port, { element, offset, property: target.property, original })
+  followRunways.set(port, { element, offset, property: target.property, original, requestedPx: runwayPx })
   invalidatePaintLimit(port)
 }
 
@@ -499,9 +516,10 @@ function applyVisual(
   animatedH: number,
   reservePx: number,
   velocityPxPerSec = 0,
+  runwayPx = FOLLOW_STATUS_RUNWAY_PX,
 ): number {
   const surfaces = shiftSurfacesOf(port)
-  ensureRunway(port, surfaces)
+  ensureRunway(port, surfaces, runwayPx)
   const contentHeight = Math.max(0, port.scrollHeight)
   const runwayOffset = runwayOffsetOf(port)
   const targetHeight = Math.max(0, contentHeight - runwayOffset)
@@ -680,11 +698,12 @@ export function useConversationFollow(
 
     const updateRevealScale = (next: HTMLElement, elapsedMs: number, urgent = false): void => {
       if (revealScaleRef === undefined) return
+      const tuning = debugRuntime.activeTuning()
       const state = followMotionStates.get(next)
       const target = state === undefined
         ? 1
-        : computeFollowRevealScale(state.lagPx, state.capacityPx, state.constrained)
-      const current = Math.min(1, Math.max(FOLLOW_REVEAL_MIN_SCALE, revealScaleRef.current))
+        : computeFollowRevealScale(state.lagPx, state.capacityPx, state.constrained, tuning)
+      const current = Math.min(1, Math.max(tuning.backpressureMinScale, revealScaleRef.current))
       if (target < current || urgent) {
         // Slowing affects only future glyph commits, so it can react at once
         // without producing a visual discontinuity in the current frame.
@@ -697,6 +716,23 @@ export function useConversationFollow(
 
     const releaseRevealScale = (): void => {
       if (revealScaleRef !== undefined) revealScaleRef.current = 1
+    }
+
+    const reportFollow = (next: HTMLElement, isActive: boolean): void => {
+      const state = followMotionStates.get(next)
+      debugRuntime.reportFollow(next, {
+        lagPx: state?.lagPx ?? Math.max(0, next.scrollHeight - next.clientHeight - next.scrollTop),
+        velocityPxPerSec: state?.velocityPxPerSec ?? 0,
+        reservePx: state?.reservePx ?? 0,
+        capacityPx: state?.capacityPx ?? 0,
+        revealScale: revealScaleRef?.current ?? 1,
+        following,
+        constrained: state?.constrained ?? false,
+        scrollTop: next.scrollTop,
+        scrollHeight: next.scrollHeight,
+        clientHeight: next.clientHeight,
+        active: isActive,
+      })
     }
 
     const isLeader = (next: HTMLElement): boolean => followLeaders.get(next)?.owner === owner
@@ -717,12 +753,19 @@ export function useConversationFollow(
         clearMotion(next)
         followMotionStates.delete(next)
         releaseRevealScale()
+        debugRuntime.reportFollow(next, null)
       }
     }
 
     const handBackVisual = (next: HTMLElement): void => {
       const shift = currentShiftOf(shiftSurfacesOf(next).at(-1) ?? next)
       const visualTop = Math.max(0, next.scrollTop - Math.max(0, shift))
+      // The predictive runway only has meaning while this follower owns the
+      // floor. Remove it before choosing the reader's landing point; keeping
+      // it through the release paints a transient natural gap + 48px blank
+      // block until the next follow frame restores an equal transform.
+      clearMotion(next)
+      restoreRunway(next)
       const floor = Math.max(0, next.scrollHeight - next.clientHeight)
       // The host keeps its own bottom-follow bit while the reader remains in
       // its 25px slack band. Land one pixel beyond that band so even a light
@@ -760,8 +803,10 @@ export function useConversationFollow(
     const restoreBeforePaint = (): void => {
       if (!following || port === null || !isLeader(port)) return
       invalidatePaintLimit(port)
-      animatedH = applyVisual(port, animatedH, reservePx, velocityPxPerSec)
+      const tuning = debugRuntime.activeTuning()
+      animatedH = applyVisual(port, animatedH, reservePx, velocityPxPerSec, tuning.runwayPx)
       updateRevealScale(port, 0, true)
+      reportFollow(port, activeRef.current)
     }
 
     const bindPort = (next: HTMLElement): void => {
@@ -790,6 +835,7 @@ export function useConversationFollow(
       // frames would open paint room more slowly precisely when it is needed.
       const elapsedMs = Math.max(0.001, now - last)
       const dt = Math.min(FOLLOW_MAX_FRAME_MS, elapsedMs)
+      const tuning = debugRuntime.activeTuning()
       last = now
       const root = rootRef.current
       if (root === null) return
@@ -836,8 +882,9 @@ export function useConversationFollow(
         if (following) {
           hold(nextPort)
           if (isLeader(nextPort)) {
-            animatedH = applyVisual(nextPort, animatedH, reservePx, velocityPxPerSec)
+            animatedH = applyVisual(nextPort, animatedH, reservePx, velocityPxPerSec, tuning.runwayPx)
             updateRevealScale(nextPort, elapsedMs)
+            reportFollow(nextPort, activeRef.current)
             const runwayOffset = runwayOffsetOf(nextPort)
             const entranceLag = Math.max(0, nextPort.scrollHeight - animatedH - runwayOffset)
             if (entranceLag <= FOLLOW_SETTLE_EPSILON_PX) finishEntrance()
@@ -852,7 +899,10 @@ export function useConversationFollow(
       }
 
       const repinSlack = readerReleased ? FOLLOW_REPIN_PX : FOLLOW_SLACK_PX
-      if (!following && !interacting && reportedLag <= repinSlack) {
+      const returnedToFloor = readerReleased
+        && !readerGestureIntent
+        && reportedLag <= FOLLOW_REPIN_PX
+      if (!following && (!interacting || returnedToFloor) && reportedLag <= repinSlack) {
         following = true
         readerReleased = false
         animatedH = extent
@@ -876,6 +926,7 @@ export function useConversationFollow(
 
       if (!activeRef.current || !following) {
         followScrollLedgers.set(nextPort, nextPort.scrollTop)
+        reportFollow(nextPort, activeRef.current)
         return
       }
       hold(nextPort)
@@ -893,14 +944,14 @@ export function useConversationFollow(
       const predictGrowth = predictiveRef?.current ?? predictive
       const reserveTarget = !predictGrowth
         ? 0
-        : computeFollowReserve(speedCpsRef.current, runwayOffset)
-      const reserveStep = 1 - Math.exp(-elapsedMs / FOLLOW_RESERVE_RESPONSE_MS)
+        : computeFollowReserve(speedCpsRef.current, tuning.runwayPx)
+      const reserveStep = 1 - Math.exp(-elapsedMs / tuning.reserveResponseMs)
       reservePx += (reserveTarget - reservePx) * reserveStep
       const step = computeFollowStep(dt, {
         lag,
         speedEma: speedCpsRef.current,
         velocityPxPerSec,
-      })
+      }, tuning)
       if (lag <= 0.1) {
         animatedH = contentHeight - runwayOffset
         velocityPxPerSec = 0
@@ -912,8 +963,9 @@ export function useConversationFollow(
         )
         velocityPxPerSec = step.velocityPxPerSec
       }
-      animatedH = applyVisual(nextPort, animatedH, reservePx, velocityPxPerSec)
+      animatedH = applyVisual(nextPort, animatedH, reservePx, velocityPxPerSec, tuning.runwayPx)
       updateRevealScale(nextPort, elapsedMs)
+      reportFollow(nextPort, true)
       const remainingEntranceLag = Math.max(
         0,
         nextPort.scrollHeight - animatedH - runwayOffsetOf(nextPort),
@@ -943,6 +995,7 @@ export function useConversationFollow(
         clearVisual(host)
         followLeaders.delete(host)
         releaseRevealScale()
+        debugRuntime.reportFollow(host, null)
         return
       }
       if (preserveReader) {
@@ -950,13 +1003,15 @@ export function useConversationFollow(
         clearVisual(host)
         followLeaders.delete(host)
         releaseRevealScale()
+        debugRuntime.reportFollow(host, null)
         return
       }
 
       // Completion can land the final Tool/command height in this same
       // commit. Preserve the logical extent and drain it after unmount instead
       // of clearing the compositor state before the first settled paint.
-      ensureRunway(host, shiftSurfacesOf(host))
+      const completionTuning = debugRuntime.activeTuning()
+      ensureRunway(host, shiftSurfacesOf(host), completionTuning.runwayPx)
       const completionRunway = runwayOffsetOf(host)
       const completionMinimumLag = Math.max(0, reservePx)
       animatedH = Math.min(
@@ -964,13 +1019,15 @@ export function useConversationFollow(
         host.scrollHeight - completionRunway - completionMinimumLag,
       )
       settleAtFloor(host)
-      animatedH = applyVisual(host, animatedH, reservePx, velocityPxPerSec)
+      animatedH = applyVisual(host, animatedH, reservePx, velocityPxPerSec, completionTuning.runwayPx)
+      reportFollow(host, false)
       const runwayOffset = runwayOffsetOf(host)
       const remainingLag = Math.max(0, host.scrollHeight - animatedH - runwayOffset)
       if (remainingLag <= FOLLOW_SETTLE_EPSILON_PX && reservePx <= FOLLOW_SETTLE_EPSILON_PX) {
         finishAtNaturalFloor(host)
         followLeaders.delete(host)
         releaseRevealScale()
+        debugRuntime.reportFollow(host, null)
         return
       }
 
@@ -996,14 +1053,16 @@ export function useConversationFollow(
           clearVisual(host)
           followLeaders.delete(host)
           releaseRevealScale()
+          debugRuntime.reportFollow(host, null)
           stopSettleListeners()
           return
         }
         const dt = Math.min(FOLLOW_MAX_FRAME_MS, Math.max(0, now - settleLast))
+        const tuning = debugRuntime.activeTuning()
         settleLast = now
         const runwayOffset = runwayOffsetOf(host)
         const lag = Math.max(0, host.scrollHeight - animatedH - runwayOffset)
-        const reserveStep = 1 - Math.exp(-dt / FOLLOW_RESERVE_RESPONSE_MS)
+        const reserveStep = 1 - Math.exp(-dt / tuning.reserveResponseMs)
         reservePx += (0 - reservePx) * reserveStep
         if (lag <= FOLLOW_SETTLE_EPSILON_PX && reservePx <= FOLLOW_SETTLE_EPSILON_PX) {
           animatedH = host.scrollHeight - runwayOffset
@@ -1012,6 +1071,7 @@ export function useConversationFollow(
           finishAtNaturalFloor(host)
           followLeaders.delete(host)
           releaseRevealScale()
+          debugRuntime.reportFollow(host, null)
           stopSettleListeners()
           return
         }
@@ -1019,7 +1079,7 @@ export function useConversationFollow(
           lag,
           speedEma: speedCpsRef.current,
           velocityPxPerSec,
-        })
+        }, tuning)
         // The temporary runway is visually neutral only while an equal lag
         // remains in the transform. Do not let the spring outrun the runway's
         // closing reserve or cleanup would reveal an overshoot and rebound.
@@ -1030,7 +1090,8 @@ export function useConversationFollow(
         )
         velocityPxPerSec = step.velocityPxPerSec
         settleAtFloor(host)
-        animatedH = applyVisual(host, animatedH, reservePx, velocityPxPerSec)
+        animatedH = applyVisual(host, animatedH, reservePx, velocityPxPerSec, tuning.runwayPx)
+        reportFollow(host, false)
         requestAnimationFrame(settleFrame)
       }
       requestAnimationFrame(settleFrame)
