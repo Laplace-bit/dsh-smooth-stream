@@ -216,12 +216,32 @@ function resizeProxyOf(port: HTMLElement): HTMLElement | null {
   return port.querySelector('[data-chat-transcript]') ?? port.querySelector('[data-chat-flow]')
 }
 
-/** Outermost message surfaces; nested tool rows ride their parent. */
-function shiftSurfacesOf(port: HTMLElement): HTMLElement[] {
+/**
+ * Outermost message surfaces; nested tool rows ride their parent.
+ *
+ * Another plugin may insert its own element as a flow sibling of the Chat rows
+ * (meow-memory's fold bar is one). Such a row carries no
+ * `data-chat-anchor-key`, so selecting only anchored rows would shift the
+ * conversation while leaving the foreign row at its natural offset, letting the
+ * shifted rows paint over it. Every direct flow child therefore rides the same
+ * transform, keeping the visual order of the column intact.
+ */
+export function shiftSurfacesOf(port: HTMLElement): HTMLElement[] {
   const transcript = port.querySelector<HTMLElement>('[data-chat-transcript]')
   if (transcript !== null) return [transcript]
-  return [...port.querySelectorAll<HTMLElement>('[data-chat-anchor-key]')]
+  const anchored = [...port.querySelectorAll<HTMLElement>('[data-chat-anchor-key]')]
     .filter(row => row.parentElement?.closest('[data-chat-anchor-key]') === null)
+  const flow = port.querySelector<HTMLElement>('[data-chat-flow]')
+  if (flow === null) return anchored
+  const status = turnStatusOf(port)
+  const anchoredSet = new Set(anchored)
+  // One document-order pass: an anchored row, or a foreign child that contains
+  // no anchored row of its own (a wrapper around real rows would double-shift
+  // the rows inside it).
+  return [...flow.children].filter((child): child is HTMLElement =>
+    child instanceof HTMLElement
+    && child !== status
+    && (anchoredSet.has(child) || child.querySelector('[data-chat-anchor-key]') === null))
 }
 
 function currentShiftOf(element: HTMLElement): number {
