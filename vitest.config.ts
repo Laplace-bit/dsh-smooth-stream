@@ -4,7 +4,28 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vitest/config'
 
 const root = fileURLToPath(new URL('.', import.meta.url))
-const harnessRoot = resolve(root, '../deepseek-harness')
+
+/**
+ * The path map targets `../deepseek-harness`, which holds when this plugin is
+ * checked out beside the harness. A checkout inside the harness's own
+ * `local-plugins/` directory reaches the same tree two levels up, so resolve
+ * the sibling layout first and fall back to the nested one; without a hit the
+ * `@deepseek-ai/*` specifiers fall through to prebuilt client bundles that
+ * expect a loader global and throw on import.
+ */
+function findHarnessRoot(): string | null {
+  for (const candidate of [
+    resolve(root, '../deepseek-harness'),
+    resolve(root, '../..'),
+  ]) {
+    if (existsSync(join(candidate, 'packages')) && existsSync(join(candidate, 'vendor'))) {
+      return candidate
+    }
+  }
+  return null
+}
+
+const harnessRoot = findHarnessRoot()
 
 interface PathMap {
   compilerOptions: { paths: Record<string, string[]> }
@@ -37,13 +58,21 @@ function expandTarget(target: string, captured: string): string {
 }
 
 function harnessPathsPlugin(): Plugin | null {
-  if (!existsSync(harnessRoot)) return null
+  if (harnessRoot === null) return null
   const map = JSON.parse(readFileSync(join(root, 'tsconfig.paths.json'), 'utf8')) as PathMap
   const entries = Object.entries(map.compilerOptions.paths)
   const exact = new Map<string, string[]>()
   const wild: Array<{ pattern: string; targets: string[] }> = []
+  // Every target is written against the sibling layout; re-root it so a nested
+  // checkout resolves the same source files.
+  const reroot = (target: string): string => resolve(
+    root,
+    target.startsWith('../deepseek-harness/')
+      ? join(harnessRoot, target.slice('../deepseek-harness/'.length))
+      : target,
+  )
   for (const [pattern, targets] of entries) {
-    const resolved = targets.map(target => resolve(root, target))
+    const resolved = targets.map(reroot)
     if (pattern.includes('*')) wild.push({ pattern, targets: resolved })
     else exact.set(pattern, resolved)
   }
