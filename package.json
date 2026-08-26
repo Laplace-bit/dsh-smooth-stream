@@ -1,6 +1,6 @@
 {
   "name": "dsh-smooth-stream",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Fluid streaming rendering and silky scrolling for DeepSeek Harness replies, including Markdown, code blocks, tables, and tool results.",
   "license": "MIT",
   "type": "module",

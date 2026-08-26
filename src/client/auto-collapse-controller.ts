@@ -28,9 +28,9 @@
  */
 
 const STYLE_ID = 'dshss-auto-collapse-style'
-/** Class of the injected per-turn summary row; also consumed by the follow
- * engine so the row rides the same lag transform as native message rows. */
-export const PROCESSED_CLASS = 'dshss-processed'
+/** Class of the injected per-turn summary row; the follow engine's generalized
+ * surface walk picks it up as an ordinary foreign flow sibling. */
+const PROCESSED_CLASS = 'dshss-processed'
 /** Inline custom property marking elements whose display this plugin owns. */
 const DISPLAY_OWNED_PROP = '--dshss-display-owned'
 /** Unobservable external style writes are reconciled by this audit cadence. */

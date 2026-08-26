@@ -29,7 +29,6 @@
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 import { DEFAULT_STREAM_DEBUG_TUNING, type StreamDebugTuning } from '../settings.ts'
 import { debugRuntime } from './debugRuntime.ts'
-import { PROCESSED_CLASS } from './auto-collapse-controller.ts'
 
 /**
  * Programmatic follow marker retained for hosts that recognize external
@@ -217,16 +216,36 @@ function resizeProxyOf(port: HTMLElement): HTMLElement | null {
   return port.querySelector('[data-chat-transcript]') ?? port.querySelector('[data-chat-flow]')
 }
 
-/** Outermost message surfaces; nested tool rows ride their parent. */
-/** @internal Test seam: the equal-lag transform set for one scrollport. */
+/**
+ * Outermost message surfaces; nested tool rows ride their parent.
+ *
+ * Another plugin may insert its own element as a flow sibling of the Chat rows
+ * (meow-memory's fold bar is one; so is this plugin's own fold summary row).
+ * Such a row carries no `data-chat-anchor-key`, so selecting only anchored
+ * rows would shift the conversation while leaving the foreign row at its
+ * natural offset, letting the shifted rows paint over it. Every direct flow
+ * child therefore rides the same transform, keeping the visual order of the
+ * column intact.
+ */
 export function shiftSurfacesOf(port: HTMLElement): HTMLElement[] {
   const transcript = port.querySelector<HTMLElement>('[data-chat-transcript]')
   if (transcript !== null) return [transcript]
-  // Fold summary rows are plugin-injected flow children without an anchor
-  // key; they must ride the same lag transform as native rows, otherwise
-  // they visibly detach from their neighbours on every follow frame.
-  return [...port.querySelectorAll<HTMLElement>(`[data-chat-anchor-key], .${PROCESSED_CLASS}`)]
+  const anchored = [...port.querySelectorAll<HTMLElement>('[data-chat-anchor-key]')]
     .filter(row => row.parentElement?.closest('[data-chat-anchor-key]') === null)
+  const flow = port.querySelector<HTMLElement>('[data-chat-flow]')
+  if (flow === null) return anchored
+  const status = turnStatusOf(port)
+  const anchoredSet = new Set(anchored)
+  // One document-order pass: an anchored row, or a foreign child that contains
+  // no anchored row of its own (a wrapper around real rows would double-shift
+  // the rows inside it).
+  const __dbg = [...flow.children].filter((child): child is HTMLElement =>
+    child instanceof HTMLElement
+    && child !== status
+    && (anchoredSet.has(child) || child.querySelector('[data-chat-anchor-key]') === null))
+  console.log('[engine] reached end of shiftSurfacesOf, n=', __dbg.length)
+  ;(globalThis as Record<string, unknown>).__dshssProbe = __dbg.map(e => `${e.tagName}:${e.getAttribute('data-chat-anchor-key') ?? e.className}`)
+  return __dbg
 }
 
 function currentShiftOf(element: HTMLElement): number {

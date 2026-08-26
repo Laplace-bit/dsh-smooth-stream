@@ -13,6 +13,7 @@ describe('follow lag surfaces include fold summary rows', () => {
   it('selects anchored rows and plugin summary rows together, in DOM order', () => {
     const port = document.createElement('div')
     const flow = document.createElement('div')
+    flow.setAttribute('data-chat-flow', '')
     port.appendChild(flow)
 
     const rowA = document.createElement('div')
