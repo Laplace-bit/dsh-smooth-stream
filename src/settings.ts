@@ -62,6 +62,13 @@ export interface StreamSettings {
    * it by hand — and stops the running state from re-owning the disclosure.
    */
   thinkAutoExpand: boolean
+  /**
+   * Whether a finished turn folds its work process (thinking, tool calls,
+   * context injection, intermediate replies) behind one "已处理" summary row,
+   * leaving only the final answer visible. The summary row can always be
+   * toggled by hand, and turns still expand live while they stream.
+   */
+  autoCollapse: boolean
   /** Whether the live renderer diagnostics panel is enabled. */
   debugEnabled: boolean
   /** Values edited by the diagnostics panel. */
@@ -72,6 +79,7 @@ export interface StreamSettings {
 export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   enabled: true,
   thinkAutoExpand: true,
+  autoCollapse: true,
   debugEnabled: false,
   debugTuning: DEFAULT_STREAM_DEBUG_TUNING,
 }

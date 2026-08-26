@@ -8,6 +8,7 @@ export type SmoothStreamLocaleKey =
   | 'title' | 'description'
   | 'enabled' | 'enabledHint'
   | 'thinkAutoExpand' | 'thinkAutoExpandHint'
+  | 'autoCollapse' | 'autoCollapseHint'
   | 'debugEnabled' | 'debugEnabledHint' | 'debugUnavailable'
   | 'debugPanelTitle' | 'debugPanelToggle' | 'debugPanelClose' | 'debugGuide'
   | 'debugLive' | 'debugIdle' | 'debugUnsaved'
@@ -36,6 +37,8 @@ export const en: Record<SmoothStreamLocaleKey, string> = {
   enabledHint: 'Let this plugin render and follow streaming replies. Turn off to use the built-in Harness renderer.',
   thinkAutoExpand: 'Auto-expand thinking',
   thinkAutoExpandHint: 'Open the thinking block while it streams. Turn off to keep it collapsed.',
+  autoCollapse: 'Collapse finished work',
+  autoCollapseHint: 'When a reply finishes, fold its thinking, tools, and intermediate output behind one “Processed” summary so only the final answer shows. Click the summary to expand again; works with streaming on or off.',
   debugEnabled: 'Show render diagnostics',
   debugEnabledHint: 'Show live streaming and scroll metrics on the right side of the chat. Tune values there, then save them here.',
   debugUnavailable: 'Live diagnostics require a newer plugin Host.',
@@ -114,6 +117,8 @@ export const zh: Record<SmoothStreamLocaleKey, string> = {
   enabledHint: '由本插件渲染并跟随流式回复；关闭后使用 Harness 内置渲染。',
   thinkAutoExpand: '自动展开思考',
   thinkAutoExpandHint: '思考块在流式时自动展开；关闭后保持折叠，可手动展开。',
+  autoCollapse: '完成后自动折叠',
+  autoCollapseHint: '回复处理完成后，把思考、工具与过程输出折叠为一行“已处理”摘要，只展示最终回复；点击摘要可再次展开。开启或关闭流式渲染均可用，默认开启。',
   debugEnabled: '显示渲染调试面板',
   debugEnabledHint: '在聊天右侧显示流式渲染和滚动的实时参数，可在面板中调节并在这里保存。',
   debugUnavailable: '当前 Host 版本不支持实时调试，请先更新插件 Host。',

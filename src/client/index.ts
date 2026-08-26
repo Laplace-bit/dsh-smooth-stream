@@ -7,6 +7,7 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { TypewriterAssistantNodeView } from './TypewriterAssistantNodeView.tsx'
+import { AutoCollapseController } from './auto-collapse-controller.ts'
 import { wrapFollowNodeView, type FollowWrapProps } from './TypewriterToolNodeView.tsx'
 import { SmoothStreamCard } from './SmoothStreamCard.tsx'
 import { SmoothStreamCardController } from './smooth-stream-card-controller.ts'
@@ -154,6 +155,7 @@ class SettingsCell {
       pending === this.pending
       && next.enabled === this.value.enabled
       && next.thinkAutoExpand === this.value.thinkAutoExpand
+      && next.autoCollapse === this.value.autoCollapse
       && next.debugEnabled === this.value.debugEnabled
       && next.debugTuning === this.value.debugTuning
     ) return
@@ -165,6 +167,11 @@ class SettingsCell {
   /** False while an available settings service is resolving its authority. */
   takeoverEnabled(): boolean {
     return !this.pending && this.value.enabled
+  }
+
+  /** Whether finished turns should fold behind a summary row right now. */
+  autoCollapseActive(): boolean {
+    return !this.pending && this.value.autoCollapse
   }
 
   readonly getSnapshot = (): StreamSettings => this.value
@@ -189,6 +196,25 @@ class SettingsCell {
 export function apply(ctx: ClientContext): void {
   const config = readBootConfig()
   const settings = new SettingsCell()
+
+  // Auto-collapse works at the DOM level and is independent of the renderer
+  // takeover: it also folds finished turns when the built-in Harness renderer
+  // owns the conversation. The lifecycle rides the guaranteed `slots` service
+  // (this entry's own inject list) and follows the same live settings cell, so
+  // flipping the preference restores every folded row immediately.
+  ctx.inject(['slots'], () => {
+    const autoCollapse = new AutoCollapseController()
+    const syncAutoCollapse = (): void => {
+      if (settings.autoCollapseActive()) autoCollapse.start()
+      else autoCollapse.stop()
+    }
+    const unsubscribe = settings.subscribe(syncAutoCollapse)
+    syncAutoCollapse()
+    return () => {
+      unsubscribe()
+      autoCollapse.stop()
+    }
+  })
 
   // The card talks to the plugin-owned loopback RPC, so the core settings
   // namespace allowlist cannot make it disappear. The stream still applies

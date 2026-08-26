@@ -65,9 +65,12 @@ In the Web UI, open **Settings → Plugins → Plugin configuration** to find a 
 
 - **Enable smooth streaming** (on by default): lets this plugin own reply and tool-row rendering and follow. Turn it off to return rendering completely to the built-in Harness UI.
 - **Auto-expand thinking**: controls whether reasoning opens while it streams. This preference has no effect while the master toggle is off.
+- **Collapse finished work** (on by default): once a turn finishes processing, its thinking, tool calls, context injection, and intermediate output fold behind one “已处理 X秒 / Processed” summary row so only the final answer shows. Click the summary any time to expand or re-collapse the full process.
 - **Show render diagnostics** (off by default): opens a chat-side panel with live rendering, frame-rate, and scroll-follow measurements, plus controls for reveal and spring behavior.
 
 With “Auto-expand thinking” on, reasoning blocks open while streaming and collapse when thinking ends. With it off, reasoning stays collapsed; you can still open a block by hand, and the stream state will not wrestle it back.
+
+“Collapse finished work” never interferes while a reply streams — output expands live, and folding happens only after the turn settles with all work complete. The switch works independently of “Enable smooth streaming”: folding applies whether this plugin or the built-in renderer owns the conversation. Plain replies without thinking or tools get no summary row. Content embedded by other plugins through fully custom tool views (such as `dsh-pianist`'s piano card) is never folded — only calls rendered as native tool cards participate. This feature supersedes the standalone `dsh-auto-collapse` plugin; do not run both at once, or they will fight over the same DOM nodes and overlap text.
 
 These are durable, user-level preferences that apply live without a restart, and are written to the DeepSeek Harness user-settings document rather than the plugin's composed configuration.
 

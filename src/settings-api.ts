@@ -27,6 +27,8 @@ export interface StreamSettingsView {
   enabled: boolean
   /** Current resolved preference. */
   thinkAutoExpand: boolean
+  /** Whether finished turns fold their work process behind a summary row. */
+  autoCollapse: boolean
   /** Whether a fixed npm update command is safe to offer. */
   canUpgrade: boolean
 }

@@ -84,6 +84,19 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
                   </span>
                   <span className={css.hint}>{t('thinkAutoExpandHint')}</span>
                 </label>
+                <label className={css.field}>
+                  <span className={css.fieldHead}>
+                    <span className={css.label}>{t('autoCollapse')}</span>
+                    <input
+                      type="checkbox"
+                      className={css.toggle}
+                      checked={state.autoCollapse}
+                      disabled={!state.writable || state.saving}
+                      onChange={(event) => { props.edit({ autoCollapse: event.target.checked }) }}
+                    />
+                  </span>
+                  <span className={css.hint}>{t('autoCollapseHint')}</span>
+                </label>
                 <label className={state.debugAvailable ? css.field : `${css.field} ${css.fieldDisabled}`}>
                   <span className={css.fieldHead}>
                     <span className={css.label}>{t('debugEnabled')}</span>

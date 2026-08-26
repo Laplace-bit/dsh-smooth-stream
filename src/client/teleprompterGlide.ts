@@ -29,6 +29,7 @@
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 import { DEFAULT_STREAM_DEBUG_TUNING, type StreamDebugTuning } from '../settings.ts'
 import { debugRuntime } from './debugRuntime.ts'
+import { PROCESSED_CLASS } from './auto-collapse-controller.ts'
 
 /**
  * Programmatic follow marker retained for hosts that recognize external
@@ -217,10 +218,14 @@ function resizeProxyOf(port: HTMLElement): HTMLElement | null {
 }
 
 /** Outermost message surfaces; nested tool rows ride their parent. */
-function shiftSurfacesOf(port: HTMLElement): HTMLElement[] {
+/** @internal Test seam: the equal-lag transform set for one scrollport. */
+export function shiftSurfacesOf(port: HTMLElement): HTMLElement[] {
   const transcript = port.querySelector<HTMLElement>('[data-chat-transcript]')
   if (transcript !== null) return [transcript]
-  return [...port.querySelectorAll<HTMLElement>('[data-chat-anchor-key]')]
+  // Fold summary rows are plugin-injected flow children without an anchor
+  // key; they must ride the same lag transform as native rows, otherwise
+  // they visibly detach from their neighbours on every follow frame.
+  return [...port.querySelectorAll<HTMLElement>(`[data-chat-anchor-key], .${PROCESSED_CLASS}`)]
     .filter(row => row.parentElement?.closest('[data-chat-anchor-key]') === null)
 }
 

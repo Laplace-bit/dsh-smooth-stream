@@ -23,6 +23,7 @@ export interface SmoothStreamCardState {
   failed: boolean
   enabled: boolean
   thinkAutoExpand: boolean
+  autoCollapse: boolean
   debugEnabled: boolean
   debugTuning: StreamDebugTuning
   debugAvailable: boolean
@@ -51,7 +52,7 @@ export class SmoothStreamCardController {
   private readonly store = createSnapshotStore<SmoothStreamCardState>(this.projection())
   private loaded: StreamSettingsView | undefined
   private loadedDebug: StreamDebugSettingsView | undefined
-  private stagedBase: Pick<StreamSettings, 'enabled' | 'thinkAutoExpand'> | undefined
+  private stagedBase: Pick<StreamSettings, 'enabled' | 'thinkAutoExpand' | 'autoCollapse'> | undefined
   private stagedDebug: Pick<StreamSettings, 'debugEnabled' | 'debugTuning'> | undefined
   private saving = false
   private failed = false
@@ -89,11 +90,12 @@ export class SmoothStreamCardController {
       hooks: { smoothStreamCard: this.store },
       edit: (patch) => {
         if (this.saving) return
-        if (patch.enabled !== undefined || patch.thinkAutoExpand !== undefined) {
+        if (patch.enabled !== undefined || patch.thinkAutoExpand !== undefined || patch.autoCollapse !== undefined) {
           this.stagedBase = {
             ...this.baseValues(),
             ...(patch.enabled === undefined ? {} : { enabled: patch.enabled }),
             ...(patch.thinkAutoExpand === undefined ? {} : { thinkAutoExpand: patch.thinkAutoExpand }),
+            ...(patch.autoCollapse === undefined ? {} : { autoCollapse: patch.autoCollapse }),
           }
         }
         if (this.loadedDebug !== undefined && (patch.debugEnabled !== undefined || patch.debugTuning !== undefined)) {
@@ -138,10 +140,11 @@ export class SmoothStreamCardController {
     }
   }
 
-  private baseValues(): Pick<StreamSettings, 'enabled' | 'thinkAutoExpand'> {
+  private baseValues(): Pick<StreamSettings, 'enabled' | 'thinkAutoExpand' | 'autoCollapse'> {
     return this.stagedBase ?? {
       enabled: this.loaded?.enabled ?? DEFAULT_STREAM_SETTINGS.enabled,
       thinkAutoExpand: this.loaded?.thinkAutoExpand ?? DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+      autoCollapse: this.loaded?.autoCollapse ?? DEFAULT_STREAM_SETTINGS.autoCollapse,
     }
   }
 

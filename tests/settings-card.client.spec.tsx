@@ -31,6 +31,7 @@ const developmentView: StreamSettingsView = {
   writable: true,
   enabled: true,
   thinkAutoExpand: true,
+  autoCollapse: true,
   canUpgrade: false,
 }
 
@@ -41,6 +42,7 @@ const developmentDebugView: StreamDebugSettingsView = {
 
 interface BenchOptions {
   view?: StreamSettingsView
+  readValue?: unknown
   debugView?: StreamDebugSettingsView
   failRead?: boolean
   readGate?: Promise<void>
@@ -84,23 +86,30 @@ async function bench(options: BenchOptions = {}): Promise<{
     if (endpoint === STREAM_SETTINGS_RPC.read) {
       if (options.failRead === true) throw new Error('RPC unavailable')
       await options.readGate
-      return { ok: true as const, value: view }
+      return { ok: true as const, value: options.readValue ?? view }
     }
     if (endpoint === STREAM_SETTINGS_RPC.write) {
       const settings = payload as {
         enabled?: unknown
         thinkAutoExpand?: unknown
+        autoCollapse?: unknown
         debugEnabled?: unknown
         debugTuning?: unknown
       }
-      if (typeof settings.enabled !== 'boolean' || typeof settings.thinkAutoExpand !== 'boolean') {
+      if (typeof settings.enabled !== 'boolean' || typeof settings.thinkAutoExpand !== 'boolean'
+        || typeof settings.autoCollapse !== 'boolean') {
         return { ok: false as const, error: { code: 'internal', message: 'bad payload' } }
       }
       if (options.failWrite === true) {
         return { ok: false as const, error: { code: 'settings-rejected', message: 'write failed' } }
       }
       await options.writeGate
-      view = { ...view, enabled: settings.enabled, thinkAutoExpand: settings.thinkAutoExpand }
+      view = {
+        ...view,
+        enabled: settings.enabled,
+        thinkAutoExpand: settings.thinkAutoExpand,
+        autoCollapse: settings.autoCollapse,
+      }
       if (typeof settings.debugEnabled === 'boolean' && typeof settings.debugTuning === 'object' && settings.debugTuning !== null) {
         debugView = { debugEnabled: settings.debugEnabled, tuning: settings.debugTuning as StreamDebugSettingsView['tuning'] }
       }
@@ -226,6 +235,17 @@ describe('smooth-stream settings card', () => {
     expect(coreDescribe).not.toHaveBeenCalled()
   })
 
+  it('rejects a settings response whose auto-collapse flag is malformed', async () => {
+    const { ctx, slots } = await bench({
+      readValue: { ...developmentView, autoCollapse: 'true' },
+    })
+    declareCardSlot(slots)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+
+    const face = cardFace(slots)
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('unavailable'))
+  })
+
   it('labels a link installation as a development version and disables its update action', async () => {
     const { ctx, slots } = await bench()
     declareCardSlot(slots)
@@ -258,6 +278,30 @@ describe('smooth-stream settings card', () => {
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
       enabled: true,
       thinkAutoExpand: false,
+      autoCollapse: true,
+    })
+  })
+
+  it('stages and persists the finished-turn collapse switch independently', async () => {
+    const { ctx, slots, call } = await bench()
+    declareCardSlot(slots)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const face = cardFace(slots)
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
+
+    face.edit({ autoCollapse: false })
+    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ dirty: true, autoCollapse: false })
+    face.save()
+    await vi.waitFor(() => {
+      expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+        dirty: false,
+        autoCollapse: false,
+      })
+    })
+    expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
+      enabled: true,
+      thinkAutoExpand: true,
+      autoCollapse: false,
     })
   })
 
@@ -307,6 +351,7 @@ describe('smooth-stream settings card', () => {
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
       enabled: false,
       thinkAutoExpand: true,
+      autoCollapse: true,
       debugEnabled: true,
       debugTuning: tuning,
     })
