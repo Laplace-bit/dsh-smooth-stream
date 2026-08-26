@@ -162,5 +162,10 @@
     "tsdown": "^0.22.2",
     "typescript": "^5.9.2",
     "vitest": "^4.1.8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
