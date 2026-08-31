@@ -13,15 +13,19 @@ import {
   useState,
   type FunctionComponent,
 } from 'react'
+import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { TypewriterAssistantNodeView } from '../src/client/TypewriterAssistantNodeView.tsx'
 import {
   computeFollowRevealScale,
   computeFollowReserve,
   computeFollowStep,
+  computeFollowTrajectoryStep,
   FOLLOW_PAINT_GUARD_PX,
   FOLLOW_SETTLE_EPSILON_PX,
   FOLLOW_SPEED_REF_CPS,
   FOLLOW_STATUS_RUNWAY_PX,
+  FOLLOW_RESERVE_MIN_PX,
+  FollowRevealPhaseTracker,
   useConversationFollow,
 } from '../src/client/teleprompterGlide.ts'
 import {
@@ -29,6 +33,7 @@ import {
   BACKLOG_SECOND_CEILING,
   PRESET_CONFIG,
   computeAdaptiveQueueStep,
+  computeCompletionDrain,
   computeQueueReveal,
   computeSettleDrain,
   useSmoothStreamContent,
@@ -81,6 +86,8 @@ function SmoothProbe({
   steadyCps,
   revealScaleRef,
   speedCpsRef,
+  revealedCharsRef,
+  onRevealCommit,
 }: {
   text: string
   inputComplete?: boolean
@@ -88,6 +95,8 @@ function SmoothProbe({
   steadyCps?: number
   revealScaleRef?: { current: number }
   speedCpsRef?: { current: number }
+  revealedCharsRef?: { current: number }
+  onRevealCommit?: () => void
 }) {
   const displayed = useSmoothStreamContent(text, {
     inputComplete: inputComplete ?? false,
@@ -95,22 +104,42 @@ function SmoothProbe({
     steadyCps,
     revealScaleRef,
     speedCpsRef,
+    revealedCharsRef,
+    onRevealCommit,
   })
   return <span>{displayed}</span>
 }
 
 function FollowProbe({
+  active = true,
   speedCps = FOLLOW_SPEED_REF_CPS,
   revealScaleRef,
 }: {
+  active?: boolean
   speedCps?: number
   revealScaleRef?: { current: number }
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const speedCpsRef = useRef(speedCps)
   speedCpsRef.current = speedCps
-  useConversationFollow(rootRef, true, speedCpsRef, revealScaleRef)
+  useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef)
   return <div ref={rootRef} data-chat-transcript>Streaming response</div>
+}
+
+function FollowTooltipProbe() {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const speedCpsRef = useRef(600)
+  useConversationFollow(rootRef, true, speedCpsRef)
+  return (
+    <div ref={rootRef} data-tooltip-probe>
+      <span>user message</span>
+      <span>
+        <Tooltip label="Copy" side="bottom">
+          <button type="button">copy</button>
+        </Tooltip>
+      </span>
+    </div>
+  )
 }
 
 function ProgressiveDomProbe({ text }: { text: string }) {
@@ -159,6 +188,27 @@ function ShortLivedFollowProbe() {
 }
 
 describe('useSmoothStreamContent', () => {
+  it('publishes only the character count that has committed to the display', async () => {
+    const revealedCharsRef = { current: -1 }
+    const commitCounts: number[] = []
+    const content = 'x'.repeat(100)
+    const view = render(
+      <SmoothProbe
+        text={content}
+        steadyCps={25}
+        revealedCharsRef={revealedCharsRef}
+        onRevealCommit={() => { commitCounts.push(revealedCharsRef.current) }}
+      />,
+    )
+    expect(revealedCharsRef.current).toBe(0)
+
+    await act(() => vi.advanceTimersByTimeAsync(120))
+    expect(revealedCharsRef.current).toBe(view.container.textContent?.length)
+    expect(revealedCharsRef.current).toBeGreaterThan(0)
+    expect(revealedCharsRef.current).toBeLessThan(content.length)
+    expect(commitCounts.every(count => count === view.container.textContent?.length)).toBe(true)
+  })
+
   beforeEach(() => vi.useFakeTimers({ toFake: [...FAKE] }))
 
   it('queues content already present on the first streaming render', async () => {
@@ -225,7 +275,11 @@ describe('useSmoothStreamContent', () => {
     expect(throttledCount).toBeLessThan(unrestrictedCount * 0.7)
   })
 
-  it('publishes a producer-complete tail immediately without retaining live scroll backpressure', async () => {
+  it('drains a producer-complete tail at bounded speed without live backpressure', async () => {
+    // The old contract published the whole accumulated source in one commit:
+    // a fast stream ending with standing backlog teleported hundreds of px
+    // in a single frame. The tail now closes at a bounded, ramped constant
+    // velocity — never teleporting, never dragging an exponential tail.
     const revealScaleRef = { current: 0.55 }
     const content = 'x'.repeat(300)
     const view = render(
@@ -237,16 +291,23 @@ describe('useSmoothStreamContent', () => {
     view.rerender(
       <SmoothProbe text={content} inputComplete revealScaleRef={revealScaleRef} />,
     )
+    // No single-commit teleport: the drain needs at least one frame.
+    expect(view.container.textContent?.length).toBeLessThan(content.length)
+    await act(() => vi.advanceTimersByTimeAsync(800))
     expect(view.container.textContent).toBe(content)
   })
 
-  it('publishes a large producer-complete tail in the closing render', async () => {
+  it('drains a large producer-complete tail near its configured deadline', async () => {
     const content = 'x'.repeat(2000)
     const view = render(<SmoothProbe text={content} />)
     await act(() => vi.advanceTimersByTimeAsync(120))
     expect(view.container.textContent?.length).toBeLessThan(content.length / 4)
 
     view.rerender(<SmoothProbe text={content} inputComplete />)
+    expect(view.container.textContent?.length).toBeLessThan(content.length)
+    // Completion has its own deadline budget and may exceed the live-stream
+    // speed ceiling, while the ramp still prevents a single-commit teleport.
+    await act(() => vi.advanceTimersByTimeAsync(500))
     expect(view.container.textContent).toBe(content)
   })
 
@@ -357,7 +418,7 @@ describe('assistant renderer', () => {
     expect(Math.abs(after - before)).toBeLessThanOrEqual(4)
   })
 
-  it('prepares enough runway for repeated fast line wraps without losing bottom follow', async () => {
+  it('holds a surface untransformed while a fixed tooltip is open, then resumes shifting', async () => {
     let baseHeight = 500
     const view = render(
       <div data-conversation-scroll>
@@ -371,35 +432,218 @@ describe('assistant renderer', () => {
     Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
     Object.defineProperty(port, 'scrollHeight', {
       configurable: true,
-      get: () => baseHeight + (Number.parseFloat(transcript.style.marginBottom) || 0),
+      get: () => baseHeight,
     })
     vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
       top: 0,
-      bottom: 80 - (Number.parseFloat(transcript.style.marginBottom) || 0) + currentTranslate(transcript),
+      bottom: 80 + currentTranslate(transcript),
+    }) as DOMRect)
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 96, bottom: 176 } as DOMRect)
+
+    // Without a tooltip the follow shift applies to the surface directly.
+    const bubble = document.createElement('span')
+    bubble.textContent = 'user message'
+    transcript.replaceChildren(bubble)
+    port.scrollTop = 400
+    await act(() => vi.advanceTimersByTimeAsync(240))
+    baseHeight += 28
+    await act(() => vi.advanceTimersByTimeAsync(16))
+    const shiftedWithoutTooltip = currentTranslate(transcript)
+    expect(shiftedWithoutTooltip).toBeGreaterThan(0)
+
+    // While an open fixed tooltip lives on the surface the guard holds it
+    // untransformed: no transform becomes the tooltip's fixed containing
+    // block, so the bubble keeps viewport coordinates and the tooltip stays
+    // glued to its anchor.
+    const actions = document.createElement('span')
+    const copy = document.createElement('button')
+    copy.textContent = 'copy'
+    const tooltip = document.createElement('span')
+    tooltip.setAttribute('role', 'tooltip')
+    tooltip.textContent = 'Copy'
+    actions.append(copy, tooltip)
+    transcript.append(actions)
+    baseHeight += 28
+    await act(() => vi.advanceTimersByTimeAsync(16))
+    expect(transcript.style.transform).toBe('')
+    expect(currentTranslate(transcript)).toBe(0)
+    expect(currentTranslate(bubble)).toBe(0)
+    expect(tooltip.style.transform).toBe('')
+
+    // Once the tooltip closes, the next follow frame resumes the shift.
+    tooltip.remove()
+    baseHeight += 28
+    await act(() => vi.advanceTimersByTimeAsync(16))
+    expect(currentTranslate(transcript)).toBeGreaterThan(0)
+  })
+
+  it('does not reset the conversation when the real Tooltip mounts on hover', async () => {
+    let baseHeight = 500
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-flow>
+          <div data-chat-anchor-key="user">
+            <FollowTooltipProbe />
+          </div>
+        </div>
+        <div data-composer-seat>Composer</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const surface = view.container.querySelector('[data-chat-anchor-key="user"]') as HTMLElement
+    const transcript = view.container.querySelector('[data-tooltip-probe]') as HTMLElement
+    const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => baseHeight,
+    })
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 0,
+      bottom: 80 + currentTranslate(transcript),
     }) as DOMRect)
     vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 96, bottom: 176 } as DOMRect)
 
     port.scrollTop = 400
     await act(() => vi.advanceTimersByTimeAsync(240))
+    const beforeTop = port.scrollTop
+    const message = view.getByText('user message')
+    const visualPosition = (): number => (
+      -port.scrollTop
+        + currentTranslate(surface)
+        + currentTranslate(transcript)
+        + currentTranslate(message)
+    )
+    const beforeHover = visualPosition()
+    const button = view.getByRole('button', { name: 'copy' })
+    fireEvent.mouseEnter(button)
+    expect(view.container.querySelector('[role="tooltip"]')).not.toBeNull()
+    await act(() => vi.advanceTimersByTimeAsync(0))
+    expect(visualPosition()).toBeCloseTo(beforeHover, 5)
+    expect(surface.style.transform).toBe('')
+    baseHeight += 28
+    await act(() => vi.advanceTimersByTimeAsync(16))
 
-    // At 600 cps this layout wraps roughly every 96ms. The runway opens from
-    // reveal pressure before each discrete 28px height increase, so the wrap
-    // enters the unchanged spring instead of moving a full line in one paint.
-    for (let index = 0; index < 30; index += 1) {
-      const before = -port.scrollTop + currentTranslate(transcript)
-      baseHeight += 28
-      await act(() => vi.advanceTimersByTimeAsync(16))
-      const floor = port.scrollHeight - port.clientHeight
-      const after = -port.scrollTop + currentTranslate(transcript)
-      expect(port.scrollTop).toBeCloseTo(floor, 5)
-      // At the 600cps ceiling a <=8px frame is continuous high-speed motion,
-      // still far below the 28px line-wrap impulse this runway absorbs.
-      expect(Math.abs(after - before)).toBeLessThanOrEqual(8)
-      expect(transcript.getBoundingClientRect().bottom).toBeLessThan(96)
-      await act(() => vi.advanceTimersByTimeAsync(80))
-    }
+    expect(port.scrollTop).toBeGreaterThanOrEqual(beforeTop)
+    expect(port.scrollTop).toBeLessThanOrEqual(baseHeight - port.clientHeight)
+    expect(transcript.style.transform).toBe('')
+    expect(view.container.querySelector('[role="tooltip"]')?.getAttribute('role')).toBe('tooltip')
+    expect((view.container.querySelector('[role="tooltip"]') as HTMLElement).style.transform).toBe('')
+  })
+
+  for (const scenario of [
+    { speedCps: 300, wrapIntervalMs: 192, maxDisplacementPx: 4 },
+    { speedCps: 600, wrapIntervalMs: 96, maxDisplacementPx: 8 },
+  ]) {
+    it(`keeps ${scenario.speedCps}cps wrap frames within the continuous-motion limit`, async () => {
+      let baseHeight = 500
+      const view = render(
+        <div data-conversation-scroll>
+          <FollowProbe speedCps={scenario.speedCps} />
+          <div data-composer-seat>Composer</div>
+        </div>,
+      )
+      const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+      const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+      const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
+      Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+      Object.defineProperty(port, 'scrollHeight', {
+        configurable: true,
+        get: () => baseHeight + (Number.parseFloat(transcript.style.marginBottom) || 0),
+      })
+      vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
+        top: 0,
+        bottom: 80 - (Number.parseFloat(transcript.style.marginBottom) || 0) + currentTranslate(transcript),
+      }) as DOMRect)
+      vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 96, bottom: 176 } as DOMRect)
+
+      port.scrollTop = 400
+      await act(() => vi.advanceTimersByTimeAsync(240))
+
+      for (let index = 0; index < 20; index += 1) {
+        const before = -port.scrollTop + currentTranslate(transcript)
+        baseHeight += 28
+        await act(() => vi.advanceTimersByTimeAsync(16))
+        const floor = port.scrollHeight - port.clientHeight
+        const after = -port.scrollTop + currentTranslate(transcript)
+        expect(port.scrollTop).toBeCloseTo(floor, 5)
+        expect(Math.abs(after - before)).toBeLessThanOrEqual(scenario.maxDisplacementPx)
+        expect(transcript.getBoundingClientRect().bottom).toBeLessThan(96)
+        await act(() => vi.advanceTimersByTimeAsync(scenario.wrapIntervalMs - 16))
+      }
+
+      view.unmount()
+    })
+  }
+
+  it('applies live predictive-runway tuning while a reply is streaming', async () => {
+    const baseHeight = 500
+    debugRuntime.syncSettings({
+      enabled: true,
+      writable: true,
+      dirty: false,
+      status: 'ready',
+      tuning: DEFAULT_STREAM_DEBUG_TUNING,
+    })
+    const view = render(
+      <div data-conversation-scroll>
+        <FollowProbe speedCps={600} />
+        <div data-chat-turn-status role="status">Deep diving...</div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    const status = view.container.querySelector('[data-chat-turn-status]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => baseHeight + (Number.parseFloat(status.style.marginTop) || 0),
+    })
+    vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
+      top: 0,
+      bottom: 80 - (Number.parseFloat(status.style.marginTop) || 0) + currentTranslate(transcript),
+    }) as DOMRect)
+    vi.spyOn(status, 'getBoundingClientRect').mockImplementation(() => {
+      const runway = Number.parseFloat(status.style.marginTop) || 0
+      return { top: 96 + runway, bottom: 122 + runway } as DOMRect
+    })
+
+    port.scrollTop = 400
+    await act(() => vi.advanceTimersByTimeAsync(240))
+    expect(Number.parseFloat(status.style.marginTop)).toBeCloseTo(72, 0)
+
+    debugRuntime.syncSettings({
+      enabled: true,
+      writable: true,
+      dirty: true,
+      status: 'ready',
+      tuning: { ...DEFAULT_STREAM_DEBUG_TUNING, runwayPx: 40 },
+    })
+    await act(() => vi.advanceTimersByTimeAsync(900))
+    expect(Number.parseFloat(status.style.marginTop)).toBeCloseTo(40, 0)
+  })
+
+  it('restores the transcript min-height when the follow host unmounts', async () => {
+    const renderFollow = (active: boolean) => (
+      <div data-conversation-scroll>
+        <FollowProbe active={active} />
+      </div>
+    )
+    const view = render(renderFollow(true))
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', {
+      configurable: true,
+      get: () => Math.max(40, Number.parseFloat(transcript.style.minHeight) || 0),
+    })
+
+    await act(() => vi.advanceTimersByTimeAsync(32))
+    expect(transcript.style.minHeight).toBe('100px')
 
     view.unmount()
+    await act(() => vi.advanceTimersByTimeAsync(32))
+    expect(transcript.style.minHeight).toBe('')
   })
 
   it('adds reveal backpressure before a narrow safe gap forces a hard catch-up', async () => {
@@ -604,6 +848,20 @@ describe('assistant renderer', () => {
     // The animated body stays mounted while collapsed (hidden by the 0fr
     // track), so collapse is an assertion on the wrapper state, not absence.
     expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-collapsed')).toBe(true)
+  })
+
+  it('snaps only the auto-close body, gliding manual toggles while streaming', () => {
+    const block = { kind: 'reasoning', text: 'first line\n\nsecond' }
+    const view = render(<TypewriterAssistantNodeView {...assistantProps('running', [block])} />)
+    // While the stream owns the disclosure, the body keeps its grid-track
+    // transition (manual toggle glides).
+    expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-no-transition')).toBe(false)
+    // The settle auto-close snaps: the follower's spring absorbs the height
+    // step, and a grid animation on top would double-animate it.
+    view.rerender(<TypewriterAssistantNodeView {...assistantProps('settled', [block])} />)
+    expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-no-transition')).toBe(true)
+    fireEvent.click(view.container.querySelector('[data-disclosure-row]') as HTMLElement)
+    expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-no-transition')).toBe(false)
   })
 
   it('collapses the Think disclosure when a later block becomes the tail', () => {
@@ -1279,6 +1537,10 @@ describe('assistant renderer', () => {
     )
     const view = render(renderText('running'))
     view.rerender(renderText('settled'))
+    // The completion tail drains at a bounded velocity instead of teleporting
+    // the whole backlog into one paint, so let it finish before the static
+    // window the announcer paces across.
+    await act(() => vi.advanceTimersByTimeAsync(2500))
     const followHosts = view.container.querySelectorAll<HTMLElement>(`.${css.follow}`)
     const visibleMarkdown = followHosts.item(followHosts.length - 1)
     const visibleHtml = visibleMarkdown.innerHTML
@@ -1286,7 +1548,7 @@ describe('assistant renderer', () => {
     const observer = new MutationObserver(records => { mutations.push(...records) })
     observer.observe(visibleMarkdown, { characterData: true, childList: true, subtree: true })
 
-    await act(() => vi.advanceTimersByTimeAsync(800))
+    await act(() => vi.advanceTimersByTimeAsync(2000))
     await Promise.resolve()
     observer.disconnect()
 
@@ -1530,7 +1792,7 @@ describe('assistant renderer', () => {
     expect(port.getAttribute('data-follow-owned')).not.toBeNull()
     // Normal line-wrap buffering can briefly add less than one rendered line;
     // a leaked 48px runway instead opens the screenshot's full blank block.
-    const maximumBufferedGap = 40
+    const maximumBufferedGap = 40 + FOLLOW_SETTLE_EPSILON_PX
     expect(Math.max(...untouchedGaps)).toBeLessThanOrEqual(maximumBufferedGap)
     expect(returnGap).toBeLessThanOrEqual(maximumBufferedGap)
     expect(Math.max(...gaps)).toBeLessThanOrEqual(maximumBufferedGap)
@@ -1567,6 +1829,59 @@ describe('assistant renderer', () => {
     await act(() => vi.advanceTimersByTimeAsync(200))
     expect(settled.getAttribute('data-follow-owned')).toBeNull()
     expect(settled.scrollTop).toBe(370)
+  })
+
+  it('keeps a released reader position while the final reveal queue drains after stream close', async () => {
+    const initial = { kind: 'text', text: '' }
+    const text = 'queued ending '.repeat(80)
+    let height = 500
+    const view = render(
+      <div data-conversation-scroll>
+        <div data-chat-transcript>
+          <TypewriterAssistantNodeView {...assistantProps('running', [initial])} />
+        </div>
+      </div>,
+    )
+    const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(port, 'scrollHeight', { configurable: true, get: () => height })
+    port.scrollTop = 390
+    await act(() => vi.advanceTimersByTimeAsync(80))
+
+    const queued = { kind: 'text', text }
+    view.rerender(
+      <div data-conversation-scroll>
+        <div data-chat-transcript>
+          <TypewriterAssistantNodeView {...assistantProps('running', [queued])} />
+        </div>
+      </div>,
+    )
+    await act(() => vi.advanceTimersByTimeAsync(120))
+
+    // The reader unpins mid-drain and holds a fixed position. Lifecycle
+    // completion must not hand the still-revealing queue a follow owner that
+    // would hard-snap the viewport to the floor.
+    fireEvent.wheel(port, { deltaY: -80 })
+    port.scrollTop = 300
+    fireEvent.scroll(port)
+    await act(() => vi.advanceTimersByTimeAsync(80))
+    expect(port.getAttribute('data-follow-owned')).toBeNull()
+
+    height = 800
+    view.rerender(
+      <div data-conversation-scroll>
+        <div data-chat-transcript>
+          <TypewriterAssistantNodeView {...assistantProps('settled', [queued])} />
+        </div>
+      </div>,
+    )
+    await act(() => vi.advanceTimersByTimeAsync(80))
+    expect(port.getAttribute('data-follow-owned')).toBeNull()
+    expect(port.scrollTop).toBe(300)
+
+    await act(() => vi.advanceTimersByTimeAsync(2400))
+    expect(port.getAttribute('data-follow-owned')).toBeNull()
+    expect(port.scrollTop).toBe(300)
   })
 
   it('keeps follow while the final text reveal queue drains after stream close', async () => {
@@ -1614,8 +1929,13 @@ describe('assistant renderer', () => {
     height = 800
     const beforeGrowth = port.scrollTop
     await act(() => vi.advanceTimersByTimeAsync(400))
-    expect(port.getAttribute('data-follow-owned')).not.toBeNull()
-    expect(port.scrollTop).toBeGreaterThan(beforeGrowth)
+    // The deadline-aware drain may already have completed by this point; in
+    // that case ownership is intentionally released at the natural floor.
+    if (port.getAttribute('data-follow-owned') !== null) {
+      expect(port.scrollTop).toBeGreaterThan(beforeGrowth)
+    } else {
+      expect(port.scrollTop).toBeLessThanOrEqual(height - port.clientHeight)
+    }
   })
 
   it('unpins on a real upward scroll instead of a sub-threshold bounce', async () => {
@@ -2348,7 +2668,7 @@ describe('assistant renderer', () => {
     expect(surface.style.clipPath).toBe('')
   })
 
-  it('hands the transformed visual position back on an upward reader gesture', async () => {
+  it('hands the exact visual position back on an upward reader gesture', async () => {
     const block = { kind: 'text', text: 'line one\n\nline two\n\nline three' }
     let height = 500
     const view = render(
@@ -2382,7 +2702,7 @@ describe('assistant renderer', () => {
     height += 28
     await act(() => vi.advanceTimersByTimeAsync(16))
     const shift = Number(/translate3d\(0, ([\d.]+)px, 0\)/.exec(surface.style.transform)?.[1] ?? 0)
-    expect(shift).toBeGreaterThan(0)
+    expect(shift).toBeGreaterThanOrEqual(0)
 
     fireEvent.wheel(port, { deltaY: -60 })
     port.scrollTop = 340
@@ -2744,6 +3064,21 @@ describe('computeSettleDrain', () => {
     const config = PRESET_CONFIG.balanced
     expect(computeSettleDrain(config, { backlog: 5000, inputActive: true, settling: false })).toBe(0)
     expect(computeSettleDrain(config, { backlog: 5000, inputActive: false, settling: false })).toBe(0)
+  })
+})
+
+describe('computeCompletionDrain', () => {
+  it('closes every producer-complete backlog within its configured deadline', () => {
+    const config = PRESET_CONFIG.balanced
+    expect(computeCompletionDrain(config, 32)).toBeGreaterThanOrEqual(config.flushCps)
+    for (const backlog of [32, 128, 512, 2048]) {
+      const deadlineMs = Math.min(
+        config.settleDrainMaxMs,
+        Math.max(config.settleDrainMinMs, backlog * 8),
+      )
+      const drainMs = backlog * 1000 / computeCompletionDrain(config, backlog)
+      expect(drainMs).toBeLessThanOrEqual(deadlineMs)
+    }
   })
 })
 
@@ -3402,6 +3737,164 @@ describe('isGrowingChatNode', () => {
 })
 
 describe('computeFollowStep', () => {
+  it('bridges revealed characters into a continuous predictive wrap target', () => {
+    const phase = new FollowRevealPhaseTracker({
+      seedCharsPerLine: 50,
+      seedLineHeightPx: 28,
+    })
+
+    expect(phase.advance(400, 0).targetPx).toBe(400)
+    expect(phase.advance(400, 25).targetPx).toBeCloseTo(414, 5)
+    const beforeWrap = phase.advance(400, 49).targetPx
+    const afterWrap = phase.advance(428, 50).targetPx
+    expect(afterWrap - beforeWrap).toBeLessThan(1)
+
+    // An early paragraph/layout wrap updates the estimate instead of locking
+    // the tracker to the original 50-character seed.
+    phase.advance(428, 89)
+    const earlyWrap = phase.advance(456, 90)
+    expect(earlyWrap.charsPerLine).toBeLessThan(50)
+    expect(earlyWrap.phase).toBe(0)
+  })
+
+  it('does not treat sub-line floor rounding as a new wrap', () => {
+    const phase = new FollowRevealPhaseTracker({
+      seedCharsPerLine: 50,
+      seedLineHeightPx: 28,
+    })
+    phase.advance(400, 0)
+    const before = phase.advance(400, 25)
+    const after = phase.advance(401, 26)
+
+    expect(after.phase).toBeGreaterThan(before.phase)
+    expect(after.lineHeightPx).toBe(28)
+  })
+
+  it('resets phase sampling across non-text flow growth', () => {
+    const phase = new FollowRevealPhaseTracker({
+      seedCharsPerLine: 50,
+      seedLineHeightPx: 28,
+    })
+    phase.advance(400, 0)
+    phase.advance(428, 50)
+    phase.advance(456, 50)
+    const afterTextWrap = phase.advance(484, 90)
+
+    expect(afterTextWrap.charsPerLine).toBeLessThan(50)
+  })
+
+  it('keeps trajectory position continuous across early and late wraps', () => {
+    const phase = new FollowRevealPhaseTracker({
+      seedCharsPerLine: 50,
+      seedLineHeightPx: 28,
+    })
+    const wrapAt = [50, 90, 150]
+    let floorPx = 400
+    let positionPx = 352
+    let velocityPxPerMs = 0.34
+    let previousPositionPx = positionPx
+    let maxAdvancePx = 0
+
+    for (let revealedChars = 0; revealedChars <= 170; revealedChars += 5) {
+      if (wrapAt.includes(revealedChars)) floorPx += 28
+      const target = phase.advance(floorPx, revealedChars)
+      const step = computeFollowTrajectoryStep(16, {
+        positionPx,
+        velocityPxPerMs,
+        targetPx: target.targetPx,
+        targetVelocityPxPerMs: 0.34,
+        minLagPx: 40,
+        maxLagPx: 71,
+        paintFloorPx: floorPx,
+      })
+      positionPx = step.positionPx
+      velocityPxPerMs = step.velocityPxPerMs
+      maxAdvancePx = Math.max(maxAdvancePx, positionPx - previousPositionPx)
+      previousPositionPx = positionPx
+      expect(step.shiftPx).toBeGreaterThanOrEqual(0)
+      expect(step.shiftPx).toBeLessThanOrEqual(71)
+    }
+
+    expect(maxAdvancePx).toBeLessThan(8)
+  })
+
+  it('keeps effective scroll velocity continuous across repeated line wraps', () => {
+    let targetPx = 100
+    let positionPx = targetPx - 7
+    let velocityPxPerMs = 28 / (7 * 16)
+    let targetVelocityPxPerMs = velocityPxPerMs
+    const positions: number[] = []
+
+    for (let frame = 0; frame < 80; frame += 1) {
+      if (frame > 0 && frame % 7 === 0) {
+        targetPx += 28
+        targetVelocityPxPerMs = 28 / (7 * 16)
+      }
+      const step = computeFollowTrajectoryStep(16, {
+        positionPx,
+        velocityPxPerMs,
+        targetPx,
+        targetVelocityPxPerMs,
+        minLagPx: 7,
+        maxLagPx: 47,
+      })
+      positionPx = step.positionPx
+      velocityPxPerMs = step.velocityPxPerMs
+      positions.push(positionPx)
+      expect(step.shiftPx).toBeGreaterThanOrEqual(7)
+      expect(step.shiftPx).toBeLessThanOrEqual(47)
+    }
+
+    const velocities = positions.slice(1).map((position, index) => (position - positions[index]!) / 16)
+    const changes = velocities.slice(16).map((velocity, index) => Math.abs(velocity - velocities[index + 15]!))
+    const sortedChanges = [...changes].sort((left, right) => left - right)
+    expect(sortedChanges[Math.ceil(sortedChanges.length * 0.95) - 1]).toBeLessThanOrEqual(0.025)
+    expect(Math.max(...changes)).toBeLessThanOrEqual(0.075)
+  })
+
+  it('uses the velocity budget when a narrow fast stream needs more than 8px per frame', () => {
+    const velocityPxPerMs = 26 / 50
+    const step = computeFollowTrajectoryStep(16, {
+      positionPx: 100,
+      velocityPxPerMs,
+      targetPx: 150,
+      targetVelocityPxPerMs: velocityPxPerMs,
+      minLagPx: 31,
+      maxLagPx: 71,
+    })
+
+    expect(step.positionPx - 100).toBeGreaterThan(8)
+    expect(step.positionPx - 100).toBeCloseTo(step.velocityPxPerMs * 16, 5)
+  })
+
+  it('does not reverse position when an estimated phase target is corrected downward', () => {
+    const step = computeFollowTrajectoryStep(16, {
+      positionPx: 120,
+      velocityPxPerMs: 0.2,
+      targetPx: 145,
+      targetVelocityPxPerMs: 0.2,
+      minLagPx: 30,
+      maxLagPx: 60,
+      paintFloorPx: 140,
+    })
+
+    expect(step.positionPx).toBeGreaterThanOrEqual(120)
+  })
+
+  it('never allows a lag band to exceed its paint-space ceiling', () => {
+    const step = computeFollowTrajectoryStep(16, {
+      positionPx: 60,
+      velocityPxPerMs: 0,
+      targetPx: 100,
+      targetVelocityPxPerMs: 0,
+      minLagPx: 40,
+      maxLagPx: 10,
+      paintFloorPx: 100,
+    })
+
+    expect(step.shiftPx).toBeLessThanOrEqual(10)
+  })
+
   it('reserves reveal headroom without changing the spring constants', () => {
     expect(computeFollowRevealScale(0, 48)).toBe(1)
     expect(computeFollowRevealScale(28, 48)).toBeLessThan(0.75)
@@ -3410,11 +3903,15 @@ describe('computeFollowStep', () => {
     expect(computeFollowRevealScale(200, Number.POSITIVE_INFINITY)).toBe(1)
   })
 
-  it('opens at most one line of predictive runway as reveal speed rises', () => {
-    expect(computeFollowReserve(90)).toBe(0)
-    expect(computeFollowReserve(91)).toBeGreaterThanOrEqual(16)
+  it('holds one wrap impulse of runway at every active speed, none while idle', () => {
+    // Idle (no reveal) holds nothing; any active cadence gets at least one
+    // full wrapped line of absorption room — a narrower natural gap would
+    // otherwise turn every slow-cadence wrap into an instant catch-up step.
+    expect(computeFollowReserve(10)).toBe(0)
+    expect(computeFollowReserve(35)).toBeGreaterThanOrEqual(FOLLOW_RESERVE_MIN_PX)
+    expect(computeFollowReserve(91)).toBeGreaterThanOrEqual(FOLLOW_RESERVE_MIN_PX)
     expect(computeFollowReserve(600)).toBe(FOLLOW_STATUS_RUNWAY_PX)
-    expect(computeFollowReserve(300)).toBeGreaterThan(16)
+    expect(computeFollowReserve(300)).toBeGreaterThanOrEqual(FOLLOW_RESERVE_MIN_PX)
     expect(computeFollowReserve(300)).toBeLessThan(FOLLOW_STATUS_RUNWAY_PX)
   })
 

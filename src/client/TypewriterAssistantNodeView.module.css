@@ -178,6 +178,13 @@
     visibility 0s var(--ds-transition-duration, 0.2s);
 }
 
+/* Auto-close at stream end snaps instead of animating: the follower's settle
+ * spring already absorbs the height step through the compositor, so a grid
+ * animation would double-animate the same collapse for a dozen frames. */
+.disclosureContent[data-no-transition] {
+  transition: none;
+}
+
 .disclosureContent > * {
   min-height: 0;
   overflow: hidden;

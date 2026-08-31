@@ -3,6 +3,7 @@ import { IconThinkOutline14, JsonBlock, MarkdownText } from '@deepseek-ai/dsh-cl
 import { ImageGallery, type ImageLoader, type MessageImageLabels } from '@deepseek-ai/dsh-client-ui-attachment'
 import type { ChatNodeViewProps, TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { AnimatedDisclosure } from './AnimatedDisclosure.tsx'
+import { notifyFollowCommit } from './teleprompterGlide.ts'
 import { useSmoothStreamContent, type StreamSmoothingPreset } from './useSmoothStreamContent.ts'
 import { useFpsGuard } from './useFpsGuard.ts'
 import { FollowHost } from './FollowHost.tsx'
@@ -32,6 +33,7 @@ interface AnimatedMarkdownTextProps extends MarkdownProps {
   /** True on the last text block: that block owns conversation follow. */
   ownFollow: boolean
   followSpeedCpsRef?: { current: number } | undefined
+  followRevealedCharsRef?: { current: number } | undefined
   followRevealScaleRef?: { current: number } | undefined
   onPredictiveChange?: ((predictive: boolean) => void) | undefined
   preset: StreamSmoothingPreset
@@ -289,6 +291,7 @@ function AnimatedMarkdownText({
   streaming,
   ownFollow,
   followSpeedCpsRef,
+  followRevealedCharsRef,
   followRevealScaleRef,
   onPredictiveChange,
   preset,
@@ -308,7 +311,9 @@ function AnimatedMarkdownText({
     preset,
     shouldHoldBack,
     speedCpsRef,
+    revealedCharsRef: followRevealedCharsRef,
     revealScaleRef: followRevealScaleRef,
+    onRevealCommit: () => { notifyFollowCommit(followRootRef.current) },
   })
   const shown = reduced ? text : displayed
   const live = typing && !reduced
@@ -347,11 +352,15 @@ function AnimatedMarkdownText({
     <FollowHost
       active={live && ownFollow}
       speedCpsRef={speedCpsRef}
+      revealedCharsRef={followRevealedCharsRef}
       revealScaleRef={followRevealScaleRef}
       predictive={streaming}
       hostRef={followRootRef}
     >
       <MarkdownText
+        // `shown` stays authoritative through the completion drain: the
+        // settled parse swaps in only when the queue has actually emptied.
+        // Rendering `text` early bypasses the drain and teleports the tail.
         text={live ? shown : text}
         streaming={live}
         codeLabels={codeLabels}
@@ -416,13 +425,19 @@ function AnimatedReasoning({
 }) {
   const reduced = usePrefersReducedMotion()
   const [expanded, setExpanded] = useState(running && thinkAutoExpand)
+  const [autoClosed, setAutoClosed] = useState(false)
   const summaryRef = useRef<HTMLSpanElement>(null)
+  const commitAnchorRef = useRef<HTMLDivElement>(null)
+  // The running→false flip is the AUTO-close: it collapses instantly and the
+  // follower's settle spring absorbs the height step. A later manual toggle
+  // keeps the CSS glide.
   const displayed = useSmoothStreamContent(text, {
     enabled: running && !reduced,
     preset,
     shouldHoldBack,
     speedCpsRef: followSpeedCpsRef,
     revealScaleRef: followRevealScaleRef,
+    onRevealCommit: () => { notifyFollowCommit(commitAnchorRef.current) },
   })
   const shown = running && !reduced ? displayed : text
   const summary = running ? latestLine(shown) : firstLine(text)
@@ -430,7 +445,14 @@ function AnimatedReasoning({
   useLayoutEffect(() => {
     // Only the running state owns disclosure while auto-expand is on; with it
     // off, a manual toggle is never wrestled back by the stream.
-    if (thinkAutoExpand) setExpanded(running)
+    if (thinkAutoExpand) {
+      setExpanded(running)
+      setAutoClosed(!running)
+    }
+    // A commit that changes this block's height must hand the follower its
+    // correction in the SAME task, before the grown-but-uncompensated frame
+    // can reach a paint.
+    notifyFollowCommit(commitAnchorRef.current)
   }, [running, thinkAutoExpand])
 
   useEffect(() => {
@@ -441,7 +463,7 @@ function AnimatedReasoning({
 
   // Preserve FollowHost's layout wrapper without mounting a second scroll owner.
   return (
-    <div className={css.follow}>
+    <div className={css.follow} ref={commitAnchorRef}>
       <div className={css.think} data-variant="think" data-state={running ? 'running' : 'ok'}>
         {running && <span className={css.visuallyHidden}>{t('row.running')}</span>}
         <AnimatedDisclosure
@@ -452,7 +474,15 @@ function AnimatedReasoning({
           icon={<IconThinkOutline14 size={14} />}
           title="Think"
           open={expanded}
-          onToggle={() => { setExpanded(value => !value) }}
+          onToggle={() => {
+            setAutoClosed(false)
+            setExpanded(value => !value)
+          }}
+          // The auto-close at stream end snaps (no grid-track animation): the
+          // follower's settle spring absorbs the height step through the
+          // compositor, so animating the track too would double-animate the
+          // collapse. Manual toggles while streaming keep the glide.
+          bodyTransition={!autoClosed}
           collapsedContent={(
             <>
               <span className={css.thinkSeparator} aria-hidden />
@@ -503,6 +533,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   const reduced = usePrefersReducedMotion()
   const { ref: guardRef, shouldHoldBack } = useFpsGuard(streaming)
   const rootSpeedRef = useRef(35)
+  const rootRevealedCharsRef = useRef(0)
   const rootRevealScaleRef = useRef(1)
   const reasoningTailIndex = streaming && data.blocks[data.blocks.length - 1]?.kind === 'reasoning'
     ? data.blocks.length - 1
@@ -571,6 +602,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
             streaming={streaming}
             ownFollow={!streaming && index === lastFollow}
             followSpeedCpsRef={index === lastFollow ? rootSpeedRef : undefined}
+            followRevealedCharsRef={index === lastFollow ? rootRevealedCharsRef : undefined}
             followRevealScaleRef={index === lastFollow ? rootRevealScaleRef : undefined}
             onPredictiveChange={index === lastFollow ? updateTextPrediction : undefined}
             preset={preset}
@@ -628,6 +660,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
       <FollowHost
         active={streaming && !reduced}
         speedCpsRef={rootSpeedRef}
+        revealedCharsRef={rootRevealedCharsRef}
         revealScaleRef={rootRevealScaleRef}
         predictiveRef={rootPredictiveRef}
       >

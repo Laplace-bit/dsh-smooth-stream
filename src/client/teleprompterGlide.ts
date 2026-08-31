@@ -26,7 +26,7 @@
  * reader release re-acquires only after returning to the real floor.
  */
 
-import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
+import { useLayoutEffect, useRef, type RefObject } from 'react'
 import { DEFAULT_STREAM_DEBUG_TUNING, type StreamDebugTuning } from '../settings.ts'
 import { debugRuntime } from './debugRuntime.ts'
 
@@ -44,9 +44,13 @@ export const FOLLOW_SPRING_SUBSTEPS = 4
 export const FOLLOW_SPRING_MAX_STEP_MS = 32
 
 /** Minimum visible room for one ordinary line-wrap impulse. */
-export const FOLLOW_RESERVE_MIN_PX = 16
+export const FOLLOW_RESERVE_MIN_PX = 31
+
+/** Reveal speeds at or below this are idle; no predictive room is held. */
+export const FOLLOW_RESERVE_IDLE_CPS = 20
 
 /** Reveal-speed range produced by the pressure-buffer typewriter. */
+/** Retained for consumers that tune the old pressure threshold. */
 export const FOLLOW_RESERVE_MIN_CPS = 90
 export const FOLLOW_RESERVE_MAX_CPS = 600
 
@@ -84,11 +88,19 @@ export const FOLLOW_HOST_RELEASE_PX = FOLLOW_SLACK_PX + 1
 export const FOLLOW_PAINT_GUARD_PX = 1
 
 /**
- * Maximum predictive paint room before status/composer chrome. One rendered
- * line is normally 24-28px; 48px plus the host's existing status gap covers
- * the original spring's measured ~63px worst-case trail at 600cps.
+ * Maximum predictive paint room before status/composer chrome. The
+ * feed-forward phase leads the real floor by up to one wrapped line, so the
+ * runway must hold steady lag + one line + guard (35 + 26 + 8 ≈ 72) or the
+ * leading shift gets clipped against chrome at the wrap cadence.
  */
-export const FOLLOW_STATUS_RUNWAY_PX = 48
+export const FOLLOW_STATUS_RUNWAY_PX = 72
+
+/**
+ * Duration of the lockstep runway retirement at stream end. The margin and
+ * its canceling transform shrink together, so this duration is invisible;
+ * it only bounds how long the owned margin lingers.
+ */
+export const FOLLOW_RUNWAY_RETIRE_MS = 160
 
 /** How long a gesture keeps `isUserInteracting` so the next scroll can unpin. */
 export const FOLLOW_GESTURE_MS = 800
@@ -96,15 +108,47 @@ export const FOLLOW_GESTURE_MS = 800
 /** Sub-pixel settle threshold; clearing below this cannot produce a visible rebound. */
 export const FOLLOW_SETTLE_EPSILON_PX = 0.25
 
+/** Retained visual-motion budget for compatibility with diagnostics/tests. */
+export const FOLLOW_CATCHUP_MAX_STEP_PX = 8
+
+/**
+ * Max painted-shift change per frame, in px. A line-wrap adds one line height
+ * (24-28px) to the floor in a single layout pass; letting the shift follow it
+ * instantly paints that whole step as a hard jump of the newest line. Capping
+ * the shift's per-frame change spreads the step across a few frames so the
+ * line glides in (slow start) instead of snapping.
+ */
+/**
+ * Per-frame bound on the DECAY side of the painted shift only (runway
+ * retirement and settle). The growth side is wrap compensation and must stay
+ * unlimited — see the clamp site in `applyVisual`.
+ */
+export const FOLLOW_PAINT_SHIFT_MAX_STEP_PX = 8
+
+/** Runway size emitted by bundles before the 72px predictive runway. */
+const LEGACY_RUNWAY_PX = 48
+
 /** Lowest reveal rate retained while the spring is short on paint room. */
 export const FOLLOW_REVEAL_MIN_SCALE = 0.55
 
 /** Safe-lag occupancy band over which reveal pressure is progressively reduced. */
-export const FOLLOW_BACKPRESSURE_START_RATIO = 0.25
+export const FOLLOW_BACKPRESSURE_START_RATIO = 0.1
 export const FOLLOW_BACKPRESSURE_FULL_RATIO = 0.75
 
 /** Slow release prevents the reveal rate from oscillating around each wrap. */
 export const FOLLOW_BACKPRESSURE_RELEASE_MS = 240
+
+/** Effective-scroll acceleration budget, in px/ms². */
+export const FOLLOW_TRAJECTORY_ACCELERATION = 0.00022
+
+/** Leave one line of phase range inside the visible runway. */
+export const FOLLOW_TRAJECTORY_PHASE_PX = 32
+
+/** Keep adaptive runway retirement from exposing an oversized chrome gap. */
+export const FOLLOW_TRAJECTORY_MIN_LAG_PX = 20
+
+/** Phase-centering response; slow enough to preserve continuous velocity. */
+export const FOLLOW_TRAJECTORY_CENTERING_MS = 120
 
 const GESTURE_EVENTS = [
   'wheel',
@@ -123,12 +167,150 @@ export function computeFollowReserve(
 ): number {
   const available = Math.max(0, runwayPx)
   if (available <= 0) return 0
-  if (speedCps <= FOLLOW_RESERVE_MIN_CPS) return 0
+  if (speedCps <= FOLLOW_RESERVE_IDLE_CPS) return 0
   const normalized = Math.min(1, Math.max(0, (
-    speedCps - FOLLOW_RESERVE_MIN_CPS
-  ) / (FOLLOW_RESERVE_MAX_CPS - FOLLOW_RESERVE_MIN_CPS)))
+    speedCps - FOLLOW_RESERVE_IDLE_CPS
+  ) / (FOLLOW_RESERVE_MAX_CPS - FOLLOW_RESERVE_IDLE_CPS)))
   const minimum = Math.min(available, FOLLOW_RESERVE_MIN_PX)
   return minimum + normalized * (available - minimum)
+}
+
+export interface FollowTrajectoryInput {
+  readonly positionPx: number
+  readonly velocityPxPerMs: number
+  readonly targetPx: number
+  readonly targetVelocityPxPerMs: number
+  readonly minLagPx: number
+  readonly maxLagPx: number
+  /** Real scroll floor used to turn logical position into a painted shift. */
+  readonly paintFloorPx?: number
+}
+
+export interface FollowRevealPhaseOptions {
+  readonly seedCharsPerLine?: number
+  readonly seedLineHeightPx?: number
+}
+
+export interface FollowRevealPhase {
+  readonly targetPx: number
+  readonly phase: number
+  readonly charsPerLine: number
+  readonly lineHeightPx: number
+}
+
+/**
+ * Character-domain feed-forward for the stepped layout floor. Callers only
+ * provide committed reveal progress and the measured floor; wrap capacity and
+ * line height stay local to this module and adapt when a real wrap lands.
+ */
+export class FollowRevealPhaseTracker {
+  private charsPerLine: number
+  private lineHeightPx: number
+  private floorPx: number | null = null
+  private wrapRevealCount = 0
+  private lastRevealCount = 0
+
+  constructor({
+    seedCharsPerLine = 50,
+    seedLineHeightPx = 26,
+  }: FollowRevealPhaseOptions = {}) {
+    this.charsPerLine = Math.max(1, seedCharsPerLine)
+    this.lineHeightPx = Math.max(1, seedLineHeightPx)
+  }
+
+  advance(floorPx: number, revealedChars: number): FollowRevealPhase {
+    const nextFloor = Math.max(0, floorPx)
+    const nextRevealCount = Math.max(0, revealedChars)
+    if (this.floorPx === null || nextRevealCount < this.lastRevealCount) {
+      this.floorPx = nextFloor
+      this.wrapRevealCount = nextRevealCount
+      this.lastRevealCount = nextRevealCount
+      return this.snapshot(nextFloor, 0)
+    }
+
+    const floorDelta = nextFloor - this.floorPx
+    const lineStepThreshold = Math.max(4, this.lineHeightPx * 0.5)
+    if (floorDelta >= lineStepThreshold) {
+      const wrappedLines = Math.max(1, Math.round(floorDelta / this.lineHeightPx))
+      const sampledLineHeight = floorDelta / wrappedLines
+      const revealedSinceWrap = nextRevealCount - this.wrapRevealCount
+      if (revealedSinceWrap >= this.charsPerLine * 0.5) {
+        const sampledCharsPerLine = revealedSinceWrap / wrappedLines
+        const alpha = 0.25
+        this.charsPerLine += (sampledCharsPerLine - this.charsPerLine) * alpha
+        this.lineHeightPx += (sampledLineHeight - this.lineHeightPx) * alpha
+        this.wrapRevealCount = nextRevealCount
+      } else {
+        // A flow sibling can grow without the text arm committing a glyph.
+        // Treat that as an unrelated layout event so its height is not folded
+        // into the next text-wrap capacity sample.
+        this.wrapRevealCount = nextRevealCount
+      }
+    } else if (floorDelta <= -lineStepThreshold) {
+      this.wrapRevealCount = nextRevealCount
+    }
+
+    this.floorPx = nextFloor
+    this.lastRevealCount = nextRevealCount
+    const phase = Math.min(1, Math.max(
+      0,
+      (nextRevealCount - this.wrapRevealCount) / this.charsPerLine,
+    ))
+    return this.snapshot(nextFloor, phase)
+  }
+
+  private snapshot(floorPx: number, phase: number): FollowRevealPhase {
+    return {
+      targetPx: floorPx + this.lineHeightPx * phase,
+      phase,
+      charsPerLine: this.charsPerLine,
+      lineHeightPx: this.lineHeightPx,
+    }
+  }
+}
+
+/** Advance a continuous effective scroll position behind a stepped floor. */
+export function computeFollowTrajectoryStep(
+  dtMs: number,
+  input: FollowTrajectoryInput,
+): { positionPx: number, shiftPx: number, velocityPxPerMs: number } {
+  if (dtMs <= 0) {
+    return {
+      positionPx: input.positionPx,
+      shiftPx: Math.max(0, (input.paintFloorPx ?? input.targetPx) - input.positionPx),
+      velocityPxPerMs: input.velocityPxPerMs,
+    }
+  }
+  const elapsedMs = Math.min(FOLLOW_MAX_FRAME_MS, dtMs)
+  const currentLagPx = input.targetPx - input.positionPx
+  const maxLagPx = Math.max(0, input.maxLagPx)
+  const minLagPx = Math.min(Math.max(0, input.minLagPx), maxLagPx)
+  const centerLagPx = (minLagPx + maxLagPx) / 2
+  const desiredVelocity = Math.max(
+    0,
+    input.targetVelocityPxPerMs
+      + (currentLagPx - centerLagPx) / FOLLOW_TRAJECTORY_CENTERING_MS,
+  )
+  const maxVelocityChange = FOLLOW_TRAJECTORY_ACCELERATION * elapsedMs
+  const velocityPxPerMs = desiredVelocity >= input.velocityPxPerMs
+    ? Math.min(desiredVelocity, input.velocityPxPerMs + maxVelocityChange)
+    : Math.max(desiredVelocity, input.velocityPxPerMs - maxVelocityChange)
+  const minPosition = input.targetPx - maxLagPx
+  const maxPosition = input.targetPx - minLagPx
+  // The frame budget follows controlled velocity rather than a refresh-rate
+  // dependent pixel constant. `elapsedMs` is already capped at 32ms, so a
+  // stalled browser cannot replay an unbounded jump when it catches up.
+  const frameAdvancePx = velocityPxPerMs * elapsedMs
+  const boundedPositionPx = Math.min(
+    maxPosition,
+    Math.max(minPosition, input.positionPx + frameAdvancePx),
+  )
+  const positionPx = Math.max(input.positionPx, boundedPositionPx)
+  return {
+    positionPx,
+    shiftPx: Math.max(0, (input.paintFloorPx ?? input.targetPx) - positionPx),
+    velocityPxPerMs,
+  }
 }
 
 /**
@@ -173,12 +355,7 @@ export interface FollowGlideStep {
   readonly velocityPxPerSec: number
 }
 
-/**
- * Semi-implicit spring integration with four substeps per <=32ms slice.
- * @param dtMs - Frame delta in ms.
- * @param input - Current visible lag and carried physics velocity.
- * @returns The position advance, its fraction, and next velocity.
- */
+/** Semi-implicit spring integration with four substeps per <=32ms slice. */
 export function computeFollowStep(
   dtMs: number,
   input: FollowGlideInput,
@@ -192,21 +369,17 @@ export function computeFollowStep(
   const elapsedMs = Math.min(FOLLOW_MAX_FRAME_MS, dtMs)
   const slices = Math.max(1, Math.ceil(elapsedMs / FOLLOW_SPRING_MAX_STEP_MS))
   const subDt = elapsedMs / 1000 / slices / FOLLOW_SPRING_SUBSTEPS
-
   for (let slice = 0; slice < slices; slice += 1) {
     for (let substep = 0; substep < FOLLOW_SPRING_SUBSTEPS; substep += 1) {
       const acceleration = (
-      tuning.springStiffness * lag - tuning.springDamping * velocity
-    ) / tuning.springMass
+        tuning.springStiffness * lag - tuning.springDamping * velocity
+      ) / tuning.springMass
       velocity = Math.max(0, velocity + acceleration * subDt)
       const advance = velocity * subDt
-      if (advance >= lag) {
-        return { advancePx: input.lag, lerpStep: 1, velocityPxPerSec: 0 }
-      }
+      if (advance >= lag) return { advancePx: input.lag, lerpStep: 1, velocityPxPerSec: 0 }
       lag -= advance
     }
   }
-
   const advancePx = input.lag - lag
   return { advancePx, lerpStep: advancePx / input.lag, velocityPxPerSec: velocity }
 }
@@ -239,13 +412,10 @@ export function shiftSurfacesOf(port: HTMLElement): HTMLElement[] {
   // One document-order pass: an anchored row, or a foreign child that contains
   // no anchored row of its own (a wrapper around real rows would double-shift
   // the rows inside it).
-  const __dbg = [...flow.children].filter((child): child is HTMLElement =>
+  return [...flow.children].filter((child): child is HTMLElement =>
     child instanceof HTMLElement
     && child !== status
     && (anchoredSet.has(child) || child.querySelector('[data-chat-anchor-key]') === null))
-  console.log('[engine] reached end of shiftSurfacesOf, n=', __dbg.length)
-  ;(globalThis as Record<string, unknown>).__dshssProbe = __dbg.map(e => `${e.tagName}:${e.getAttribute('data-chat-anchor-key') ?? e.className}`)
-  return __dbg
 }
 
 function currentShiftOf(element: HTMLElement): number {
@@ -254,15 +424,23 @@ function currentShiftOf(element: HTMLElement): number {
   )
 }
 
-function setShift(element: HTMLElement, px: number): void {
+/* An open fixed tooltip (role="tooltip") inside a surface is the only reason a
+ * naive translate would misalign content during the follow shift: the applied
+ * transform turns the surface into the tooltip's containing block and drags
+ * the bubble off its anchor. Rather than re-derive viewport coordinates every
+ * frame (a fragile engine that needed four follow-up fixes), hold the affected
+ * surface untransformed while a tooltip is open. A tooltip exists in the DOM
+ * only during hover, so the transient un-shifted row is invisible to a reader
+ * and matches the release 0.4.0 feel; the shift resumes on the next frame once
+ * it closes. */
+
+function setDirectShift(element: HTMLElement, px: number): void {
   if (Math.abs(px) > 0.01) {
     if (
       Math.abs(currentShiftOf(element) - px) <= 0.01
       && element.style.willChange === 'transform'
       && element.style.clipPath === ''
-    ) {
-      return
-    }
+    ) return
     element.style.transform = `translate3d(0, ${px}px, 0)`
     element.style.willChange = 'transform'
   } else {
@@ -270,14 +448,107 @@ function setShift(element: HTMLElement, px: number): void {
     element.style.transform = ''
     element.style.willChange = ''
   }
-  // Remove paint state left by v0.3.2 and earlier experimental builds.
   element.style.clipPath = ''
+}
+
+function setShift(element: HTMLElement, px: number): void {
+  // Guard: while an open fixed tooltip lives on the surface, hold it
+  // untransformed (see the comment above). When the shift is zero the tooltip
+  // cannot detach, so skip the subtree scan entirely and keep the fast path.
+  if (Math.abs(px) > 0.01 && element.querySelector('[role="tooltip"]') !== null) {
+    setDirectShift(element, 0)
+    return
+  }
+  setDirectShift(element, px)
 }
 
 function turnStatusOf(port: HTMLElement): HTMLElement | null {
   return port.querySelector<HTMLElement>(
     '[data-chat-turn-status], [data-chat-flow] > [role="status"]',
   )
+}
+
+/**
+ * Bottom-anchored hosts (ChatView packs the flow with `justify-content:
+ * flex-end`) translate every pre-overflow growth into an instant upward step
+ * of the whole column — a line lands and everything on screen hops up by one
+ * line-height. No scroll-domain engine can smooth that, because
+ * `scrollHeight` does not move while the host slack absorbs the growth.
+ *
+ * Owning `min-height` on the flow removes the slack instead: the column
+ * always fills the scrollport, content grows downward where it is visible,
+ * and real overflow — which the spring does model — begins with the very
+ * first wrapped line. The style is owned in a page-realm registry so a
+ * re-injected bundle adopts it rather than fighting it.
+ *
+ * The fill targets the VISIBLE client box, not the raw `clientHeight`.
+ * Imposing `min-height: clientHeight` inflates `scrollHeight` by whatever
+ * the scroller holds beyond the flow (its own padding-bottom, adjacent
+ * chrome); with short content the engine then sees a phantom floor equal to
+ * that padding and scrolls the conversation up — top edge off-screen while
+ * blank padding sits at the bottom. The overshoot is measured once per port
+ * and subtracted, so short content reaches `scrollHeight == clientHeight`
+ * and the floor is exactly zero.
+ */
+interface FollowFlowFill {
+  readonly element: HTMLElement
+  readonly original: string
+  /** Scroller height held by padding/chrome above the flow, px. */
+  readonly overshootPx: number
+}
+const FOLLOW_FLOW_FILL_SYMBOL = Symbol.for('dsh-smooth-stream.follow-flow-fill')
+const followFlowFillHost = globalThis as typeof globalThis & {
+  [key: symbol]: WeakMap<HTMLElement, FollowFlowFill> | undefined
+}
+const followFlowFills = followFlowFillHost[FOLLOW_FLOW_FILL_SYMBOL]
+  ?? new WeakMap<HTMLElement, FollowFlowFill>()
+followFlowFillHost[FOLLOW_FLOW_FILL_SYMBOL] = followFlowFills
+const FOLLOW_FLOW_FILL_USERS_SYMBOL = Symbol.for('dsh-smooth-stream.follow-flow-fill-users')
+const followFlowFillUsersHost = globalThis as typeof globalThis & {
+  [key: symbol]: WeakMap<HTMLElement, number> | undefined
+}
+const followFlowFillUsers = followFlowFillUsersHost[FOLLOW_FLOW_FILL_USERS_SYMBOL]
+  ?? new WeakMap<HTMLElement, number>()
+followFlowFillUsersHost[FOLLOW_FLOW_FILL_USERS_SYMBOL] = followFlowFillUsers
+
+function flowElementOf(port: HTMLElement): HTMLElement | null {
+  return port.querySelector<HTMLElement>('[data-chat-transcript]')
+    ?? port.querySelector<HTMLElement>('[data-chat-flow]')
+}
+
+function ensureFlowFillsPort(port: HTMLElement): void {
+  const element = flowElementOf(port)
+  const owned = followFlowFills.get(port)
+  if (element === null) {
+    if (owned !== undefined) restoreFlowFill(port)
+    return
+  }
+  const client = Math.max(0, port.clientHeight)
+  let overshoot = owned?.overshootPx
+  if (overshoot === undefined) {
+    // Measure once per port: impose the full fill, read the scrollHeight
+    // excess (scroller padding / chrome), then restore the natural state.
+    const pendingOriginal = element.style.minHeight
+    element.style.minHeight = `${client}px`
+    overshoot = Math.max(0, port.scrollHeight - client)
+    element.style.minHeight = pendingOriginal
+    if (owned !== undefined) restoreFlowFill(port)
+  }
+  const target = `${Math.max(0, client - overshoot)}px`
+  if (owned !== undefined) {
+    if (owned.element === element && owned.overshootPx === overshoot && element.style.minHeight === target) return
+    restoreFlowFill(port)
+  }
+  const original = element.style.minHeight
+  element.style.minHeight = target
+  followFlowFills.set(port, { element, original, overshootPx: overshoot })
+}
+
+function restoreFlowFill(port: HTMLElement): void {
+  const owned = followFlowFills.get(port)
+  if (owned === undefined) return
+  owned.element.style.minHeight = owned.original
+  followFlowFills.delete(port)
 }
 
 /** Height committed by one newly mounted Chat row, including its flex gap. */
@@ -302,6 +573,7 @@ interface FollowRunway {
   readonly original: string
   readonly property: 'marginBottom' | 'marginTop'
   readonly requestedPx: number
+  readonly normalizedLegacy?: boolean
 }
 
 /**
@@ -337,6 +609,15 @@ interface FollowPaintLimit {
 export const FOLLOW_PAINT_LIMIT_TTL_MS = 250
 
 const followPaintLimits = new WeakMap<HTMLElement, FollowPaintLimit>()
+const followHadChrome = new WeakSet<HTMLElement>()
+/** Last painted shift per port, to spread a wrap's one-line step over frames. */
+const followLastShiftPx = new WeakMap<HTMLElement, number>()
+/** Last runway offset seen per port, to rebase the extent when the margin size changes. */
+const followRunwayOffsetHistory = new WeakMap<HTMLElement, number>()
+/** Last observed scroll floor per port, for the slack→overflow runway re-measure. */
+const followFloorHistory = new WeakMap<HTMLElement, number>()
+/** One-shot flag: the transition frame must paint the full runway as baseline. */
+const followSlackTransition = new WeakSet<HTMLElement>()
 
 function invalidatePaintLimit(port: HTMLElement): void {
   followPaintLimits.delete(port)
@@ -354,6 +635,47 @@ interface FollowMotionState {
 /** Logical position and velocity survive a React owner handoff and finish. */
 const followMotionStates = new WeakMap<HTMLElement, FollowMotionState>()
 
+/**
+ * Reader-release record that must survive an ownership handoff. A follower
+ * closing at stream end (finish/drain arm swap, row lifecycle flip) destroys
+ * the closure holding `following = false`, and the arm taking over would
+ * otherwise read the held viewport as "at bottom" and hard-snap to the
+ * floor. Presence in this map means the reader's unpin away from the floor
+ * is still in effect; it is cleared when a follower re-pins at the floor.
+ */
+interface FollowReaderHold {
+  readonly atMs: number
+}
+const followReaderHolds = new WeakMap<HTMLElement, FollowReaderHold>()
+
+/**
+ * Commit-time correction channel. A reveal commit that lands after this
+ * frame's ResizeObserver delivery would otherwise paint one intermediate
+ * frame — content grown, scrollTop/transform not yet compensated — before
+ * the next tick fixes it. Reveal arms call {@link notifyFollowCommit} right
+ * after their commit; the leading follower re-runs its geometry in the same
+ * task, so the intermediate state never reaches a paint.
+ */
+const followCommitListeners = new WeakMap<HTMLElement, Set<() => void>>()
+
+export function notifyFollowCommit(fromInsidePort: HTMLElement | null): void {
+  if (fromInsidePort === null) return
+  const port = fromInsidePort.closest<HTMLElement>('[data-conversation-scroll]')
+  const listeners = port === null ? undefined : followCommitListeners.get(port)
+  if (listeners === undefined) return
+  for (const listener of [...listeners]) listener()
+}
+
+function subscribeFollowCommit(port: HTMLElement, fn: () => void): () => void {
+  let listeners = followCommitListeners.get(port)
+  if (listeners === undefined) {
+    listeners = new Set()
+    followCommitListeners.set(port, listeners)
+  }
+  listeners.add(fn)
+  return () => { listeners!.delete(fn) }
+}
+
 function restoreRunway(port: HTMLElement): void {
   const runway = followRunways.get(port)
   if (runway === undefined) return
@@ -366,12 +688,11 @@ function isLegacyRunway(value: string): boolean {
   if (value === '') return false
   const terms = [...value.matchAll(/([\d.]+)px/g)]
   if (terms.length === 0 || value.replaceAll(/calc|px|[\d.+()\s]/g, '') !== '') return false
-  return terms.every(([, raw]) => {
-    const px = Number(raw)
-    return Number.isFinite(px)
-      && px >= FOLLOW_STATUS_RUNWAY_PX
-      && Math.abs(px % FOLLOW_STATUS_RUNWAY_PX) <= Number.EPSILON
-  })
+  const values = terms.map(([, raw]) => Number(raw))
+  if (values.some(px => !Number.isFinite(px))) return false
+  return [LEGACY_RUNWAY_PX, FOLLOW_STATUS_RUNWAY_PX].some(unit => values.every(px => (
+    px >= unit && Math.abs(px % unit) <= Number.EPSILON
+  )))
 }
 
 /** Remove unowned runway residue written by v0.3.3 and earlier bundles. */
@@ -380,8 +701,8 @@ function migrateLegacyRunway(
   surfaces: readonly HTMLElement[],
   status: HTMLElement | null,
   composer: HTMLElement | null,
-): void {
-  if (followRunways.has(port)) return
+): boolean {
+  if (followRunways.has(port)) return false
   let migrated = false
   if (status !== null && isLegacyRunway(status.style.marginTop)) {
     // Harness TurnStatus has no inline margin; exact 48px multiples here are
@@ -402,6 +723,7 @@ function migrateLegacyRunway(
     migrated = true
   }
   if (migrated) invalidatePaintLimit(port)
+  return migrated
 }
 
 function ensureRunway(
@@ -411,13 +733,32 @@ function ensureRunway(
 ): void {
   const status = turnStatusOf(port)
   const composer = port.querySelector<HTMLElement>('[data-composer-seat]')
-  migrateLegacyRunway(port, surfaces, status, composer)
+  // Adopt one exact current runway before migration. Larger exact multiples
+  // are accumulated residue from older bundles and must be stripped.
+  if (status !== null && followRunways.get(port) === undefined) {
+    const inlinePx = Number.parseFloat(status.style.marginTop ?? '') || 0
+    if (Math.abs(inlinePx - FOLLOW_STATUS_RUNWAY_PX) <= 0.5) {
+      followRunways.set(port, {
+        element: status,
+        offset: inlinePx,
+        property: 'marginTop',
+        original: '',
+        requestedPx: inlinePx,
+      })
+      invalidatePaintLimit(port)
+    }
+  }
+  const migratedLegacy = migrateLegacyRunway(port, surfaces, status, composer)
   // A runway is useful only after the natural conversation already has a
   // scroll floor for its equal message transform to ride. Before that point
   // applyVisual keeps every surface in normal flow, so adding status margin
   // would expose the whole runway as empty space below a short/early Think.
   const naturalHeight = Math.max(0, port.scrollHeight - runwayOffsetOf(port))
-  if (runwayPx <= 0 || port.clientHeight <= 0 || naturalHeight <= port.clientHeight) {
+  const existing = followRunways.get(port)
+  const requestedRunwayPx = migratedLegacy || existing?.normalizedLegacy === true
+    ? FOLLOW_STATUS_RUNWAY_PX
+    : runwayPx
+  if (requestedRunwayPx <= 0 || port.clientHeight <= 0 || naturalHeight <= port.clientHeight) {
     restoreRunway(port)
     return
   }
@@ -432,15 +773,23 @@ function ensureRunway(
   const current = followRunways.get(port)
   if (current?.element === element
     && current.property === target.property
-    && current.requestedPx === runwayPx) return
+    && current.requestedPx === requestedRunwayPx) return
+
   restoreRunway(port)
   const beforeHeight = port.scrollHeight
   const original = element.style[target.property]
   element.style[target.property] = original === ''
-    ? `${runwayPx}px`
-    : `calc(${original} + ${runwayPx}px)`
+    ? `${requestedRunwayPx}px`
+    : `calc(${original} + ${requestedRunwayPx}px)`
   const offset = Math.max(0, port.scrollHeight - beforeHeight)
-  followRunways.set(port, { element, offset, property: target.property, original, requestedPx: runwayPx })
+  followRunways.set(port, {
+    element,
+    offset,
+    property: target.property,
+    original,
+    requestedPx: requestedRunwayPx,
+    normalizedLegacy: migratedLegacy || existing?.normalizedLegacy === true,
+  })
   invalidatePaintLimit(port)
 }
 
@@ -457,6 +806,7 @@ function safeShiftLimit(
   if (last === undefined) return 0
   const status = turnStatusOf(port)
   const composer = port.querySelector<HTMLElement>('[data-composer-seat]')
+  if (status !== null || composer !== null) followHadChrome.add(port)
   const cached = followPaintLimits.get(port)
   // Content growth alone cannot move the limit (measured at the floor, the
   // flow bottom rides the scrollport bottom), so the cache survives glyph
@@ -482,7 +832,7 @@ function safeShiftLimit(
     // mounted but has not measured yet, permit only the runway zero-point
     // until ResizeObserver provides a real ceiling.
     return status === null && composer === null
-      ? Number.POSITIVE_INFINITY
+      ? followHadChrome.has(port) ? 0 : Number.POSITIVE_INFINITY
       : runwayOffsetOf(port)
   }
   const ceilingTop = ceiling.rect.top - currentShiftOf(ceiling.element)
@@ -541,17 +891,62 @@ function applyVisual(
   reservePx: number,
   velocityPxPerSec = 0,
   runwayPx = FOLLOW_STATUS_RUNWAY_PX,
+  shiftCeilingPx = Number.POSITIVE_INFINITY,
+  promoteAtRest = false,
+  trajectoryShiftPx?: number,
 ): number {
   const surfaces = shiftSurfacesOf(port)
-  ensureRunway(port, surfaces, runwayPx)
-  const contentHeight = Math.max(0, port.scrollHeight)
-  const runwayOffset = runwayOffsetOf(port)
+  ensureFlowFillsPort(port)
+  void runwayPx
+  // A runway added while the column still fit the viewport was absorbed by
+  // the host's bottom slack: its measured offset was zero, but once real
+  // overflow begins the same margin costs scroll length. Detect that
+  // transition BEFORE any geometry is read and re-add the margin so its
+  // stored offset is measured against the true post-overflow layout.
+  {
+    const preFloor = Math.max(0, port.scrollHeight - port.clientHeight)
+    const lastFloorSeen = followFloorHistory.get(port)
+    if (lastFloorSeen !== undefined && lastFloorSeen === 0 && preFloor > 0 && followRunways.has(port)) {
+      const owned = followRunways.get(port)
+      restoreRunway(port)
+      ensureRunway(port, surfaces, owned?.requestedPx ?? runwayPx)
+      // This frame the margin materializes into scroll length AND lands in
+      // the floor in the same write; painting the held reserve as baseline
+      // would leave its px uncompensated on screen. Spend the full runway
+      // as baseline for exactly this frame.
+      followSlackTransition.add(port)
+    }
+    if (preFloor !== lastFloorSeen) {
+      // A changed floor means the natural tail geometry may have changed. This
+      // is the infrequent layout-growth boundary; ordinary same-floor reveal
+      // commits continue to use the cached chrome clearance.
+      invalidatePaintLimit(port)
+      followFloorHistory.set(port, preFloor)
+    }
+  }
+  ensureRunway(port, surfaces, reservePx)
+  const contentHeight2 = Math.max(0, port.scrollHeight)
+  const runwayOffset2 = runwayOffsetOf(port)
+  // Rebase the spring extent onto the current offset domain. targetHeight
+  // = contentHeight − offset AND animatedH live in the same space; when the
+  // margin grows, targetHeight drops by the offset's growth, so animatedH
+  // must drop in lockstep or the whole req (painted shift) is released as
+  // an upward snap. Shifting both by the same delta leaves the painted
+  // shift untouched.
+  const prevOffset2 = followRunwayOffsetHistory.get(port)
+  if (prevOffset2 !== undefined && runwayOffset2 !== prevOffset2) {
+    animatedH = Math.max(0, animatedH - (runwayOffset2 - prevOffset2))
+  }
+  followRunwayOffsetHistory.set(port, runwayOffset2)
+  const contentHeight = contentHeight2
+  const runwayOffset = runwayOffset2
   const targetHeight = Math.max(0, contentHeight - runwayOffset)
   const floor = Math.max(0, contentHeight - port.clientHeight)
   const extent = Math.min(targetHeight, Math.max(0, animatedH))
   if (port.style.overflowAnchor !== 'none') port.style.overflowAnchor = 'none'
   if (port.style.scrollBehavior !== 'auto') port.style.scrollBehavior = 'auto'
   if (floor <= 0) {
+    followRunwayOffsetHistory.set(port, 0)
     setFollowScrollTop(port, 0)
     followMotionStates.set(port, {
       capacityPx: Number.POSITIVE_INFINITY,
@@ -562,21 +957,60 @@ function applyVisual(
       velocityPxPerSec: 0,
     })
     for (const surface of surfaces) setShift(surface, 0)
+    followLastShiftPx.set(port, 0)
     const status = turnStatusOf(port)
     if (status !== null) setShift(status, 0)
     return targetHeight
   }
-  // Measure paint room at the real floor. This write and the final physical
-  // position land in the same animation frame, so only the latter is painted.
-  setFollowScrollTop(port, floor)
-  const limit = floor > 0 ? safeShiftLimit(port, surfaces) : 0
+  // The visible scroll position rides the spring's smooth extent so each newly
+  // revealed line is approached at continuous velocity instead of snapping the
+  // whole wrap into one frame (the residual "不丝滑" jump). `animatedH` advances
+  // by the spring's bounded per-frame step; the newest ≤ `visibleReserve` lines
+  // stay hidden below the fold in the runway while `scrollTop` glides up to
+  // reveal them. Concretely: `scrollTop = floor − min(requestedLag, reserve)`,
+  // so during fast typing scrollTop trails floor by at most one runway (≤ 2
+  // lines) advancing smoothly at the spring cadence; when typing stops and lag
+  // exhausts, scrollTop converges to the floor. The shift below still holds the
+  // reserve so no per-wrap tail jump appears.
+  const limit = safeShiftLimit(port, surfaces)
+  followSlackTransition.delete(port)
   const visibleReserve = Math.min(runwayOffset, Math.max(0, reservePx))
   const baselineShift = runwayOffset - visibleReserve
   const requestedLag = Math.max(0, targetHeight - extent)
-  const shift = Math.min(baselineShift + requestedLag, Math.max(0, limit))
-  const effectiveLag = Math.max(0, shift - baselineShift)
+  // Steady-state tail pin: while the predictive reserve is held, paint the
+  // shifted surfaces at a FIXED offset equal to the reserve, so the newest
+  // revealed line rides at a constant viewport position and every wrap's reveal
+  // lands below the fold inside that space — instead of translating the whole
+  // message by the decaying per-reveal lag (which moved the newest line up/down
+  // at reveal cadence = the residual "轻微回弹来回" jitter). The reserve is held
+  // constant during streaming; only when it retires (entrance/settle) does the
+  // shift glide with it. The spring still closes below the fold, and backpressure
+  // reads the untranslated requestedLag so reveal pacing is unchanged.
+  const availableShift = Math.min(
+    Math.max(0, limit),
+    Math.max(0, shiftCeilingPx),
+  )
+  const motionShift = Math.min(
+    trajectoryShiftPx ?? baselineShift + requestedLag,
+    availableShift,
+  )
+  const idlePromotion = promoteAtRest && motionShift <= 0.01 && availableShift > 0 ? 0.1 : 0
+  let shift = Math.max(motionShift, idlePromotion)
+  const previousShift = followLastShiftPx.get(port)
+  if (previousShift !== undefined && shift < previousShift - FOLLOW_PAINT_SHIFT_MAX_STEP_PX) {
+    // Decay-only rate limit. Growth is a WRAP COMPENSATION: the floor already
+    // jumped one line in the same layout pass and `scrollTop` followed it, so
+    // the matching shift increase cancels that step exactly. Rate-limiting it
+    // paints the uncovered remainder as a visible one-frame jump (the
+    // "换行 18px 跳变"). Only the decay side — runway retirement and settle —
+    // is a real animation and keeps its per-frame bound.
+    shift = previousShift - FOLLOW_PAINT_SHIFT_MAX_STEP_PX
+  }
+  followLastShiftPx.set(port, shift)
+  const effectiveLag = Math.max(0, motionShift - baselineShift)
   const capacityPx = Math.max(0, limit - baselineShift)
   const effectiveExtent = targetHeight - effectiveLag
+  setFollowScrollTop(port, floor)
   followMotionStates.set(port, {
     capacityPx,
     constrained: requestedLag > effectiveLag + FOLLOW_SETTLE_EPSILON_PX,
@@ -604,6 +1038,7 @@ function clearVisual(port: HTMLElement): void {
   clearMotion(port)
   restoreRunway(port)
   followMotionStates.delete(port)
+  followLastShiftPx.delete(port)
   invalidatePaintLimit(port)
 }
 
@@ -615,9 +1050,16 @@ function holdCompositorAtRest(element: HTMLElement): void {
 }
 
 /** Remove equal offsets, land on the floor, then retire the compositor quietly. */
-function finishAtNaturalFloor(port: HTMLElement): void {
+function finishAtNaturalFloor(port: HTMLElement, retainCompositor = true): void {
   const surfaces = shiftSurfacesOf(port)
   const status = turnStatusOf(port)
+  if (!retainCompositor) {
+    restoreRunway(port)
+    settleAtFloor(port)
+    clearMotion(port)
+    followMotionStates.delete(port)
+    return
+  }
   const promoted = [...surfaces, ...(status === null ? [] : [status])]
     .filter(element => element.style.transform !== '' || element.style.willChange === 'transform')
   const promotedSet = new Set(promoted)
@@ -638,7 +1080,6 @@ function finishAtNaturalFloor(port: HTMLElement): void {
   if (promoted.length === 0) return
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      if (port.hasAttribute(FOLLOW_OWNED_ATTR)) return
       for (const element of promoted) {
         if (Math.abs(currentShiftOf(element)) <= 0.01) setShift(element, 0)
       }
@@ -649,6 +1090,7 @@ function finishAtNaturalFloor(port: HTMLElement): void {
 function settleAtFloor(port: HTMLElement): void {
   const floor = Math.max(0, port.scrollHeight - port.clientHeight)
   setFollowScrollTop(port, floor)
+  followReaderHolds.delete(port)
 }
 
 interface FollowLeader {
@@ -672,6 +1114,7 @@ let followGeneration = 0
  * @param onEntranceSettled - Releases a one-shot entrance owner after catch-up.
  * @param predictiveRef - Optional live visibility gate for predictive runway.
  * @param entranceExtentRef - Optional measured growth delta for a generic row.
+ * @param revealedCharsRef - Committed code-point count for feed-forward phase.
  */
 export function useConversationFollow(
   rootRef: RefObject<HTMLElement | null>,
@@ -683,18 +1126,18 @@ export function useConversationFollow(
   onEntranceSettled?: () => void,
   predictiveRef?: { current: boolean },
   entranceExtentRef?: { current: number | null },
+  revealedCharsRef?: { current: number },
 ): void {
   const activeRef = useRef(active)
   const entranceRef = useRef(entrance)
   const onEntranceSettledRef = useRef(onEntranceSettled)
   entranceRef.current = entrance
   onEntranceSettledRef.current = onEntranceSettled
-  useEffect(() => {
-    activeRef.current = active
-  }, [active])
+  activeRef.current = active
 
   useLayoutEffect(() => {
     if (!active) return
+    const startedAsEntrance = entrance
     const owner = {}
     const generation = ++followGeneration
     let rafId = 0
@@ -711,6 +1154,18 @@ export function useConversationFollow(
     let interactTimer: ReturnType<typeof setTimeout> | null = null
     let port: HTMLElement | null = null
     let resize: ResizeObserver | null = null
+    let observedTail: HTMLElement | null = null
+    let statusWasPresent: boolean | null = null
+    let trajectoryPositionPx: number | null = null
+    let trajectoryVelocityPxPerMs = 0
+    let trajectoryTargetVelocityPxPerMs = 0
+    let trajectoryFloorPx: number | null = null
+    let trajectoryGrowthAtMs: number | null = null
+    let trajectoryAccumulatedGrowthPx = 0
+    let trajectoryAccumulatedGrowthMs = 0
+    let trajectoryGrowthSamples = 0
+    let trajectoryWasActive = false
+    const revealPhase = new FollowRevealPhaseTracker()
     let holding: HTMLElement | null = null
     let entrancePending = entranceRef.current
 
@@ -745,10 +1200,12 @@ export function useConversationFollow(
     const reportFollow = (next: HTMLElement, isActive: boolean): void => {
       const state = followMotionStates.get(next)
       debugRuntime.reportFollow(next, {
-        lagPx: state?.lagPx ?? Math.max(0, next.scrollHeight - next.clientHeight - next.scrollTop),
+        // TEMP audit provenance: lagPx=-1 marks the fallback path (no motion
+        // state owned by this reporter this frame).
+        lagPx: state ? state.lagPx : -1,
         velocityPxPerSec: state?.velocityPxPerSec ?? 0,
         reservePx: state?.reservePx ?? 0,
-        capacityPx: state?.capacityPx ?? 0,
+        capacityPx: state ? state.capacityPx : -1,
         revealScale: revealScaleRef?.current ?? 1,
         following,
         constrained: state?.constrained ?? false,
@@ -783,7 +1240,8 @@ export function useConversationFollow(
 
     const handBackVisual = (next: HTMLElement): void => {
       const shift = currentShiftOf(shiftSurfacesOf(next).at(-1) ?? next)
-      const visualTop = Math.max(0, next.scrollTop - Math.max(0, shift))
+      const transferableShift = shift > FOLLOW_SETTLE_EPSILON_PX ? shift : 0
+      const visualTop = Math.max(0, next.scrollTop - transferableShift)
       // The predictive runway only has meaning while this follower owns the
       // floor. Remove it before choosing the reader's landing point; keeping
       // it through the release paints a transient natural gap + 48px blank
@@ -826,12 +1284,49 @@ export function useConversationFollow(
 
     const restoreBeforePaint = (): void => {
       if (!following || port === null || !isLeader(port)) return
-      invalidatePaintLimit(port)
+      // A reveal commit changes the measured tail, not the fixed chrome. Keep
+      // the paint-limit TTL intact here; ResizeObserver and viewport/chrome
+      // changes invalidate it when the cached geometry is no longer valid.
+      // The same-task correction still runs, but ordinary glyph commits do not
+      // force a fresh chrome rect read.
       const tuning = debugRuntime.activeTuning()
-      animatedH = applyVisual(port, animatedH, reservePx, velocityPxPerSec, tuning.runwayPx)
+      const predictGrowth = predictiveRef?.current ?? predictive
+      const floor = Math.max(0, port.scrollHeight - port.clientHeight)
+      // A wrap or other layout growth changes the real floor and may change the
+      // natural tail clearance. Re-measure that boundary; same-floor glyph
+      // commits can continue using the cached chrome geometry.
+      if (followFloorHistory.get(port) !== floor) invalidatePaintLimit(port)
+      const isReasoningSurface = rootRef.current?.querySelector('[data-variant="think"]') !== null
+      const trajectoryShift = predictive
+        && !isReasoningSurface
+        && runwayOffsetOf(port) > 0
+        && trajectoryPositionPx !== null
+        ? floor - trajectoryPositionPx
+        : undefined
+      animatedH = applyVisual(
+        port,
+        animatedH,
+        reservePx,
+        velocityPxPerSec,
+        tuning.runwayPx,
+        Number.POSITIVE_INFINITY,
+        !predictGrowth,
+        trajectoryShift,
+      )
+      if (trajectoryShift !== undefined) {
+        trajectoryPositionPx = floor - currentShiftOf(shiftSurfacesOf(port).at(-1) ?? port)
+      }
       updateRevealScale(port, 0, true)
       reportFollow(port, activeRef.current)
+      // Host ChatView ResizeObservers may run after this observer and hard-snap
+      // to its floor. Re-apply the owned floating top in the same microtask,
+      // before the browser's next paint, while scroll-event capture prevents a
+      // programmatic write from changing the reader's at-bottom state.
     }
+
+    // Same correction, run synchronously with a reveal commit (see
+    // notifyFollowCommit above). Subscribed per-port in bindPort.
+    let unsubscribeCommit: (() => void) | null = null
 
     const bindPort = (next: HTMLElement): void => {
       if (port === next) return
@@ -839,8 +1334,10 @@ export function useConversationFollow(
         for (const name of GESTURE_EVENTS) port.removeEventListener(name, markGesture)
         resize?.disconnect()
       }
+      unsubscribeCommit?.()
       port = next
       invalidatePaintLimit(port)
+      unsubscribeCommit = subscribeFollowCommit(port, () => { restoreBeforePaint() })
       for (const name of GESTURE_EVENTS) {
         port.addEventListener(name, markGesture, { passive: true })
       }
@@ -850,6 +1347,21 @@ export function useConversationFollow(
         const proxy = resizeProxyOf(port)
         if (proxy !== null) resize.observe(proxy)
       }
+    }
+
+    /**
+     * Keep the observer on the flow's TAIL surface. A flow locked to the
+     * viewport by min-height does not resize when content grows inside it —
+     * only the last message row does, and missing that resize means missing
+     * the pre-paint correction for that frame's wrap.
+     */
+    const observeTailSurface = (): void => {
+      if (resize === null || port === null) return
+      const tail = shiftSurfacesOf(port).at(-1) ?? null
+      if (tail === observedTail) return
+      if (observedTail !== null) resize.unobserve(observedTail)
+      observedTail = tail
+      if (tail !== null) resize.observe(tail)
     }
 
     const frame = (now: number) => {
@@ -866,6 +1378,7 @@ export function useConversationFollow(
       const nextPort = root.closest<HTMLElement>('[data-conversation-scroll]')
       if (nextPort === null) return
       bindPort(nextPort)
+      observeTailSurface()
       // A hidden/unmeasured port has no meaningful floor yet. Keep this owner
       // unprimed and let the already-scheduled RAF initialize it after layout.
       if (nextPort.clientHeight <= 0) return
@@ -885,18 +1398,44 @@ export function useConversationFollow(
           // A new Agent row is already part of scrollHeight on its first
           // frame. Start at the pre-insert extent so that initial Context and
           // Tool chrome enters through the same spring as later height growth.
+          // The predictive runway starts pre-opened at the current reveal
+          // pressure: it rides canceled by the equal transform, and waiting
+          // out the response ramp would leave the first wraps unpinned.
           const entranceExtent = entrancePending
             ? entranceExtentRef?.current ?? entranceExtentOf(root)
             : 0
-          animatedH = Math.max(0, nextPort.scrollHeight - entranceExtent)
-          reservePx = 0
+          const predictGrowth = predictiveRef?.current ?? predictive
+          // Start the entrance at the pre-insert extent, not the raw reported
+          // lag: holding the reader's small first-frame offset here would keep
+          // the entrance lag above the settle epsilon for ~a second (the
+          // spring's advance at single-digit lag is sub-pixel), leaving the
+          // entrance arm alive past a settled swap and deferring the
+          // completion settle until it finally closes.
+          animatedH = entrancePending
+            ? Math.max(0, nextPort.scrollHeight - entranceExtent)
+            : nextPort.scrollHeight
+          // Established before first paint; the matching margin below is
+          // written in the same commit, so this held-and-canceled space
+          // never moves a pixel.
+          const hasStatus = turnStatusOf(nextPort) !== null
+          reservePx = predictGrowth && (hasStatus || speedCpsRef.current > FOLLOW_RESERVE_MIN_CPS)
+            ? computeFollowReserve(speedCpsRef.current, tuning.runwayPx)
+            : 0
+          statusWasPresent = hasStatus
           velocityPxPerSec = 0
           // The committed row/growth delta has already moved the new floor.
-          // Decide ownership from the reader's position before that delta;
-          // otherwise any atomic result taller than FOLLOW_SLACK_PX looks
-          // indistinguishable from an intentional reader pull-up.
-          const lagBeforeEntrance = Math.max(0, reportedLag - entranceExtent)
-          following = lagBeforeEntrance <= FOLLOW_SLACK_PX
+          // Decide ownership from READER INTENT EVIDENCE, not raw lag: an
+          // upward move recorded past our own ledger is a pull-up; anything
+          // else (content that mounted while the host had not re-pinned yet,
+          // a post-fold clamp, first-frame geometry) must keep following,
+          // otherwise the whole stream falls back to the host's hard snap.
+          void reportedLag
+          // A prior follower's reader-release record outranks ledger
+          // evidence: its closure died with `following = false` after the
+          // release already reset the ledger to the held position, so the
+          // delta-based check alone can no longer see the unpin.
+          following = !readerScrolledUp(nextPort)
+            && !followReaderHolds.has(nextPort)
         } else {
           animatedH = Math.min(nextPort.scrollHeight, inherited.extent)
           reservePx = inherited.reservePx
@@ -906,7 +1445,38 @@ export function useConversationFollow(
         if (following) {
           hold(nextPort)
           if (isLeader(nextPort)) {
-            animatedH = applyVisual(nextPort, animatedH, reservePx, velocityPxPerSec, tuning.runwayPx)
+            animatedH = applyVisual(
+              nextPort,
+              animatedH,
+              reservePx,
+              velocityPxPerSec,
+              tuning.runwayPx,
+              Number.POSITIVE_INFINITY,
+              !(predictiveRef?.current ?? predictive),
+            )
+            if (
+              predictive
+              && root.querySelector('[data-variant="think"]') === null
+              && runwayOffsetOf(nextPort) > 0
+            ) {
+              const floor = Math.max(0, nextPort.scrollHeight - nextPort.clientHeight)
+              const requestedMinLagPx = Math.max(
+                FOLLOW_TRAJECTORY_MIN_LAG_PX,
+                runwayOffsetOf(nextPort) - FOLLOW_TRAJECTORY_PHASE_PX,
+              )
+              const paintMaxLagPx = Math.max(0, safeShiftLimit(nextPort, shiftSurfacesOf(nextPort)) - FOLLOW_PAINT_GUARD_PX)
+              const minLagPx = Math.min(requestedMinLagPx, paintMaxLagPx)
+              const currentShift = currentShiftOf(shiftSurfacesOf(nextPort).at(-1) ?? nextPort)
+              trajectoryPositionPx = floor - Math.min(paintMaxLagPx, Math.max(minLagPx, currentShift))
+              trajectoryTargetVelocityPxPerMs = Math.max(0, speedCpsRef.current) * 0.4 / 1000
+              trajectoryVelocityPxPerMs = trajectoryTargetVelocityPxPerMs
+              trajectoryFloorPx = floor
+              trajectoryGrowthAtMs = now
+              trajectoryAccumulatedGrowthPx = 0
+              trajectoryAccumulatedGrowthMs = 0
+              trajectoryGrowthSamples = 0
+              trajectoryWasActive = true
+            }
             updateRevealScale(nextPort, elapsedMs)
             reportFollow(nextPort, activeRef.current)
             const runwayOffset = runwayOffsetOf(nextPort)
@@ -929,6 +1499,7 @@ export function useConversationFollow(
       if (!following && (!interacting || returnedToFloor) && reportedLag <= repinSlack) {
         following = true
         readerReleased = false
+        followReaderHolds.delete(nextPort)
         animatedH = extent
         reservePx = 0
         velocityPxPerSec = 0
@@ -940,6 +1511,7 @@ export function useConversationFollow(
         following = false
         readerGestureIntent = false
         readerReleased = true
+        followReaderHolds.set(nextPort, { atMs: performance.now() })
         handBackVisual(nextPort)
         animatedH = nextPort.scrollHeight
         reservePx = 0
@@ -962,32 +1534,152 @@ export function useConversationFollow(
       // Runway and an equal transform cancel visually. It is the zero point,
       // not residual motion: decaying below it would scroll past the final
       // resting position and rebound when runway is removed.
+      //
+      // The reservation scales with reveal pressure — idle holds nothing,
+      // because speculative space at rest is a visible defect on handback —
+      // but the runway MARGIN tracks the reservation 1:1 in the same frame,
+      // so their difference (the only part that can move pixels) stays
+      // constant. Growing the reservation without the margin would glide the
+      // whole column; growing both together is invisible.
+      const predictGrowth = predictiveRef?.current ?? predictive
+      const hasStatus = turnStatusOf(nextPort) !== null
+      const statusJustRemoved = predictGrowth && statusWasPresent === true && !hasStatus
+      if (statusJustRemoved) reservePx = tuning.runwayPx
+      statusWasPresent = hasStatus
+      const reserveEnabled = hasStatus
+        || statusJustRemoved
+        || reservePx > FOLLOW_SETTLE_EPSILON_PX
+        || speedCpsRef.current > FOLLOW_RESERVE_MIN_CPS
+      const pressureReserveTarget = predictGrowth && reserveEnabled
+        ? computeFollowReserve(speedCpsRef.current, tuning.runwayPx)
+        : 0
+      // Reveal pressure may open more runway, but a burst gap must not retire
+      // it mid-stream: shrinking the owned margin moves the real floor and
+      // creates the exact 1px back-and-forth motion this module prevents.
+      // Prediction shutdown and an explicit lower debug cap still retire it.
+      const heldReserveTarget = tuning.runwayPx < reservePx
+        ? tuning.runwayPx
+        : Math.max(reservePx, pressureReserveTarget)
+      const effectiveReserveTarget = !predictGrowth
+        ? 0
+        : statusJustRemoved
+          ? tuning.runwayPx
+          : heldReserveTarget
+      const reserveStep = 1 - Math.exp(-elapsedMs / tuning.reserveResponseMs)
+      reservePx += (effectiveReserveTarget - reservePx) * reserveStep
+      if (predictGrowth || runwayOffsetOf(nextPort) > 0.5) {
+        ensureRunway(nextPort, shiftSurfacesOf(nextPort), reservePx)
+      }
       const runwayOffset = runwayOffsetOf(nextPort)
       const contentHeight = nextPort.scrollHeight
-      const lag = Math.max(0, contentHeight - animatedH - runwayOffset)
-      const predictGrowth = predictiveRef?.current ?? predictive
-      const reserveTarget = !predictGrowth
-        ? 0
-        : computeFollowReserve(speedCpsRef.current, tuning.runwayPx)
-      const reserveStep = 1 - Math.exp(-elapsedMs / tuning.reserveResponseMs)
-      reservePx += (reserveTarget - reservePx) * reserveStep
-      const step = computeFollowStep(dt, {
-        lag,
-        speedEma: speedCpsRef.current,
-        velocityPxPerSec,
-      }, tuning)
-      if (lag <= 0.1) {
-        animatedH = contentHeight - runwayOffset
-        velocityPxPerSec = 0
-      } else {
-        const minimumLag = predictGrowth ? 0 : Math.max(0, reservePx)
-        animatedH = Math.min(
-          contentHeight - runwayOffset - minimumLag,
-          animatedH + step.advancePx,
+      const floorNow = Math.max(0, contentHeight - nextPort.clientHeight)
+      const trajectoryActive = predictive
+        && root.querySelector('[data-variant="think"]') === null
+        && runwayOffset > 0
+      let trajectoryShift: number | undefined
+      if (trajectoryActive) {
+        const requestedMinLagPx = Math.max(
+          FOLLOW_TRAJECTORY_MIN_LAG_PX,
+          runwayOffset - FOLLOW_TRAJECTORY_PHASE_PX,
         )
-        velocityPxPerSec = step.velocityPxPerSec
+        // Phase-band upper bound comes from paint space, not a runway-derived
+        // constant: `minLag + 39` can exceed the real gap to status/composer
+        // chrome and get clipped into a hard catch-up exactly at the wrap
+        // cadence the band exists to absorb (see docs §3.1).
+        const paintLimit = safeShiftLimit(nextPort, shiftSurfacesOf(nextPort))
+        const maxLagPx = Math.max(0, paintLimit - FOLLOW_PAINT_GUARD_PX)
+        const minLagPx = Math.min(requestedMinLagPx, maxLagPx)
+        if (trajectoryPositionPx === null || trajectoryFloorPx === null) {
+          const currentShift = currentShiftOf(shiftSurfacesOf(nextPort).at(-1) ?? nextPort)
+          trajectoryPositionPx = floorNow - Math.min(maxLagPx, Math.max(minLagPx, currentShift))
+          trajectoryTargetVelocityPxPerMs = Math.max(0, speedCpsRef.current) * 0.4 / 1000
+          trajectoryVelocityPxPerMs = trajectoryTargetVelocityPxPerMs
+          trajectoryGrowthAtMs = now
+        } else if (floorNow > trajectoryFloorPx + 0.5) {
+          const intervalMs = Math.max(1, now - (trajectoryGrowthAtMs ?? now))
+          if (trajectoryGrowthSamples > 0) {
+            trajectoryAccumulatedGrowthPx += floorNow - trajectoryFloorPx
+            trajectoryAccumulatedGrowthMs += intervalMs
+            const measuredVelocity = trajectoryAccumulatedGrowthPx
+              / trajectoryAccumulatedGrowthMs
+            // A single wrap interval is quantized by layout and may also span a
+            // dropped frame. Do not replace the trajectory target with that
+            // staircase sample: low-pass it over a few wraps so the visual
+            // velocity remains continuous when the host is busy or a retry row
+            // changes the layout.
+            const targetBlend = 1 - Math.exp(-intervalMs / 240)
+            trajectoryTargetVelocityPxPerMs += (
+              measuredVelocity - trajectoryTargetVelocityPxPerMs
+            ) * targetBlend
+          }
+          trajectoryGrowthSamples += 1
+          trajectoryGrowthAtMs = now
+        } else if (floorNow < trajectoryFloorPx - 0.5) {
+          trajectoryPositionPx = floorNow - minLagPx
+          trajectoryGrowthAtMs = now
+          trajectoryAccumulatedGrowthPx = 0
+          trajectoryAccumulatedGrowthMs = 0
+          trajectoryGrowthSamples = 0
+        }
+        trajectoryFloorPx = floorNow
+        const phaseTarget = revealedCharsRef === undefined
+          ? floorNow
+          : revealPhase.advance(floorNow, revealedCharsRef.current).targetPx
+        const trajectoryStep = computeFollowTrajectoryStep(elapsedMs, {
+          positionPx: trajectoryPositionPx,
+          velocityPxPerMs: trajectoryVelocityPxPerMs,
+          targetPx: phaseTarget,
+          targetVelocityPxPerMs: trajectoryTargetVelocityPxPerMs,
+          minLagPx,
+          maxLagPx,
+          paintFloorPx: floorNow,
+        })
+        trajectoryPositionPx = trajectoryStep.positionPx
+        trajectoryVelocityPxPerMs = trajectoryStep.velocityPxPerMs
+        trajectoryShift = trajectoryStep.shiftPx
+        trajectoryWasActive = true
+        const baselineShift = runwayOffset - Math.min(runwayOffset, Math.max(0, reservePx))
+        animatedH = contentHeight - runwayOffset - Math.max(0, trajectoryShift - baselineShift)
+        velocityPxPerSec = trajectoryVelocityPxPerMs * 1000
+      } else {
+        if (trajectoryWasActive) {
+          const currentShift = currentShiftOf(shiftSurfacesOf(nextPort).at(-1) ?? nextPort)
+          animatedH = contentHeight - runwayOffset - Math.max(0, currentShift)
+          velocityPxPerSec = trajectoryVelocityPxPerMs * 1000
+          trajectoryPositionPx = null
+          trajectoryWasActive = false
+        }
+        const lag = Math.max(0, contentHeight - animatedH - runwayOffset)
+        const step = computeFollowStep(dt, {
+          lag,
+          speedEma: speedCpsRef.current,
+          velocityPxPerSec,
+        }, tuning)
+        if (lag <= 0.1) {
+          animatedH = contentHeight - runwayOffset
+          velocityPxPerSec = 0
+        } else {
+          const minimumLag = predictGrowth ? 0 : Math.max(0, reservePx)
+          animatedH = Math.min(
+            contentHeight - runwayOffset - minimumLag,
+            animatedH + step.advancePx,
+          )
+          velocityPxPerSec = step.velocityPxPerSec
+        }
       }
-      animatedH = applyVisual(nextPort, animatedH, reservePx, velocityPxPerSec, tuning.runwayPx)
+      animatedH = applyVisual(
+        nextPort,
+        animatedH,
+        reservePx,
+        velocityPxPerSec,
+        tuning.runwayPx,
+        Number.POSITIVE_INFINITY,
+        !predictGrowth,
+        trajectoryShift,
+      )
+      if (trajectoryActive) {
+        trajectoryPositionPx = floorNow - currentShiftOf(shiftSurfacesOf(nextPort).at(-1) ?? nextPort)
+      }
       updateRevealScale(nextPort, elapsedMs)
       reportFollow(nextPort, true)
       const remainingEntranceLag = Math.max(
@@ -1004,6 +1696,7 @@ export function useConversationFollow(
     frame(performance.now())
     return () => {
       cancelAnimationFrame(rafId)
+      unsubscribeCommit?.()
       if (interactTimer !== null) clearTimeout(interactTimer)
       resize?.disconnect()
       if (port !== null) {
@@ -1016,6 +1709,13 @@ export function useConversationFollow(
       if (!isLeader(host)) return
       const preserveReader = interacting && (readerGestureIntent || readerScrolledUp(host))
       if (!following || !primed) {
+        if (!following && primed) {
+          // A follower that already released the reader must carry that fact
+          // across this closure's death: the draining arm mounting after this
+          // cleanup would otherwise read the held viewport as its own
+          // at-bottom state and hard-snap it to the floor.
+          followReaderHolds.set(host, { atMs: performance.now() })
+        }
         clearVisual(host)
         followLeaders.delete(host)
         releaseRevealScale()
@@ -1024,6 +1724,7 @@ export function useConversationFollow(
       }
       if (preserveReader) {
         handBackVisual(host)
+        followReaderHolds.set(host, { atMs: performance.now() })
         clearVisual(host)
         followLeaders.delete(host)
         releaseRevealScale()
@@ -1034,21 +1735,56 @@ export function useConversationFollow(
       // Completion can land the final Tool/command height in this same
       // commit. Preserve the logical extent and drain it after unmount instead
       // of clearing the compositor state before the first settled paint.
-      const completionTuning = debugRuntime.activeTuning()
-      ensureRunway(host, shiftSurfacesOf(host), completionTuning.runwayPx)
-      const completionRunway = runwayOffsetOf(host)
-      const completionMinimumLag = Math.max(0, reservePx)
-      animatedH = Math.min(
-        animatedH,
-        host.scrollHeight - completionRunway - completionMinimumLag,
+      // NOTE: do NOT clamp animatedH down by the held reserve here — the
+      // reserve is canceled space (base = margin − reservation stays flat),
+      // so treating it as real lag paints a whole runway-height step at the
+      // exact moment leadership hands to the draining arm. The settle loop
+      // caps animatedH against the shrinking extent directly.
+      const lagBeforeCompletionPaint = Math.max(
+        0,
+        host.scrollHeight - animatedH - runwayOffsetOf(host),
       )
+      if (!activeRef.current && lagBeforeCompletionPaint <= FOLLOW_SLACK_PX) {
+        finishAtNaturalFloor(host, !startedAsEntrance)
+        followLeaders.delete(host)
+        releaseRevealScale()
+        debugRuntime.reportFollow(host, null)
+        return
+      }
+      const completionShift = currentShiftOf(shiftSurfacesOf(host).at(-1) ?? host)
+      const completionShiftCeiling = completionShift > FOLLOW_SETTLE_EPSILON_PX
+        ? completionShift
+        : Number.POSITIVE_INFINITY
+      // The completion handoff keeps at least one real runway open so the
+      // final height has reserved paint room to drain through: with zero
+      // margin the whole final height lands as shift in ONE paint (offset
+      // space collapses to the paint limit), the exact teleport this drain
+      // exists to prevent. The draining arm ramps its reserve from here.
+      const completionTuning = debugRuntime.activeTuning()
+      const previousCompletionRunway = runwayOffsetOf(host)
+      ensureRunway(host, shiftSurfacesOf(host), Math.max(reservePx, completionTuning.runwayPx))
+      const completionRunway = runwayOffsetOf(host)
+      // Rebase the spring extent onto the new offset domain before the paint:
+      // adding the margin drops targetHeight by the same amount, so animatedH
+      // must drop in lockstep or the margin's px release as an instant shift.
+      animatedH = Math.max(0, animatedH - (completionRunway - previousCompletionRunway))
       settleAtFloor(host)
-      animatedH = applyVisual(host, animatedH, reservePx, velocityPxPerSec, completionTuning.runwayPx)
+      animatedH = applyVisual(
+        host,
+        animatedH,
+        reservePx,
+        velocityPxPerSec,
+        completionRunway,
+        completionShiftCeiling,
+      )
       reportFollow(host, false)
       const runwayOffset = runwayOffsetOf(host)
       const remainingLag = Math.max(0, host.scrollHeight - animatedH - runwayOffset)
-      if (remainingLag <= FOLLOW_SETTLE_EPSILON_PX && reservePx <= FOLLOW_SETTLE_EPSILON_PX) {
-        finishAtNaturalFloor(host)
+      if (
+        remainingLag <= FOLLOW_SETTLE_EPSILON_PX
+        || (!activeRef.current && remainingLag <= FOLLOW_SLACK_PX)
+      ) {
+        finishAtNaturalFloor(host, !startedAsEntrance)
         followLeaders.delete(host)
         releaseRevealScale()
         debugRuntime.reportFollow(host, null)
@@ -1066,6 +1802,8 @@ export function useConversationFollow(
         }
       }
       let settleLast = performance.now()
+      let settleMarginPx = Math.max(runwayOffsetOf(host), reservePx)
+      let settleMarginRate = settleMarginPx / FOLLOW_RUNWAY_RETIRE_MS
       const settleFrame = (now: number): void => {
         if (!isLeader(host)) {
           stopSettleListeners()
@@ -1084,15 +1822,24 @@ export function useConversationFollow(
         const dt = Math.min(FOLLOW_MAX_FRAME_MS, Math.max(0, now - settleLast))
         const tuning = debugRuntime.activeTuning()
         settleLast = now
+        // Retire the runway in LOCKSTEP with its canceling reserve: the
+        // margin shrinks by exactly the amount the reservation shrinks, so
+        // their baseline difference — and therefore every painted pixel —
+        // stays put while the reserved space closes. Decaying only the
+        // reservation would slide the whole column by the runway height.
+        if (settleMarginPx > 0 && settleMarginRate > 0) {
+          settleMarginPx = Math.max(0, settleMarginPx - settleMarginRate * dt)
+          ensureRunway(host, shiftSurfacesOf(host), settleMarginPx)
+          reservePx = Math.min(reservePx, settleMarginPx)
+        }
         const runwayOffset = runwayOffsetOf(host)
         const lag = Math.max(0, host.scrollHeight - animatedH - runwayOffset)
-        const reserveStep = 1 - Math.exp(-dt / tuning.reserveResponseMs)
-        reservePx += (0 - reservePx) * reserveStep
-        if (lag <= FOLLOW_SETTLE_EPSILON_PX && reservePx <= FOLLOW_SETTLE_EPSILON_PX) {
-          animatedH = host.scrollHeight - runwayOffset
+        if (lag <= FOLLOW_SETTLE_EPSILON_PX && settleMarginPx <= FOLLOW_SETTLE_EPSILON_PX) {
+          animatedH = host.scrollHeight
           reservePx = 0
           velocityPxPerSec = 0
-          finishAtNaturalFloor(host)
+          followRunways.delete(host)
+          finishAtNaturalFloor(host, !startedAsEntrance)
           followLeaders.delete(host)
           releaseRevealScale()
           debugRuntime.reportFollow(host, null)
@@ -1104,21 +1851,38 @@ export function useConversationFollow(
           speedEma: speedCpsRef.current,
           velocityPxPerSec,
         }, tuning)
-        // The temporary runway is visually neutral only while an equal lag
-        // remains in the transform. Do not let the spring outrun the runway's
-        // closing reserve or cleanup would reveal an overshoot and rebound.
-        const minimumLag = Math.max(0, reservePx)
         animatedH = Math.min(
-          host.scrollHeight - runwayOffset - minimumLag,
+          host.scrollHeight - runwayOffset,
           animatedH + step.advancePx,
         )
         velocityPxPerSec = step.velocityPxPerSec
         settleAtFloor(host)
-        animatedH = applyVisual(host, animatedH, reservePx, velocityPxPerSec, tuning.runwayPx)
+        animatedH = applyVisual(host, animatedH, reservePx, velocityPxPerSec, Math.max(settleMarginPx, runwayOffset))
         reportFollow(host, false)
         requestAnimationFrame(settleFrame)
       }
       requestAnimationFrame(settleFrame)
     }
   }, [active, rootRef, speedCpsRef, revealScaleRef, predictive, predictiveRef])
+
+  useLayoutEffect(() => {
+    const host = rootRef.current?.closest<HTMLElement>('[data-conversation-scroll]') ?? null
+    if (host !== null) {
+      followFlowFillUsers.set(host, (followFlowFillUsers.get(host) ?? 0) + 1)
+    }
+    return () => {
+      if (host === null) return
+      const remaining = Math.max(0, (followFlowFillUsers.get(host) ?? 1) - 1)
+      if (remaining > 0) {
+        followFlowFillUsers.set(host, remaining)
+        return
+      }
+      followFlowFillUsers.delete(host)
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!followLeaders.has(host) && !followFlowFillUsers.has(host)) restoreFlowFill(host)
+        })
+      })
+    }
+  }, [rootRef])
 }

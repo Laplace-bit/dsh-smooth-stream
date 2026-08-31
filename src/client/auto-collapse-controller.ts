@@ -27,6 +27,8 @@
  * flowing when background tabs suspend rAF.
  */
 
+import { hasRecentConversationFollow } from './teleprompterGlide.ts'
+
 const STYLE_ID = 'dshss-auto-collapse-style'
 /** Class of the injected per-turn summary row; the follow engine's generalized
  * surface walk picks it up as an ordinary foreign flow sibling. */
@@ -174,6 +176,7 @@ export class AutoCollapseController {
   /** True between start() and stop(); the preference toggle re-enters both. */
   private running = false
   private lastPassError = ''
+  private followDeferredAt: number | null = null
 
   private flow: HTMLElement | null = null
   /** Stable segment key → summary row + gesture state. */
@@ -233,6 +236,7 @@ export class AutoCollapseController {
 
   stop(): void {
     this.running = false
+    this.followDeferredAt = null
     if (this.raf !== 0) cancelAnimationFrame(this.raf)
     this.raf = 0
     if (this.timer !== 0) clearTimeout(this.timer)
@@ -270,13 +274,26 @@ export class AutoCollapseController {
     }, AUDIT_TICK_MS)
   }
 
-  /** Body-level observations only need to wake us up near the active flow. */
+  /** Only mutations inside the active flow can affect collapse geometry. */
   private shouldSchedule(records: MutationRecord[]): boolean {
     if (records.length === 0 || this.flow === null || !this.flow.isConnected) return true
-    return records.some(record => (
-      nodeWithin(record.target, this.flow as HTMLElement)
-      || nodeWithin(this.flow as HTMLElement, record.target)
-    ))
+    const flow = this.flow
+    return records.some(record => {
+      // The harness Tooltip renders its `position: fixed` bubble as a Fragment
+      // sibling INSIDE the message row (not a body portal), so hovering a copy
+      // button mounts/unmounts a node within the flow. It never affects
+      // collapse geometry, but treating it as relevant made hovering re-run
+      // the collapse pass against a streaming flow, racing the follower and
+      // producing visible flicker/jitter. Ignore purely-fixed additions and
+      // removals; keep every layout-affecting mutation.
+      const changed = [...record.addedNodes, ...record.removedNodes]
+      if (changed.length > 0 && changed.every(node => isFloatingOverlayNode(node))) return false
+      if (record.target === flow || nodeWithin(record.target, flow)) return true
+      // Child-list additions/removals can target an ancestor only when the
+      // changed node itself is inside the flow; inspect added/removed nodes so
+      // a body-level tooltip mutation remains ignored.
+      return changed.some(node => nodeWithin(node, flow))
+    })
   }
 
   /** Walk each record to its flow child so reply-cache invalidation stays
@@ -389,49 +406,94 @@ export class AutoCollapseController {
       this.syncProcessedRow(state)
     }
 
+    // Start the deadline only after a completed segment actually exists.
+    // Opening it during a long-running stream exhausts the full two seconds
+    // before completion and lets the fold collide with the final reveal drain.
+    const portNow = flow.closest<HTMLElement>('[data-conversation-scroll]')
+    if (
+      completedKeys.size > 0
+      && portNow !== null
+      && hasRecentConversationFollow(portNow, 140)
+    ) {
+      const now = Date.now()
+      this.followDeferredAt ??= now
+      if (now - this.followDeferredAt < 2000) {
+        this.schedule()
+        return
+      }
+    }
+    this.followDeferredAt = null
+
     // Every layout-affecting decision below lands synchronously: one pass,
     // one reflow, no deferred or animated geometry.
-    for (const [key, state] of [...this.segmentStates]) {
-      if (completedKeys.has(key)) continue
-      state.row?.remove()
-      this.segmentStates.delete(key)
-    }
+    //
+    // Folding moves flow height in one commit. A reader pinned to the floor
+    // would see the whole column translate unless scrollTop re-pins to the
+    // new floor in the same frame — the host's own ResizeObserver snap fires
+    // only for RESIZES it observes and can lose the race to paint. Capture
+    // the pin state before the mutations and restore it after.
+    const port = flow.closest<HTMLElement>('[data-conversation-scroll]')
+    const beforeFloor = Math.max(0, (port?.scrollHeight ?? 0) - (port?.clientHeight ?? 0))
+    const pinnedToFloor = port !== null && beforeFloor - port.scrollTop <= 30
+    // Anchor on the LAST VISIBLE MESSAGE SURFACE rather than the scroll floor:
+    // the floor moves with every height change above AND below the fold point,
+    // while the reader's eye is on the answer text. Compensating by this
+    // surface's viewport delta pins exactly what the reader is looking at,
+    // whatever the fold removed or inserted around it.
+    const anchorBefore = lastVisibleAnchorTop(flow)
 
-    const desiredHidden = new Set<HTMLElement>()
-    for (const segment of segments) {
-      const state = this.segmentStates.get(segment.key)
-      const collapse = state !== undefined && !state.expanded
-      if (collapse) {
-        for (const seat of segment.hideSeats) this.hideElement(seat, desiredHidden)
-        for (const row of segment.finalThinkRows) this.hideElement(row, desiredHidden)
-        // The final answer itself always shows; its thinking rows were hidden
-        // above, everything else about it is restored defensively.
-        if (segment.finalStep !== null) this.restoreElement(segment.finalStep)
-      } else {
-        for (const seat of segment.hideSeats) this.restoreElement(seat)
-        for (const row of segment.finalThinkRows) this.restoreElement(row)
-        if (segment.finalStep !== null) this.restoreElement(segment.finalStep)
+    const applyMutations = (): void => {
+      for (const [key, state] of [...this.segmentStates]) {
+        if (completedKeys.has(key)) continue
+        state.row?.remove()
+        this.segmentStates.delete(key)
       }
-    }
 
-    // Segments whose work is already invisible (hidden by the host or another
-    // extension) withdraw their summary row instead of pointing at nothing,
-    // but keep owning whatever they still hold so the sweep below leaves it.
-    for (const segment of segments) {
-      if (!hasVisibleSegmentWork(segment)) {
+      const desiredHidden = new Set<HTMLElement>()
+      for (const segment of segments) {
         const state = this.segmentStates.get(segment.key)
-        if (state !== undefined && state.row !== null) {
-          state.row.remove()
-          state.row = null
+        const collapse = state !== undefined && !state.expanded
+        if (collapse) {
+          for (const seat of segment.hideSeats) this.hideElement(seat, desiredHidden)
+          for (const row of segment.finalThinkRows) this.hideElement(row, desiredHidden)
+          // The final answer itself always shows; its thinking rows were hidden
+          // above, everything else about it is restored defensively.
+          if (segment.finalStep !== null) this.restoreElement(segment.finalStep)
+        } else {
+          for (const seat of segment.hideSeats) this.restoreElement(seat)
+          for (const row of segment.finalThinkRows) this.restoreElement(row)
+          if (segment.finalStep !== null) this.restoreElement(segment.finalStep)
         }
       }
-      for (const seat of segment.hideSeats) this.retainDisplayControl(seat, desiredHidden)
-      for (const row of segment.finalThinkRows) this.retainDisplayControl(row, desiredHidden)
-      if (segment.finalStep !== null) this.retainDisplayControl(segment.finalStep, desiredHidden)
-    }
 
-    this.restoreUnusedDisplays(desiredHidden)
-    for (const state of this.segmentStates.values()) this.placeProcessedRow(flow, state)
+      // Segments whose work is already invisible (hidden by the host or another
+      // extension) withdraw their summary row instead of pointing at nothing,
+      // but keep owning whatever they still hold so the sweep below leaves it.
+      for (const segment of segments) {
+        if (!hasVisibleSegmentWork(segment)) {
+          const state = this.segmentStates.get(segment.key)
+          if (state !== undefined && state.row !== null) {
+            state.row.remove()
+            state.row = null
+          }
+        }
+        for (const seat of segment.hideSeats) this.retainDisplayControl(seat, desiredHidden)
+        for (const row of segment.finalThinkRows) this.retainDisplayControl(row, desiredHidden)
+        if (segment.finalStep !== null) this.retainDisplayControl(segment.finalStep, desiredHidden)
+      }
+
+      this.restoreUnusedDisplays(desiredHidden)
+      for (const state of this.segmentStates.values()) this.placeProcessedRow(flow, state)
+    }
+    applyMutations()
+
+    if (port !== null && pinnedToFloor && anchorBefore !== null) {
+      const anchorAfter = lastVisibleAnchorTop(flow)
+      if (anchorAfter !== null) {
+        const delta = anchorAfter - anchorBefore
+        if (Math.abs(delta) > 0.5) port.scrollTop += delta
+      }
+    }
 
     for (const key of [...this.runningSince.keys()]) {
       if (!liveSegmentKeys.has(key)) this.runningSince.delete(key)
@@ -619,6 +681,24 @@ function nodeWithin(node: Node, ancestor: Node): boolean {
   for (let current: Node | null = node; current !== null; current = current.parentNode) {
     if (current === ancestor) return true
   }
+  return false
+}
+
+/**
+ * Whether a mutation-added/removed node is a `position: fixed` overlay (the
+ * harness Tooltip bubble / a popover) that never affects the flow's collapse
+ * geometry. The primitives Tooltip mounts its fixed bubble as a Fragment
+ * sibling inside the message row — `position: fixed` arrives from its CSS
+ * module class, not inline style — so it appears within `[data-chat-flow]`
+ * even though it is viewport-fixed and layout-neutral. Matching on the
+ * tooltip's structural role instead of computed style keeps the filter
+ * reliable before the node has been laid out.
+ */
+function isFloatingOverlayNode(node: Node): boolean {
+  if (!(node instanceof HTMLElement)) return false
+  if (node.getAttribute('role') === 'tooltip') return true
+  if (node.style.position === 'fixed') return true
+  if (node.style.position === 'absolute' && node.parentElement?.getAttribute('role') === 'tooltip') return true
   return false
 }
 
@@ -862,6 +942,21 @@ function hasBodyText(el: HTMLElement): boolean {
  * tails only carry an end timestamp, which is diffed against the opening user
  * row's timestamp.
  */
+
+/**
+ * Viewport-top of the last visible anchored message row, or null when none is
+ * rendered. Used to pin the reader's visual anchor across a fold commit.
+ */
+function lastVisibleAnchorTop(flow: HTMLElement): number | null {
+  const rows = flow.querySelectorAll<HTMLElement>('[data-chat-anchor-key]')
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index]!
+    if (row.getClientRects().length === 0) continue
+    return row.getBoundingClientRect().top
+  }
+  return null
+}
+
 function parseTurnDuration(boundary: HTMLElement): number | undefined {
   const text = boundary.textContent ?? ''
   const zh = text.match(/用时\s*(\d+)分(\d+)秒|用时\s*(\d+)秒/)

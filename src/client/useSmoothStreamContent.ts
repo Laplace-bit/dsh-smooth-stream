@@ -170,14 +170,24 @@ export function computeSettleDrain(config: StreamSmoothingPresetConfig, input: S
   return clamp(Math.max(settleCps, overflowCps), config.flushCps, config.maxFlushCps)
 }
 
-/** Fixed velocity that closes a producer-complete queue within its deadline. */
+/**
+ * Fixed velocity that closes a producer-complete queue within its deadline.
+ * This completion-only target may exceed the live-stream flush ceiling.
+ */
 export function computeCompletionDrain(
   config: StreamSmoothingPresetConfig,
   backlog: number,
+  initialCps = 0,
 ): number {
   if (backlog <= 0) return 0
   const drainTargetMs = clamp(backlog * 8, config.settleDrainMinMs, config.settleDrainMaxMs)
-  const deadlineCps = (backlog * 1000) / drainTargetMs
+  const deadlineSeconds = drainTargetMs / 1000
+  const rampAreaSeconds = SETTLE_RAMP_TAU_S * (1 - Math.exp(
+    -deadlineSeconds / SETTLE_RAMP_TAU_S,
+  ))
+  const deadlineCps = (
+    backlog - Math.max(0, initialCps) * rampAreaSeconds
+  ) / Math.max(0.001, deadlineSeconds - rampAreaSeconds)
   return Math.max(
     deadlineCps,
     computeSettleDrain(config, { backlog, inputActive: false, settling: true }),
@@ -189,6 +199,8 @@ export function computeCompletionDrain(
  * this multiple of the steady rate, so the end never drags.
  */
 export const SETTLE_DRAIN_MULTIPLIER = 1.8
+/** Time constant for ramping the completion-drain velocity up from streaming pace. */
+export const SETTLE_RAMP_TAU_S = 0.09
 
 export interface RevealStepInput {
   readonly backlog: number
@@ -261,6 +273,14 @@ export interface UseSmoothStreamContentOptions {
   defaultCps?: number | undefined
   /** Written each commit with the live arrival-rate EMA for the follow lerp. */
   speedCpsRef?: { current: number } | undefined
+  /** Cumulative code points that have actually committed to the display. */
+  revealedCharsRef?: { current: number } | undefined
+  /**
+   * Called synchronously after each reveal commit lands in the DOM, so the
+   * conversation follower can re-run its geometry inside the same task and
+   * no intermediate (grown-but-uncompensated) frame can reach a paint.
+   */
+  onRevealCommit?: (() => void) | undefined
   /** Live multiplier from the follow spring when safe visual lag is filling. */
   revealScaleRef?: { current: number } | undefined
 }
@@ -282,7 +302,9 @@ export function useSmoothStreamContent(
     steadyCps,
     defaultCps,
     speedCpsRef,
+    revealedCharsRef,
     revealScaleRef,
+    onRevealCommit,
   }: UseSmoothStreamContentOptions = {},
 ): string {
   const config = PRESET_CONFIG[preset]
@@ -309,11 +331,16 @@ export function useSmoothStreamContent(
   const lastFrameTsRef = useRef<number | null>(null)
   const queueDebtRef = useRef(0)
   const settleCpsRef = useRef<number | null>(null)
+  const lastDrainCpsRef = useRef(0)
   const holdBackRef = useRef(shouldHoldBack)
   const speedOutRef = useRef(speedCpsRef)
   speedOutRef.current = speedCpsRef
+  const revealedCharsOutRef = useRef(revealedCharsRef)
+  revealedCharsOutRef.current = revealedCharsRef
   const revealScaleOutRef = useRef(revealScaleRef)
   revealScaleOutRef.current = revealScaleRef
+  const onRevealCommitOutRef = useRef(onRevealCommit)
+  onRevealCommitOutRef.current = onRevealCommit
   const inputCompleteRef = useRef(inputComplete)
   inputCompleteRef.current = inputComplete
   const streamIdRef = useRef(`stream-${Math.random().toString(36).slice(2)}`)
@@ -344,6 +371,7 @@ export function useSmoothStreamContent(
       displayedCountRef.current = chars.length
       queueDebtRef.current = 0
       settleCpsRef.current = null
+      lastDrainCpsRef.current = 0
       const speedOut = speedOutRef.current
       if (speedOut !== undefined) speedOut.current = seedCps
       setDisplayedContent(nextContent)
@@ -356,14 +384,16 @@ export function useSmoothStreamContent(
     [seedCps, stopFrameLoop],
   )
 
-  // Producer completion is authoritative. Publish the accumulated source in
-  // the same commit instead of leaving a visible typewriter tail after the
-  // Agent has already stopped; the conversation follower still glides any
-  // resulting layout height before paint.
-  useLayoutEffect(() => {
-    if (!enabled || !inputComplete || displayedContentRef.current === content) return
-    syncImmediate(content)
-  }, [content, enabled, inputComplete, syncImmediate])
+  // Producer completion used to publish the accumulated source in one commit
+  // here. That single commit is a visible teleport whenever a fast stream
+  // ends with standing backlog — hundreds of chars become thousands of px in
+  // one frame, exactly the end-of-render jerk this plugin fights. The frame
+  // loop's producer-complete branch already drains the queue at a bounded
+  // constant velocity (computeCompletionDrain), which finishes near its
+  // configured deadline and glides every px through the spring. Nothing is left
+  // "typing" after the Agent stops; the tail just closes at drain speed.
+  //
+  // Non-append-only edits and disabled streams still sync immediately below.
 
   const startFrameLoop = useCallback(() => {
     if (rafRef.current !== null) return
@@ -406,14 +436,31 @@ export function useSmoothStreamContent(
       if (producerComplete) {
         // Backpressure protects live layout. Once input has ended, retaining
         // that scale only makes a completed response keep typing onscreen.
-        // Keep one drain velocity for the whole completion tail. Recomputing
-        // it from the shrinking backlog creates an exponential slow tail.
-        const settleCps = settleCpsRef.current ?? computeCompletionDrain(config, backlog)
-        settleCpsRef.current = settleCps
+        // Keep one TARGET velocity for the whole completion tail — recomputing
+        // it from the shrinking backlog creates an exponential slow tail —
+        // but RAMP the effective velocity up from the last reveal speed over
+        // ~3 frames: an instant jump from streaming pace to max flush is
+        // itself a visible jerk at exactly the moment the reader is watching
+        // the reply finish.
+        // The pre-drain reveal speed is the streaming EMA, not the debug seed.
+        // Seeding the ramp from the 35cps default when the reply ran at the
+        // max-flush ceiling stretched a 420ms tail past the 800ms announcer
+        // step and the visible Markdown mutated across it.
+        const previousCps = lastDrainCpsRef.current > 0
+          ? lastDrainCpsRef.current
+          : Math.max(config.minCps, emaCpsRef.current)
+        const drainTargetCps = settleCpsRef.current
+          ?? computeCompletionDrain(config, backlog, previousCps)
+        settleCpsRef.current = drainTargetCps
+        const rampedCps = previousCps
+          + (drainTargetCps - previousCps) * (1 - Math.exp(-dtSeconds / SETTLE_RAMP_TAU_S))
+        const settleCps = Math.min(drainTargetCps, Math.max(previousCps, rampedCps))
+        lastDrainCpsRef.current = Math.min(drainTargetCps, rampedCps)
         const accumulated = Math.max(0, queueDebtRef.current) + settleCps * dtSeconds
         revealChars = Math.min(backlog, Math.floor(accumulated))
         revealSpeedCps = settleCps
         nextQueueDebt = revealChars >= backlog ? 0 : accumulated - revealChars
+        if (revealChars >= backlog) lastDrainCpsRef.current = 0
       } else if (steadyCps !== undefined) {
         const step = computeRevealStep(
           config,
@@ -486,7 +533,16 @@ export function useSmoothStreamContent(
     }
 
     rafRef.current = requestAnimationFrame(tick)
-  }, [config, stopFrameLoop, steadyCps])
+  }, [config, seedCps, stopFrameLoop, steadyCps])
+
+  // Run AFTER the commit's DOM mutations, before paint: the follower's
+  // same-task correction hook.
+  useLayoutEffect(() => {
+    const revealedCharsOut = revealedCharsOutRef.current
+    if (revealedCharsOut !== undefined) revealedCharsOut.current = displayedCountRef.current
+    if (displayedContent === '') return
+    onRevealCommitOutRef.current?.()
+  }, [displayedContent])
 
   useEffect(() => {
     startFrameLoopRef.current = startFrameLoop

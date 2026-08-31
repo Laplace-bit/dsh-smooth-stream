@@ -244,6 +244,50 @@ describe('auto-collapse transitions', () => {
     }
   })
 
+  it('ignores a fixed tooltip bubble mounting inside the flow while streaming', () => {
+    // The harness Tooltip renders its position:fixed bubble as a Fragment
+    // sibling inside the message row, so hovering a copy button while the
+    // reply streams mutates nodes within the flow. That mount/unmount must not
+    // re-run the collapse pass against the streaming reply (it races the
+    // follower and flickers the content).
+    const { step, think } = buildFinishedTurn()
+    // Simulate the reply still streaming: the turn tail exists, but the think
+    // is running, so no fold may happen yet.
+    think.setAttribute('data-state', 'running')
+    startController()
+    flush()
+    expect(think.style.display).not.toBe('none')
+    expect(summaryRow()).toBeNull()
+
+    // Hover mounts the fixed bubble inside the running step. The harness
+    // Tooltip stamps role="tooltip" and positions it fixed via its CSS class.
+    const bubble = document.createElement('span')
+    bubble.setAttribute('role', 'tooltip')
+    bubble.setAttribute('data-side', 'bottom')
+    bubble.style.position = 'fixed'
+    bubble.style.padding = '3px 7px'
+    bubble.textContent = '复制'
+    step.appendChild(bubble)
+    flush()
+    // The stream is still running: no fold was scheduled by the tooltip mount.
+    expect(think.style.display).not.toBe('none')
+    expect(summaryRow()).toBeNull()
+
+    // Leaving hides the bubble — also ignored.
+    bubble.remove()
+    flush()
+    expect(think.style.display).not.toBe('none')
+    expect(summaryRow()).toBeNull()
+
+    // Once the reply settles, a fresh pass still folds — the fixed-bubble
+    // filter never suppresses real layout state changes.
+    think.setAttribute('data-state', 'ok')
+    controller.stop()
+    startController()
+    flush()
+    expect(summaryRow()).not.toBeNull()
+  })
+
   it('folds context, command, and compaction seats like other work process', () => {
     const flow = createFlow()
     addUser(flow, 'u1')

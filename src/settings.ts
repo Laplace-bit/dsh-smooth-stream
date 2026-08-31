@@ -40,7 +40,7 @@ export const DEFAULT_STREAM_DEBUG_TUNING: StreamDebugTuning = {
   springStiffness: 130,
   springDamping: 24,
   springMass: 1,
-  runwayPx: 48,
+  runwayPx: 72,
   reserveResponseMs: 180,
   backpressureMinScale: 0.55,
 }

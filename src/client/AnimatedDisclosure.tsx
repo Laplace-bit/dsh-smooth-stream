@@ -27,6 +27,13 @@ export interface AnimatedDisclosureProps {
   leadingClassName?: string | undefined
   titleClassName?: string | undefined
   chevronClassName?: string | undefined
+  /**
+   * When false the body snaps between states with no grid-track transition.
+   * The auto-close at stream end uses this: the conversation follower's
+   * settle spring absorbs the height step through the compositor instead,
+   * which glides identically without twelve frames of layout animation.
+   */
+  bodyTransition?: boolean
 }
 
 /**
@@ -46,6 +53,7 @@ export function AnimatedDisclosure({
   leadingClassName,
   titleClassName,
   chevronClassName,
+  bodyTransition = true,
 }: AnimatedDisclosureProps) {
   const toggleFromKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'Enter' && event.key !== ' ') return
@@ -77,7 +85,12 @@ export function AnimatedDisclosure({
         <span className={cx(css.disclosureTitle, titleClassName)}>{title}</span>
         {!open && collapsedContent}
       </div>
-      <div className={css.disclosureContent} data-disclosure-content data-collapsed={open ? undefined : ''}>
+      <div
+        className={css.disclosureContent}
+        data-disclosure-content
+        data-collapsed={open ? undefined : ''}
+        data-no-transition={bodyTransition ? undefined : ''}
+      >
         {children}
       </div>
     </div>
