@@ -235,13 +235,33 @@
 }
 
 /*
+ * Inline code is allowed to wrap inside list items. The Harness markdown
+ * theme uses `inline-flex` for its single-line code treatment, but an
+ * inline-flex box can expose multiple painted line boxes without contributing
+ * their full height to a trimmed list-item line box in Chromium. Keep the
+ * code's font and padding while using normal inline layout so every wrapped
+ * line participates in the parent list item's geometry.
+ */
+.root :not(pre) > code {
+  display: inline;
+  line-height: inherit;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: baseline;
+}
+
+/*
  * Trim the half-leading above and below each text block so line boxes hug
  * the font's ascent/descent edges. `text` edges are used instead of
  * `cap alphabetic` because assistant text is CJK-heavy and cap-height
  * trimming would clip ideographic glyphs.
  */
 @supports (text-box-trim: trim-both) {
-  .root :is(p, h1, h2, h3, h4, h5, h6, li, blockquote) {
+  /* List-item line boxes must retain their full leading. A wrapped inline
+   * code element is an inline-flex formatting context; Chromium's
+   * text-box-trim can shrink the li's layout box below the code's painted
+   * second line, letting the following item start inside that line. */
+  .root :is(p, h1, h2, h3, h4, h5, h6, blockquote) {
     text-box-trim: trim-both;
     text-box-edge: text;
   }

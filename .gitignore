@@ -13,6 +13,9 @@ repro/bundle.js
 repro/bundle.css
 repro/audit.bundle.js
 repro/audit.bundle.css
+repro/overlap.bundle.js
+repro/overlap.bundle.css
+.mt-probe.*
 benchmarks/results/
 .workbuddy/
 skills-lock.json

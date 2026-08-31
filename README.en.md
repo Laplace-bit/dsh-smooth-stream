@@ -48,6 +48,7 @@ Left: default Web UI. Right: dsh-smooth-stream.
 | Render audit `run-render-audit` (5 streaming scenarios) | **10/10 clean**, zero movement regression |
 | Overflow gate `verify-overflow` | **3/3** no over-scroll, no rebound |
 | Tail smoothing `probe-tailbob` | single-frame ≤30px, 7-frame amplitude ≤32px **PASS** |
+| Inline-code wrap `probe:overlap` | Issue #13 fixture across static/reveal/engine arms **PASS** |
 
 Core ESM output gzip ≈ **4.7 kB**. Details in [How it works & benchmark](https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html).
 

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-smooth-stream 行内代码折行重叠监测</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #1b1f27;
+    --paper: #ffffff;
+    --line: #e4e7ec;
+    --soft: #f5f6f8;
+    --dsw-font-markdown-base: 16px/28px sans-serif;
+    --dsw-font-markdown-code: 14px/22px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --ds-font-family-code: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --dsw-alias-label-primary: var(--ink);
+    --dsw-alias-label-secondary: #475467;
+    --dsw-alias-label-caption: #667085;
+    --dsw-alias-state-business-primary: #1b1f27;
+    --dsw-alias-border-l2: var(--line);
+    --dsw-alias-markdown-inline-code: rgba(127, 127, 127, 0.13);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--paper); color: var(--ink); }
+  #app { height: 100%; }
+
+  .root { height: 100%; display: flex; flex-direction: column; }
+
+  /* ---- host ChatView scroll contract (port, see repro/audit.html) ---- */
+  .scrollBody {
+    position: relative;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-gutter: stable;
+  }
+  .scroll { min-height: 100%; display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 24px; }
+  .column {
+    width: min(640px, 92%);
+    margin: 0 auto;
+    padding: 24px 0 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    font: 16px/1.75 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+  .msg.user {
+    align-self: flex-end;
+    max-width: 80%;
+    background: var(--soft);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px 14px;
+  }
+  .msg.filler {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fafbfc;
+    padding: 12px 14px;
+    color: #475467;
+    font-size: 14px;
+    line-height: 1.8;
+  }
+  .msg.assistant { align-self: stretch; }
+  .body { display: flex; flex-direction: column; gap: 10px; }
+  .statusRow { padding: 6px 0 2px; color: #667085; font-size: 14px; }
+  .dots::after { content: "…"; }
+  .composerSeat {
+    border-top: 1px solid var(--line);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--paper);
+  }
+  .composerSeat input {
+    flex: 1;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font: inherit;
+  }
+  .composerSeat button {
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    background: #1b1f27;
+    color: #fff;
+    font: inherit;
+  }
+
+  /* ---- mirrored DSH assistant-markdown theme (element selectors: the
+     prebuilt primitives expose empty CSS-module classes) ---- */
+  .mdRoot { min-width: 0; max-width: 100%; overflow-wrap: anywhere; font: 16px/28px sans-serif; }
+  .mdRoot > :last-child { margin-bottom: 0; }
+  .mdRoot p { margin: 16px 0; }
+  .mdRoot ul, .mdRoot ol { margin: 16px 0; padding-left: 18px; }
+  .mdRoot li { line-height: 28px; }
+  .mdRoot li:not(:first-child) { margin-top: 6px; }
+
+  /* ---- plugin-owned mirrors (data-attribute switched from the driver) ----
+     `data-li-trim` reproduces the PRE-FIX rule in the plugin's own
+     TypewriterAssistantNodeView.module.css: text-box-trim on `li` trims the
+     list-item's layout box below the height of a wrapped inline-flex code, so
+     the following item starts inside the previous item's painted line.
+     `data-code-inline` mirrors the POST-FIX rule: normal inline code layout
+     + inherited line-height. */
+  @supports (text-box-trim: trim-both) {
+    html[data-li-trim="1"] .mdRoot li {
+      text-box-trim: trim-both;
+      text-box-edge: text;
+    }
+  }
+  html[data-code-inline="1"] .mdRoot :not(pre) > code {
+    display: inline;
+    line-height: inherit;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    vertical-align: baseline;
+  }
+  .mdRoot code {
+    /* DSH host markdown theme (packages/client/ui-primitives/
+       src/markdown/MarkdownText.module.css) :not(pre) > code rules, with the
+       design tokens resolved to this page's values. */
+    display: inline-flex;
+    align-items: center;
+    box-sizing: border-box;
+    font: 14px/22px ui-monospace, SFMono-Regular, Menlo, "SF Mono", Consolas, monospace;
+    font-size: 0.875em !important;
+    background-color: rgba(127, 127, 127, 0.13);
+    border-radius: 6px;
+    padding: 0 5px;
+  }
+  .mdRoot pre {
+    margin: 0 0 10px;
+    background: #f6f8fa;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap;
+  }
+  .mdRoot pre code { background: none; padding: 0; font: inherit; }
+  .mdRoot h1, .mdRoot h2, .mdRoot h3, .mdRoot h4, .mdRoot h5, .mdRoot h6 {
+    margin: 0 0 8px; line-height: 1.4; font-weight: 600;
+  }
+  .mdRoot blockquote {
+    margin: 0 0 10px; padding: 2px 0 2px 12px; border-left: 3px solid var(--line); color: #475467;
+  }
+  .mdRoot table { border-collapse: collapse; margin: 0 0 10px; }
+  .mdRoot th, .mdRoot td { border: 1px solid var(--line); padding: 6px 10px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script type="module" src="./overlap.bundle.js"></script>
+</body>
+</html>

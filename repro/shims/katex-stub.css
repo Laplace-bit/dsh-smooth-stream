@@ -1,0 +1,3 @@
+/* Empty stub for katex/dist/katex.min.css. The overlap probe page renders no
+ * TeX math, so the KaTeX styles (and their font URL references) are skipped to
+ * keep the esbuild bundle self-contained. */

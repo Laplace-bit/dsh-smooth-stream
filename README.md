@@ -48,6 +48,7 @@
 | 渲染审计 `run-render-audit`（5 种流式场景） | **10/10 clean**，零位移突变、零回归 |
 | 溢出闸门 `verify-overflow` | **3/3** 无过滚、无回弹 |
 | 尾行平滑 `probe-tailbob` | 单帧位移 ≤30px、7 帧振幅 ≤32px **PASS** |
+| 行内代码折行 `probe:overlap` | Issue #13 fixture，静态/揭示/引擎三臂 **PASS** |
 
 核心 ESM 产物 gzip 约 **4.7 kB**。详见[工作原理与基准](https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html)。
 

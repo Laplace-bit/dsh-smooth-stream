@@ -85,7 +85,8 @@
     "prepare": "tsdown",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --pretty false",
-    "test:smooth": "node scripts/probe-tailbob.mjs 1200 20 && node scripts/verify-overflow.mjs --runs 3"
+    "test:smooth": "node scripts/probe-tailbob.mjs 1200 20 && node scripts/verify-overflow.mjs --runs 3",
+    "probe:overlap": "node scripts/probe-overlap.mjs"
   },
   "dependencies": {
     "@deepseek-ai/dsh-settings": "0.1.0-rc.6"
