@@ -2,7 +2,7 @@
 
 免费增长黑客资料包。这里的文案可以直接复制到各平台发布。发布前请确认平台规则、账号状态和最新版本号。
 
-- 当前版本：0.3.4
+- 当前版本：0.4.1
 - 许可证：MIT
 - 安装命令：`pnpm dsh plugin --profile web add dsh-smooth-stream`
 - 主页：<https://laplace-bit.github.io/dsh-smooth-stream/>
@@ -74,7 +74,7 @@ dsh-smooth-stream, dsh plugin, dsh 插件, DeepSeek Harness 插件, DeepSeek Har
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Linux, macOS, Windows",
   "programmingLanguage": "TypeScript",
-  "softwareVersion": "0.3.4",
+  "softwareVersion": "0.4.1",
   "isAccessibleForFree": true,
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "license": "https://spdx.org/licenses/MIT",
@@ -203,14 +203,14 @@ I’m building dsh-smooth-stream, a free plugin for fluid streaming rendering in
 
 What it provides:
 - Fluid streaming rendering for text and Markdown
-- Silky scrolling as replies grow
-- Smooth transitions for line wraps, code blocks, tables, and tool results
+- Zero-reflow scroll follow (compositor transform only — no layout writes)
+- Zero-jank, adaptive reveal and wrap smoothing (single-frame ≤8px)
+- Refresh-rate-independent, level-free scrolling
 - One visual rhythm across text, reasoning, and tools
-- Adaptive reveal cadence
 
 It is independently maintained and MIT-licensed.
 
-Current version: 0.3.4
+Current version: 0.4.1
 Install: pnpm dsh plugin --profile web add dsh-smooth-stream
 GitHub: https://github.com/Laplace-bit/dsh-smooth-stream
 

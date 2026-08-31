@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>dsh-smooth-stream – DeepSeek Harness 流畅流式渲染与丝滑滚动</title>
-<meta name="description" content="dsh-smooth-stream 为 DeepSeek Harness Web UI 带来流畅的流式渲染和丝滑滚动：文字、Markdown、代码块、表格与工具结果自然呈现，内容增长时页面平稳跟随。">
-<meta name="keywords" content="dsh-smooth-stream, dsh plugin, dsh 插件, DeepSeek Harness 插件, DeepSeek Harness, deepseek-harness plugin, 流式渲染, 丝滑滚动, Markdown 流式渲染, fluid streaming, silky scrolling, streaming markdown, code block, tool result, AI chat UI, cordis plugin">
+<title>dsh-smooth-stream · 丝滑流式渲染引擎 | AI 流式输出 0重排跟随 · 0跳变 · 无级滚动</title>
+<meta name="description" content="dsh-smooth-stream 为 DeepSeek Harness (dsh) Web UI 打造丝滑流式渲染：跟随路径 0 重排（仅合成层 transform）、揭示与换行 0 跳变（单帧≤8px）、回合完成 0 突进。AI 大模型流式输出逐帧连续、无级滚动、帧率无关。">
+<meta name="keywords" content="dsh-smooth-stream, dsh plugin, dsh 插件, DeepSeek Harness 插件, DeepSeek Harness, deepseek-harness plugin, 丝滑流式, 丝滑流式渲染, 0重排, 零重排, 0跳变, 无级滚动, 零跳帧, 流式渲染, AI 流式输出, 大模型流式渲染, Markdown 流式渲染, fluid streaming, silky scrolling, zero reflow, zero jank, level-free scrolling, streaming markdown, code block, tool result, AI chat UI, cordis plugin">
 <meta name="author" content="Laplace-bit">
 <meta name="robots" content="index,follow,max-image-preview:large">
 <meta name="theme-color" content="#4d6bfe">
@@ -16,22 +16,22 @@
 
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="dsh-smooth-stream">
-<meta property="og:title" content="dsh-smooth-stream – DeepSeek Harness 流畅流式渲染与丝滑滚动">
-<meta property="og:description" content="文字、Markdown、代码块、表格与工具结果自然呈现，内容增长时页面平稳跟随。">
+<meta property="og:title" content="dsh-smooth-stream · 丝滑流式渲染引擎 | 0重排跟随 · 0跳变 · 无级滚动">
+<meta property="og:description" content="AI 流式输出不再跳帧：跟随路径 0 重排（仅合成层 transform）、揭示与换行 0 跳变（单帧≤8px）、回合完成 0 突进。为 DeepSeek Harness Web UI 打造的无级滚动丝滑流式渲染。">
 <meta property="og:url" content="https://laplace-bit.github.io/dsh-smooth-stream/">
 <meta property="og:image" content="https://laplace-bit.github.io/dsh-smooth-stream/og-image.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="710">
 <meta property="og:image:type" content="image/jpeg">
-<meta property="og:image:alt" content="dsh-smooth-stream 前后对比：默认流式输出与流式消息渲染。Before/after comparison of default streaming and dsh-smooth-stream rendering.">
+<meta property="og:image:alt" content="dsh-smooth-stream 前后对比：默认流式输出与 0 重排丝滑流式渲染。Before/after comparison of default streaming and dsh-smooth-stream zero-reflow rendering.">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:locale:alternate" content="en_US">
 
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="dsh-smooth-stream – DeepSeek Harness 流畅流式渲染与丝滑滚动">
-<meta name="twitter:description" content="流畅渲染，丝滑滚动，Markdown、代码块、表格和工具结果自然衔接。">
+<meta name="twitter:title" content="dsh-smooth-stream · 丝滑流式渲染引擎 | 0重排跟随 · 0跳变 · 无级滚动">
+<meta name="twitter:description" content="丝滑流式渲染：0重排跟随、0跳变换行、完全收敛不突进。为 DeepSeek Harness (dsh) Web UI 打造。">
 <meta name="twitter:image" content="https://laplace-bit.github.io/dsh-smooth-stream/og-image.jpg">
-<meta name="twitter:image:alt" content="DeepSeek Harness 流畅流式渲染与丝滑滚动示例。">
+<meta name="twitter:image:alt" content="DeepSeek Harness 丝滑流式渲染与无级滚动示例。">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234d6bfe'/%3E%3Cpath d='M14 20h22M14 30h30M14 40h18' stroke='white' stroke-width='6' stroke-linecap='round'/%3E%3Cpath d='M42 38l6 6 10-12' stroke='%2370e384' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 
@@ -45,7 +45,15 @@
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Linux, macOS, Windows",
   "programmingLanguage": "TypeScript",
-  "softwareVersion": "0.3.4",
+  "softwareVersion": "0.4.1",
+  "featureList": [
+    "0-reflow scroll follow (compositor-transform only)",
+    "0-jank adaptive text reveal and wrap smoothing (single-frame ≤8px)",
+    "0-burst completion drain",
+    "refresh-rate-independent level-free scrolling with a damped spring",
+    "respects prefers-reduced-motion and low frame rates",
+    "reproducible browser-level audit gates: render audit 10/10 clean, overflow 3/3, tail smoothing pass"
+  ],
   "isAccessibleForFree": true,
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "license": "https://spdx.org/licenses/MIT",
@@ -75,7 +83,7 @@
     "name": "dsh-smooth-stream",
     "applicationCategory": "DeveloperApplication"
   },
-  "dateModified": "2026-08-20"
+  "dateModified": "2026-08-31"
 }
 </script>
 <script type="application/ld+json">
@@ -92,6 +100,11 @@
       "@type": "Question",
       "name": "怎么安装 dsh-smooth-stream 插件？",
       "acceptedAnswer": { "@type": "Answer", "text": "在 DeepSeek Harness 源码目录运行：pnpm dsh plugin --profile web add dsh-smooth-stream。如果 PATH 上已有 dsh，也可以运行 dsh plugin --profile web add dsh-smooth-stream。npm 包自带预构建 lib/，无需额外授权构建脚本。" }
+    },
+    {
+      "@type": "Question",
+      "name": "「0重排」是字面意思吗？Is \"0 reflow\" literal?",
+      "acceptedAnswer": { "@type": "Answer", "text": "是指动画路径本身。滚动跟随只写合成层 transform，从不逐帧读写布局属性，因此跟随阶段不会引发重排/重绘风暴，实现丝滑流式与无级滚动；文本揭示仍按字符增量写入（这是新内容唯一必要的布局），但揭示节奏被限幅，单帧视觉位移 ≤8px、无跳变。" }
     },
     {
       "@type": "Question",
@@ -167,8 +180,8 @@ a{color:var(--brand)}
 <header>
 <div class="wrap">
 <h1>dsh-<span>smooth-stream</span></h1>
-<p class="tagline">dsh-smooth-stream 为 DeepSeek Harness 带来流畅的流式渲染和丝滑滚动：文字、Markdown、代码块、表格以及工具结果随着输出自然呈现，内容增长时页面平稳跟随。<br>
-dsh-smooth-stream brings fluid streaming rendering and silky scrolling to DeepSeek Harness: text, Markdown, code blocks, tables, and tool results appear as the reply arrives while the page follows the growing content.</p>
+<p class="tagline">AI 流式输出不再跳帧。dsh-smooth-stream 为 DeepSeek Harness 带来 <b>丝滑流式</b>渲染：跟随路径 <b>0 重排</b>（只写合成层 <code>transform</code>）、揭示与换行 <b>0 跳变</b>（单帧 ≤8px）、回合完成 <b>0 突进</b>。文字、Markdown、代码块、表格与工具结果逐帧连续、无级滚动地呈现。<br>
+No more frame jumps in AI streaming output. dsh-smooth-stream brings silky streaming to DeepSeek Harness: <b>0-reflow</b> follow (compositor <code>transform</code> only), <b>0-jank</b> reveal and wrap (≤8px per frame), and <b>0-burst</b> completion — continuously variable, refresh-rate-independent scrolling.</p>
 <div class="cta">
 <a class="btn primary" href="https://github.com/Laplace-bit/dsh-smooth-stream">GitHub 仓库 / Source</a>
 <a class="btn ghost" href="install.html">安装指南 / Install</a>
@@ -189,6 +202,19 @@ dsh-smooth-stream brings fluid streaming rendering and silky scrolling to DeepSe
 </div>
 </section>
 
+<section id="zeros">
+<div class="wrap">
+<h2>三个「0」：为什么丝滑 <small>Why zero jank</small></h2>
+<ul class="f">
+<li><b>0 重排跟随</b><p>滚动跟随只写合成层 <code>transform</code> 并预置 <code>will-change</code>，从不逐帧写 <code>top/left/width</code>——布局零参与，长回复不抖，越滚越跟手。<br>0-reflow follow: compositor-transform only, the layout tree never reflows during follow.</p></li>
+<li><b>0 跳变换行</b><p>揭示速度按队列积压自适应；换行与新块的单帧视觉位移被限幅到 ≤8px（<code>FOLLOW_PAINT_SHIFT_MAX_STEP_PX</code>），高速输出同样无跳帧。<br>0-jank reveal and wrap: every single-frame displacement stays ≤8px, even at high output rates.</p></li>
+<li><b>0 突进收敛</b><p>回合完成时以固定速度匀速倾倒队列，结尾不倾泻、不多抓一帧，正文与思考/工具输出干净衔接。<br>0-burst completion: the queue drains at one fixed velocity, no final lurch.</p></li>
+<li><b>无级滚动</b><p>位置是「积分」出来的：揭示与跟随两个引擎每帧积分一个阻尼弹簧（130/24/1），60Hz 与 120Hz 手感一致，帧率无关。<br>Level-free scrolling: position is integrated, not snapped — refresh-rate independent feel.</p></li>
+</ul>
+<p class="note">「0 重排」指动画路径本身：跟随不发起点重排/重绘风暴；文本揭示仍按字符增量写入（这是新内容唯一必要的布局），但节奏被限幅，视觉零跳变。</p>
+</div>
+</section>
+
 <section id="features">
 <div class="wrap">
 <h2>核心体验 <small>Core experience</small></h2>
@@ -198,6 +224,21 @@ dsh-smooth-stream brings fluid streaming rendering and silky scrolling to DeepSe
 <li><b>统一过渡</b><p>换行、代码块、表格和工具结果使用一致的过渡方式，正文、思考过程与工具输出衔接自然。</p></li>
 <li><b>自适应节奏</b><p>渲染速度会根据输出速度和待显示内容调整，让慢速输出从容呈现，快速输出及时跟上。</p></li>
 </ul>
+</div>
+</section>
+
+<section id="benchmark">
+<div class="wrap">
+<h2>可复现基准 <small>Reproducible benchmark</small></h2>
+<p>「丝滑」是可复现的数值：仓库自带浏览器级审计台架，发布前全量绿灯。</p>
+<table>
+<tr><th>闸门 / Gate</th><th>结果 / Result</th></tr>
+<tr><td>渲染审计 <code>run-render-audit</code>（5 种流式场景）</td><td><b>10/10 clean</b>，零位移突变、零回归</td></tr>
+<tr><td>溢出闸门 <code>verify-overflow</code></td><td><b>3/3</b> 无过滚、无回弹</td></tr>
+<tr><td>尾行平滑 <code>probe-tailbob</code></td><td>单帧 ≤30px、7 帧振幅 ≤32px <b>PASS</b></td></tr>
+<tr><td>核心 ESM 产物</td><td>gzip ≈ <b>4.7 kB</b></td></tr>
+</table>
+<p class="note">详见 <a href="how-it-works.html">工作原理与可复现基准</a>——适配队列、时间弹簧、背压，以及本地一键复现的步骤。</p>
 </div>
 </section>
 
@@ -251,6 +292,10 @@ dsh-smooth-stream brings fluid streaming rendering and silky scrolling to DeepSe
 <details open>
 <summary>什么是 dsh-smooth-stream？</summary>
 <p>为 DeepSeek Harness（dsh）Web UI 带来流畅的流式渲染和丝滑滚动。文字、Markdown、代码块、表格以及工具结果会随着输出自然呈现；内容逐步增长时，页面平稳跟随，整轮回复保持连贯的视觉节奏。</p>
+</details>
+<details>
+<summary>「0重排」是字面意思吗？Is "0 reflow" literal?</summary>
+<p>指动画路径本身。滚动跟随只写合成层 <code>transform</code>，从不逐帧读写布局属性，因此跟随阶段不会引发重排/重绘风暴；文本揭示仍按字符增量写入（这是新内容唯一必要的布局），但揭示节奏被限幅，单帧视觉位移 ≤8px、无跳变，实现丝滑流式与无级滚动。</p>
 </details>
 <details>
 <summary>怎么安装 dsh 插件？</summary>

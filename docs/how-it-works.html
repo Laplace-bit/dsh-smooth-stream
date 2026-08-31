@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>How dsh-smooth-stream renders and follows streaming replies</title>
-<meta name="description" content="A reproducible look at the adaptive reveal queue and time-based spring used by dsh-smooth-stream for DeepSeek Harness streaming replies.">
-<meta name="keywords" content="DeepSeek Harness streaming, streaming Markdown, smooth scrolling algorithm, adaptive text reveal, spring scrolling, dsh-smooth-stream benchmark">
+<title>How dsh-smooth-stream renders and follows streaming replies — zero-reflow follow, zero-jank reveal</title>
+<meta name="description" content="A reproducible look at how dsh-smooth-stream stream-renders DeepSeek Harness replies: adaptive reveal queue, a time-based spring, and a zero-reflow compositor-transform follow with per-frame displacement ≤8px.">
+<meta name="keywords" content="DeepSeek Harness streaming, streaming Markdown, smooth scrolling algorithm, adaptive text reveal, spring scrolling, zero reflow follow, zero jank reveal, compositor transform, level-free scrolling, dsh-smooth-stream benchmark">
 <meta name="author" content="Laplace-bit">
 <meta name="robots" content="index,follow,max-image-preview:large">
 <meta name="theme-color" content="#4d6bfe">
@@ -16,8 +16,8 @@
 
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="dsh-smooth-stream">
-<meta property="og:title" content="How dsh-smooth-stream renders and follows streaming replies">
-<meta property="og:description" content="Adaptive reveal pressure, a continuous spring, and a benchmark you can run locally.">
+<meta property="og:title" content="How dsh-smooth-stream renders and follows streaming replies — zero-reflow follow, zero-jank reveal">
+<meta property="og:description" content="Adaptive reveal pressure, a continuous spring, a zero-reflow compositor-transform follow, and a benchmark you can run locally.">
 <meta property="og:url" content="https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html">
 <meta property="og:image" content="https://laplace-bit.github.io/dsh-smooth-stream/og-image.jpg">
 <meta property="og:image:width" content="1200">
@@ -39,11 +39,31 @@
   "description": "A reproducible look at the adaptive reveal queue and time-based spring used by dsh-smooth-stream.",
   "url": "https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html",
   "datePublished": "2026-08-20",
-  "dateModified": "2026-08-20",
+  "dateModified": "2026-08-31",
   "inLanguage": ["en", "zh-CN"],
   "author": { "@type": "Person", "name": "Laplace-bit", "url": "https://github.com/Laplace-bit" },
-  "about": { "@type": "SoftwareApplication", "name": "dsh-smooth-stream", "softwareVersion": "0.3.4" },
+  "about": { "@type": "SoftwareApplication", "name": "dsh-smooth-stream", "softwareVersion": "0.4.1" },
   "isAccessibleForFree": true
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "dsh-smooth-stream",
+      "item": "https://laplace-bit.github.io/dsh-smooth-stream/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "How streaming motion works",
+      "item": "https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html"
+    }
+  ]
 }
 </script>
 
@@ -119,14 +139,29 @@ footer{border-top:1px solid var(--line);padding:24px 0 40px;color:var(--muted);f
 </section>
 
 <section>
+<h2>4. Why the follow is zero-reflow</h2>
+<p>The follower never writes <code>top</code>, <code>left</code>, <code>width</code>, or <code>scrollTop</code>-style layout properties during streaming. It compensates paint position with a single compositor <code>transform</code> (warmed up with <code>will-change</code>) on each outermost message surface, so no frame during a follow touches the layout tree — the grow/paint axis is <b>0-reflow</b>, and the only repaint is the newly revealed text itself.</p>
+<p>Per-frame visual displacement is also bounded: wrap compensation is rate-limited to a fixed step (<code>FOLLOW_PAINT_SHIFT_MAX_STEP_PX</code>) instead of one full line in a single paint, so a 24&thinsp;px wrap lands as ≤8px per frame. This is what makes a fast stream read as continuous motion rather than a page hopping one line at a time.</p>
+<p>The checked-in browser gates reproduce the feel end-to-end:</p>
+<table>
+<thead><tr><th>Gate</th><th>Command</th><th>Passing result</th></tr></thead>
+<tbody>
+<tr><td>Render audit (5 streaming scenarios)</td><td><code>node scripts/run-render-audit.mjs</code></td><td>10/10 clean, zero displacement regressions</td></tr>
+<tr><td>Overflow / rebound</td><td><code>node scripts/verify-overflow.mjs --runs 3</code></td><td>3/3 no over-scroll, no rebound</td></tr>
+<tr><td>Tail smoothing</td><td><code>node scripts/probe-tailbob.mjs 1200 20</code></td><td>frame step ≤30px, 7-frame amplitude ≤32px</td></tr>
+</tbody>
+</table>
+<p class="zh">跟随路径只写合成层 transform，主线程布局零参与；换行补偿单帧限幅 ≤8px，高速流也零跳帧。以上闸门均可在仓库内一键复现。</p>
+</section>
+
+<section>
 <h2>Reproduce the benchmark</h2>
 <pre><code>git clone https://github.com/Laplace-bit/dsh-smooth-stream.git
 cd dsh-smooth-stream
 pnpm install
 pnpm benchmark</code></pre>
-<p>The checked-in result was recorded on Apple M5, Node.js v22.22.1, macOS arm64. The median of seven measured runs was 47.3 million queue decisions/s and 89.3 million spring decisions/s after two warm-up runs.</p>
-<p class="callout"><b>Scope:</b> this microbenchmark measures pure TypeScript decisions only. It does not measure React commits, Markdown parsing, browser layout, paint, device thermals, or network time. Those require a Performance trace in a real DeepSeek Harness session. The high operation counts only show that the two math functions are not the likely UI bottleneck.</p>
-<p>Raw result: <a href="https://github.com/Laplace-bit/dsh-smooth-stream/blob/main/benchmarks/results/2026-08-20-apple-m5.json">2026-08-20-apple-m5.json</a>. Benchmark source: <a href="https://github.com/Laplace-bit/dsh-smooth-stream/blob/main/benchmarks/stream-engine.ts">stream-engine.ts</a>.</p>
+<p>Run <code>pnpm benchmark</code> to regenerate the numbers on your machine (the source is <a href="https://github.com/Laplace-bit/dsh-smooth-stream/blob/main/benchmarks/stream-engine.ts">stream-engine.ts</a>). A reference recording on Apple M5, Node.js v22.22.1, macOS arm64 measured ~47.3 million queue decisions/s and ~89.3 million spring decisions/s as the median of seven runs after two warm-ups.</p>
+<p class="callout"><b>Scope:</b> this microbenchmark measures pure TypeScript decisions only. It does not measure React commits, Markdown parsing, browser layout, paint, device thermals, or network time. Those require a Performance trace in a real DeepSeek Harness session. The high operation counts only show that the two math functions are not the likely UI bottleneck; the browser-level gates above cover the end-to-end feel.</p>
 </section>
 
 <section>

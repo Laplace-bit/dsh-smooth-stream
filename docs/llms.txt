@@ -1,26 +1,41 @@
 # dsh-smooth-stream
 
-> Fluid streaming rendering and silky scrolling for DeepSeek Harness replies.
-> 为 DeepSeek Harness 回复带来流畅渲染和丝滑滚动。
+> A silky-smooth streaming renderer for AI chat UIs: zero-reflow follow, zero-jank reveal, level-free scrolling.
+> 为 AI 聊天界面打造的丝滑流式渲染引擎：0 重排跟随、0 跳变揭示、无级滚动。
 
 ## Summary
 
-dsh-smooth-stream brings fluid streaming rendering and silky scrolling to the DeepSeek Harness (dsh) Web UI. Text, Markdown, code blocks, tables, and tool results appear as the reply arrives; as content grows, the page follows along in one continuous visual rhythm. The project is independently maintained and MIT-licensed.
+dsh-smooth-stream is a streaming rendering plugin for the DeepSeek Harness (`dsh`) Web UI. Model output is chunked and bursty; this plugin splits rendering and scrolling into two engines that each integrate continuous state once per frame, so AI streaming output appears as continuous motion instead of paragraph pops or per-frame reflow judder. The follow path writes only a compositor `transform` (never layout properties) — **0-reflow follow** — and wrap compensation is rate-limited to ≤8px per frame — **0-jank reveal** — with a fixed-velocity completion drain. Core ESM output is ~4.7 kB gzip. Independently maintained and MIT-licensed; not affiliated with DeepSeek.
 
 ## Key facts
 
 - Name: dsh-smooth-stream
-- Latest version: 0.3.4
+- Latest version: 0.4.1
 - License: MIT
 - Author: Laplace-bit
 - Affiliation: independently maintained; not affiliated with DeepSeek
 - Platform: DeepSeek Harness (dsh) Web UI
 - Programming language: TypeScript / React
+- Positioning: zero-reflow (0重排) follow, zero-jank (0跳变) reveal, level-free (无级) scrolling
 - Repository: https://github.com/Laplace-bit/dsh-smooth-stream
 - Homepage: https://laplace-bit.github.io/dsh-smooth-stream/
 - Installation guide: https://laplace-bit.github.io/dsh-smooth-stream/install.html
 - Technical article and reproducible algorithm benchmark: https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html
 - npm: https://www.npmjs.com/package/dsh-smooth-stream
+
+## How it stays smooth
+
+- **0-reflow follow.** Follow writes only a compositor `transform` with `will-change`; no `top/left/width` writes, so the layout tree never reflows during follow.
+- **0-jank reveal.** Reveal speed adapts to queue pressure; wrap compensation is rate-limited to ≤8px per frame (`FOLLOW_PAINT_SHIFT_MAX_STEP_PX`), so fast streams never jump.
+- **0-burst completion.** The drain of finished turns runs at one fixed velocity — no final lurch.
+- **Level-free scrolling.** A damped spring (stiffness/damping/mass ≈ 130/24/1) integrates position per frame; 60 Hz and 120 Hz settle in near-identical wall-clock time.
+- **Accessibility.** Yields to `prefers-reduced-motion`; reveal pauses below 30 fps while the reply is off-screen.
+
+## Reproducible gates
+
+- Render audit (`node scripts/run-render-audit.mjs`): 10/10 conversations clean.
+- Overflow gate (`node scripts/verify-overflow.mjs --runs 3`): 3/3 no over-scroll, no rebound.
+- Tail smoothing (`node scripts/probe-tailbob.mjs 1200 20`): single-frame ≤30px, 7-frame amplitude ≤32px.
 
 ## Install
 
@@ -36,24 +51,7 @@ If `dsh` is already on PATH:
 dsh plugin --profile web add dsh-smooth-stream
 ```
 
-Start the UI:
-
-```sh
-pnpm dsh web
-```
-
-Host log should show:
-
-```
-[dsh-smooth-stream] plugin loaded!
-```
-
-## Features
-
-- Fluid rendering: text appears as it arrives while Markdown structure stays active.
-- Silky scrolling: growing content follows one continuous scroll path.
-- Consistent transitions: line wraps, code blocks, tables, and tool results share the same motion treatment.
-- Adaptive cadence: reveal speed responds to arrival rate and pending content.
+The npm package ships prebuilt `lib/` (no pnpm ≥10 build-script allowance needed). Start the UI with `pnpm dsh web`; the Host log shows `[dsh-smooth-stream] plugin loaded!`.
 
 ## FAQ
 
@@ -61,13 +59,17 @@ Host log should show:
 
 No. It is independently maintained, MIT-licensed software for the DeepSeek Harness (dsh) Web UI and is not affiliated with DeepSeek.
 
+### Is "0 reflow" literal?
+
+It refers to the animation path: the follow writes only a compositor `transform` and never reads or writes layout properties, so the follow phase causes no reflow/repaint storm. Text reveal still writes character increments (the one layout that new content genuinely needs) but at a rate-limited cadence that keeps single-frame displacement ≤8px.
+
 ### How do I install it?
 
 Run `pnpm dsh plugin --profile web add dsh-smooth-stream` from a DeepSeek Harness source checkout, or `dsh plugin --profile web add dsh-smooth-stream` if `dsh` is already on PATH.
 
 ### Can I install it from npm?
 
-Yes. `dsh-smooth-stream` is published to npm. The npm package ships prebuilt `lib/`, so no pnpm >=10 build-script allowance is needed.
+Yes. `dsh-smooth-stream` is published to npm; `dsh plugin --profile web add dsh-smooth-stream` installs the prebuilt package.
 
 ### Does it respect prefers-reduced-motion?
 
