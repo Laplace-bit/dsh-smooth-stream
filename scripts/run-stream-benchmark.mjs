@@ -1,4 +1,5 @@
 import { build } from 'esbuild'
+import { resolve } from 'node:path'
 
 const result = await build({
   bundle: true,
@@ -7,6 +8,14 @@ const result = await build({
   platform: 'node',
   target: 'node22',
   write: false,
+  plugins: [{
+    name: 'benchmark-browser-runtime-shim',
+    setup(pluginBuild) {
+      pluginBuild.onResolve({ filter: /debugRuntime\.ts$/ }, () => ({
+        path: resolve('benchmarks/debug-runtime-shim.ts'),
+      }))
+    },
+  }],
 })
 
 const output = result.outputFiles?.[0]

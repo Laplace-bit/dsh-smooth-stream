@@ -81,20 +81,21 @@
   "scripts": {
     "benchmark": "node scripts/run-stream-benchmark.mjs",
     "build": "tsdown",
-    "build:repro": "esbuild repro/main.tsx --bundle --format=esm --platform=browser --loader:.css=local-css --outfile=repro/bundle.js",
+    "build:repro": "esbuild repro/main.tsx --bundle --format=esm --platform=browser --loader:.css=local-css --alias:@deepseek-ai/dsh-client-runtime=./repro/shims/client-runtime.ts --alias:@deepseek-ai/dsh-client-runtime/client=./repro/shims/client-runtime.ts --alias:@deepseek-ai/dsh-client-ui-primitives=./repro/shims/primitives.tsx --outfile=repro/bundle.js",
     "prepare": "tsdown",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --pretty false"
+    "typecheck": "tsc -p tsconfig.json --pretty false",
+    "test:smooth": "node scripts/probe-tailbob.mjs 1200 20 && node scripts/verify-overflow.mjs --runs 3"
   },
   "dependencies": {
     "@deepseek-ai/dsh-settings": "0.1.0-rc.6"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-connection": "*",
     "@deepseek-ai/dsh-client-locale": "*",
     "@deepseek-ai/dsh-client-runtime": "*",
     "@deepseek-ai/dsh-client-ui-attachment": "*",
-    "@deepseek-ai/dsh-client-connection": "*",
     "@deepseek-ai/dsh-client-ui-conversation": "*",
     "@deepseek-ai/dsh-client-ui-primitives": "*",
     "@deepseek-ai/dsh-client-ui-settings": "*",
@@ -138,10 +139,10 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-client-connection": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-locale": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-attachment": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-connection": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-conversation": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-settings": "0.1.0-rc.6",
@@ -157,15 +158,11 @@
     "esbuild": "^0.28.2",
     "jsdom": "^26.1.0",
     "lightningcss": "^1.30.1",
+    "playwright-core": "^1.62.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tsdown": "^0.22.2",
     "typescript": "^5.9.2",
     "vitest": "^4.1.8"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
   }
 }

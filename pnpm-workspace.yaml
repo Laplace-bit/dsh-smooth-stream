@@ -1,0 +1,4 @@
+# pnpm 11 blocks dependency build scripts until they are explicitly
+# approved here; esbuild's postinstall places its native platform binary.
+allowBuilds:
+  esbuild: true

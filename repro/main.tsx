@@ -8,6 +8,7 @@ import { createRoot } from 'react-dom/client'
 import { FollowHost } from '../src/client/FollowHost.tsx'
 import { useSmoothStreamContent } from '../src/client/useSmoothStreamContent.ts'
 import { useFpsGuard } from '../src/client/useFpsGuard.ts'
+import { notifyFollowCommit } from '../src/client/teleprompterGlide.ts'
 
 /* ---------------- host ChatView scroll contract (verbatim port) ---------- */
 
@@ -25,6 +26,7 @@ function AssistantStream({ text, streaming, renderCostMs }: { text: string; stre
   const { ref: guardRef, shouldHoldBack } = useFpsGuard(streaming)
   const [typing, setTyping] = useState(streaming)
   const speedCpsRef = useRef(35)
+  const revealedCharsRef = useRef(0)
   const revealScaleRef = useRef(1)
   const displayed = useSmoothStreamContent(text, {
     enabled: typing,
@@ -32,7 +34,9 @@ function AssistantStream({ text, streaming, renderCostMs }: { text: string; stre
     preset: 'balanced',
     shouldHoldBack,
     speedCpsRef,
+    revealedCharsRef,
     revealScaleRef,
+    onRevealCommit: () => { notifyFollowCommit(document.querySelector('[data-conversation-scroll]')) },
   })
   displayedLenRef.current = displayed.length
   useEffect(() => {
@@ -53,6 +57,7 @@ function AssistantStream({ text, streaming, renderCostMs }: { text: string; stre
         active={typing}
         predictive={streaming}
         speedCpsRef={speedCpsRef}
+        revealedCharsRef={revealedCharsRef}
         revealScaleRef={revealScaleRef}
       >
         <div

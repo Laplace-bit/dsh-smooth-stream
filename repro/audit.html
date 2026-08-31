@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-smooth-stream 收尾渲染审计</title>
+<link rel="stylesheet" href="./audit.bundle.css" />
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #1b1f27;
+    --paper: #ffffff;
+    --line: #e4e7ec;
+    --soft: #f5f6f8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--paper); color: var(--ink); }
+  #app { height: 100%; }
+  .root { height: 100%; display: flex; flex-direction: column; }
+
+  .scrollBody {
+    position: relative;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-gutter: stable;
+  }
+  /* The host reserves the composer band inside the scrollport so the flow
+     never slides beneath the fixed chrome (ChatView does the same). */
+  .scroll { min-height: 100%; display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 24px; }
+  .column {
+    width: min(720px, 92%);
+    margin: 0 auto;
+    padding: 24px 0 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    font: 16px/1.75 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+
+  .msg.user {
+    align-self: flex-end;
+    max-width: 80%;
+    background: var(--soft);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px 14px;
+  }
+  .msg.workSeat {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fafbfc;
+    padding: 10px 14px;
+  }
+  .workHead { font-size: 12px; color: #667085; margin-bottom: 4px; font-family: ui-monospace, monospace; }
+  .workBody { font-size: 14px; line-height: 1.7; color: #344054; }
+
+  .msg.assistant { align-self: stretch; }
+  .body { display: flex; flex-direction: column; gap: 10px; }
+  .md p { margin: 0 0 10px; }
+  .codeShell { margin: 0 0 10px; }
+  .codeBar { background: #eef0f3; border-radius: 8px 8px 0 0; }
+  .codeBlock {
+    margin: 0;
+    background: #f6f8fa;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap;
+  }
+
+  .thinkGlyph { display: inline-block; width: 14px; height: 14px; background: currentColor; opacity: 0.35; border-radius: 3px; }
+  .thinkBody { font-size: 15px; color: #475467; white-space: pre-wrap; }
+
+  .statusRow { padding: 6px 0 2px; color: #667085; font-size: 14px; }
+  .dots::after { content: "…"; }
+
+  .processedRow {
+    align-self: flex-start;
+    border: 1px solid var(--line);
+    background: var(--soft);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 13px;
+    color: #475467;
+    cursor: pointer;
+  }
+
+  /* Production hosts mount the composer seat as fixed chrome overlapping the
+     scrollport's bottom edge, not as flow content after the transcript. */
+  .composerSeat {
+    border-top: 1px solid var(--line);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--paper);
+  }
+  .composerSeat input {
+    flex: 1;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font: inherit;
+  }
+  .composerSeat button {
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    background: #1b1f27;
+    color: #fff;
+    font: inherit;
+  }
+  .toBottomBtn {
+    position: absolute;
+    right: 18px;
+    bottom: 74px;
+    border: 1px solid var(--line);
+    background: var(--paper);
+    border-radius: 999px;
+    padding: 6px 14px;
+    box-shadow: 0 2px 8px rgba(16, 24, 40, 0.12);
+    font: inherit;
+    font-size: 13px;
+  }
+
+  /* The tail probe is a zero-size marker; other probes sit on real content. */
+  .tailProbe { height: 0; overflow: visible; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script type="module" src="./audit.bundle.js"></script>
+</body>
+</html>
