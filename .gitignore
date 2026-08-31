@@ -3,5 +3,16 @@ lib/
 *.tsbuildinfo
 .DS_Store
 .idea/
+.agents/
+.claude/
 .vscode/
 *.log
+
+# Generated outputs and agent-workflow files (not sources)
+repro/bundle.js
+repro/bundle.css
+repro/audit.bundle.js
+repro/audit.bundle.css
+benchmarks/results/
+.workbuddy/
+skills-lock.json
