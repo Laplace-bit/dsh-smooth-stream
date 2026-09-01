@@ -1,406 +1,168 @@
-# dsh-smooth-stream Growth / Launch Kit
+# dsh-smooth-stream 发布与传播资料包 (Launch & Growth Kit)
 
-免费增长黑客资料包。这里的文案可以直接复制到各平台发布。发布前请确认平台规则、账号状态和最新版本号。
+> 去除 AI 模板套话与夸张噱头，以扎实的机械力学、物理积分与工程细节打动开发者。
 
 - 当前版本：0.4.1
 - 许可证：MIT
 - 安装命令：`pnpm dsh plugin --profile web add dsh-smooth-stream`
-- 主页：<https://laplace-bit.github.io/dsh-smooth-stream/>
-- GitHub：<https://github.com/Laplace-bit/dsh-smooth-stream>
-- npm：<https://www.npmjs.com/package/dsh-smooth-stream>
+- 项目主页：<https://laplace-bit.github.io/dsh-smooth-stream/>
+- 源码仓库：<https://github.com/Laplace-bit/dsh-smooth-stream>
 
-## 核心文案
+---
 
-### 英文一句话
+## 核心定位与主张
 
-> Fluid streaming rendering and silky scrolling for DeepSeek Harness: Markdown, code blocks, tables, and tool results flow together naturally.
+### 英文一句话 (One-liner)
+> Physics-based stream rendering and zero-reflow viewport tracking for the DeepSeek Harness Web UI.
 
 ### 中文一句话
+> 模型生成是离散的脉冲，而阅读应当是连续的流动：专为 DeepSeek Harness 打造的二阶弹簧视口追踪与物理级流式渲染引擎。
 
-> 为 DeepSeek Harness 带来流畅渲染和丝滑滚动：文字、Markdown、代码块、表格与工具结果自然衔接。
+### 英文电梯演讲 (Elevator Pitch)
+> LLM output arrives in bursty chunks that cause visual jumps and severe layout thrashing in standard chat UIs. `dsh-smooth-stream` decouples text reveal pacing from viewport motion. By combining fractional character debt integration with a second-order damped spring on the GPU compositor, it turns discontinuous token bursts into a calm, continuous stream with zero reflow during follow.
 
-### 英文长描述
+### 中文核心简介
+> 大模型通过 SSE 产生的是离散突发的分块输出。传统 Web UI 将内容渲染与滚动硬绑定在网络事件上，容易引发视觉撕裂与频繁重排。`dsh-smooth-stream` 将节奏展开与视口追踪解耦为两个动力学状态机，利用分数字符积分与二阶阻尼弹簧（GPU 合成层 Transform），将断续的 Token 脉冲转化为连贯的阅读体验，全程零重排跟随。
 
-> dsh-smooth-stream brings fluid streaming rendering and silky scrolling to the DeepSeek Harness (dsh) Web UI. Text, Markdown, code blocks, tables, and tool results appear as the reply arrives; growing content follows one continuous visual rhythm. It is independently maintained under the MIT license.
+---
 
-### 中文长描述
+## 开发者社区发布文案 (Developer Communities)
 
-> dsh-smooth-stream 为 DeepSeek Harness（dsh）Web UI 带来流畅的流式渲染和丝滑滚动。文字、Markdown、代码块、表格以及工具结果会随着输出自然呈现；内容逐步增长时，页面平稳跟随，整轮回复保持连贯的视觉节奏。项目采用 MIT 许可证独立维护。
+### 1. Hacker News (Show HN)
 
-## SEO 更新要点
+**Title:** Show HN: dsh-smooth-stream – Physics-based stream renderer for DeepSeek Harness Web UI
 
-### Title
-
-```html
-dsh-smooth-stream – DeepSeek Harness 流畅流式渲染与丝滑滚动
-```
-
-### Description
-
-```html
-<meta name="description" content="dsh-smooth-stream 为 DeepSeek Harness Web UI 带来流畅的流式渲染和丝滑滚动：文字、Markdown、代码块、表格与工具结果自然呈现，内容增长时页面平稳跟随。">
-```
-
-### Keywords
-
-```html
-dsh-smooth-stream, dsh plugin, dsh 插件, DeepSeek Harness 插件, DeepSeek Harness, deepseek-harness plugin, 流式渲染, 丝滑滚动, Markdown 流式渲染, fluid streaming, silky scrolling, streaming markdown, code block, tool result, AI chat UI, cordis plugin
-```
-
-### OG / Twitter
-
-```html
-<meta property="og:type" content="website">
-<meta property="og:image:alt" content="dsh-smooth-stream 前后对比：默认流式输出与流式消息渲染。Before/after comparison of default streaming and dsh-smooth-stream rendering.">
-<meta property="og:image:type" content="image/jpeg">
-<meta name="robots" content="index,follow,max-image-preview:large">
-<meta name="theme-color" content="#4d6bfe">
-<link rel="canonical" href="https://laplace-bit.github.io/dsh-smooth-stream/">
-<link rel="alternate" hreflang="zh-CN" href="https://laplace-bit.github.io/dsh-smooth-stream/">
-<link rel="alternate" hreflang="en" href="https://laplace-bit.github.io/dsh-smooth-stream/">
-<link rel="alternate" hreflang="x-default" href="https://laplace-bit.github.io/dsh-smooth-stream/">
-<meta name="twitter:image:alt" content="DeepSeek Harness 流畅流式渲染与丝滑滚动示例。">
-```
-
-### JSON-LD SoftwareApplication
-
-```json
-{
-  "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  "name": "dsh-smooth-stream",
-  "url": "https://laplace-bit.github.io/dsh-smooth-stream/",
-  "description": "Fluid streaming rendering and silky scrolling for the DeepSeek Harness (dsh) Web UI. Text, Markdown, code blocks, tables, and tool results appear as the reply arrives while growing content follows one continuous visual rhythm.",
-  "applicationCategory": "DeveloperApplication",
-  "operatingSystem": "Linux, macOS, Windows",
-  "programmingLanguage": "TypeScript",
-  "softwareVersion": "0.4.1",
-  "isAccessibleForFree": true,
-  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-  "license": "https://spdx.org/licenses/MIT",
-  "author": { "@type": "Person", "name": "Laplace-bit", "url": "https://github.com/Laplace-bit" },
-  "sameAs": [
-    "https://github.com/Laplace-bit/dsh-smooth-stream",
-    "https://www.npmjs.com/package/dsh-smooth-stream",
-    "https://github.com/deepseek-ai/deepseek-harness"
-  ]
-}
-```
-
-## GEO / AI 搜索优化
-
-- `docs/llms.txt` 已提供：<https://laplace-bit.github.io/dsh-smooth-stream/llms.txt>
-- 让 AI 搜索更容易引用的关键事实：
-  - dsh-smooth-stream is free and MIT-licensed.
-  - It is independently maintained for the DeepSeek Harness Web UI.
-  - It is not affiliated with DeepSeek.
-  - Install with `pnpm dsh plugin --profile web add dsh-smooth-stream`.
-  - It supports prefers-reduced-motion and live Markdown rendering.
-
-## 社媒账号资料
-
-### 推荐账号名
-
-- X / Twitter：`@dshsmoothstream`
-- LinkedIn Page：`dsh-smooth-stream`
-- 知乎 / 掘金：`dsh-smooth-stream`
-- B站 / 小红书：`dsh丝滑流式`
-
-### X / Twitter 简介
-
-英文：
-
-> Fluid streaming rendering and silky scrolling for DeepSeek Harness replies. MIT.
-> 🔗 github.com/Laplace-bit/dsh-smooth-stream
-
-中文：
-
-> DeepSeek Harness 流畅流式渲染与丝滑滚动。MIT。
-> 🔗 github.com/Laplace-bit/dsh-smooth-stream
-
-### 第一条推文
-
+**Post:**
 ```text
-dsh-smooth-stream 为 DeepSeek Harness 带来流畅的流式渲染和丝滑滚动：
-• 文字和 Markdown 随输出自然呈现
-• 换行、代码块、表格与工具结果平稳展开
-• 正文、思考过程和工具输出统一过渡
-• 整轮回复保持连贯的视觉节奏
+Hi HN,
 
-安装：
-pnpm dsh plugin --profile web add dsh-smooth-stream
+Most AI chat interfaces handle streaming by brute-force appending incoming chunks to the DOM and resetting `scrollTop` to the bottom on every network tick. When large token bursts, code blocks, or line wraps arrive, this causes abrupt visual jumps, broken easing animations, and continuous layout reflows.
 
-GitHub → https://github.com/Laplace-bit/dsh-smooth-stream
-```
+I built dsh-smooth-stream, an open-source (MIT) plugin for DeepSeek Harness (dsh) that treats streaming text and scrolling as continuous dynamical systems:
 
-## Product Hunt 打榜包
-
-### 名称
-
-`dsh-smooth-stream`
-
-### Tagline
-
-英文：
-
-> Bring fluid streaming rendering and silky scrolling to DeepSeek Harness replies.
-
-中文：
-
-> 为 DeepSeek Harness 回复带来流畅渲染和丝滑滚动。
-
-### Description
-
-```text
-dsh-smooth-stream brings fluid streaming rendering and silky scrolling to the DeepSeek Harness (dsh) Web UI.
-
-Text, Markdown, code blocks, tables, and tool results appear as the reply arrives, while growing content follows one continuous visual rhythm.
-
-Highlights:
-• Fluid streaming rendering
-• Silky scrolling as content grows
-• Markdown, code blocks, tables, and tool results stay connected
-• One consistent motion treatment across the turn
-• Adaptive reveal cadence
-• Independently maintained and MIT-licensed
-
-Install:
-pnpm dsh plugin --profile web add dsh-smooth-stream
-```
-
-### 首条评论
-
-```text
-Hi Product Hunt! 👋
-
-I built dsh-smooth-stream because I use DeepSeek Harness every day and wanted a more fluid streaming experience for long replies.
-
-Text and Markdown appear continuously, while line wraps, code blocks, tables, and tool results move the page along one smooth path.
-
-It is independently maintained and MIT-licensed. I’d love your feedback!
-
-🔗 https://github.com/Laplace-bit/dsh-smooth-stream
-```
-
-### 画廊建议
-
-1. 左右对比 GIF（最重要）
-2. 安装命令截图
-3. 流式中 Markdown/代码渲染截图
-4. 设置里的 “Auto-expand thinking” 开关截图
-5. 项目主页 / GitHub 截图
-
-## Indie Hackers 帖子
-
-### 标题
-
-> I brought fluid streaming rendering and silky scrolling to DeepSeek Harness
-
-### 正文
-
-```text
-I’m building dsh-smooth-stream, a free plugin for fluid streaming rendering in the DeepSeek Harness (dsh) Web UI.
-
-What it provides:
-- Fluid streaming rendering for text and Markdown
-- Zero-reflow scroll follow (compositor transform only — no layout writes)
-- Zero-jank, adaptive reveal and wrap smoothing (single-frame ≤8px)
-- Refresh-rate-independent, level-free scrolling
-- One visual rhythm across text, reasoning, and tools
-
-It is independently maintained and MIT-licensed.
-
-Current version: 0.4.1
-Install: pnpm dsh plugin --profile web add dsh-smooth-stream
-GitHub: https://github.com/Laplace-bit/dsh-smooth-stream
-
-I’d love feedback from other DeepSeek Harness users!
-```
-
-## Hacker News 打榜包
-
-### 标题
-
-> Show HN: dsh-smooth-stream – fluid streaming rendering for DeepSeek Harness
-
-### 首帖
-
-```text
-I brought fluid streaming rendering and silky scrolling to DeepSeek Harness Web UI replies.
-
-Text and Markdown appear continuously, while line wraps, code blocks, tables, and tool results follow one motion path. It also respects prefers-reduced-motion and pauses off-screen updates below 30fps.
-
-Install:
-pnpm dsh plugin --profile web add dsh-smooth-stream
-
-Source:
-https://github.com/Laplace-bit/dsh-smooth-stream
-
-Happy to answer technical questions about the reveal/follow implementation.
-```
-
-### 可能要回答的技术问题
-
-- 为什么不做成 DeepSeek Harness 官方功能？
-- 和默认流式渲染比，性能开销多大？
-- 如何检测“帧率低于 30fps”？
-- 如何实现“Markdown 边流边渲染”？
-- 是否支持其它 LLM Web UI？
-
-## AI 工具目录提交（There’s An AI For That 等）
-
-### 标题
-
-`dsh-smooth-stream`
-
-### 分类
-
-- Developer Tools
-- DeepSeek
-- Open Source
-- AI Chat
-- Web UI
-- Streaming
-
-### 描述
-
-> Fluid streaming rendering and silky scrolling for DeepSeek Harness (dsh) Web UI replies. Text, Markdown, code blocks, tables, and tool results follow one continuous visual rhythm. Independently maintained and MIT-licensed.
-
-### Tags
-
-`DeepSeek, DeepSeek Harness, dsh, streaming, markdown, open source, chat UI, developer tools, typewriter`
-
-## Reddit 帖子包
-
-### 推荐 Subreddit
-
-- r/DeepSeek
-- r/LocalLLaMA
-- r/OpenSource
-- r/webdev
-- r/selfhosted
-
-### r/DeepSeek
-
-```text
-Title: Fluid streaming rendering and silky scrolling for DeepSeek Harness
-
-Body:
-I use DeepSeek Harness a lot, and I wanted its Web UI streaming to feel more fluid through long replies.
-
-So I made a small open-source plugin called dsh-smooth-stream:
-• Fluid streaming rendering
-• Silky scrolling as replies grow
-• Markdown, code blocks, tables, and tool results flow together
-• One visual rhythm across the turn
-• Supports prefers-reduced-motion
+1. Dynamic Pacing Engine: Uses a fractional character debt accumulator to pace text reveal based on backlog queue depth (v = 90 + backlog^1.25 * P). Single-frame visual shift during wraps is capped at <=8px.
+2. 2nd-Order Spring Follower: Uses a sub-stepped damped spring (k=130, c=24, m=1). The real scroll container stays pinned at the bottom while residual visual lag is absorbed by a GPU compositor transform, achieving true zero-reflow tracking.
+3. Closed-Loop Backpressure: When visual lag fills the 72px runway, reveal pacing dynamically slows down to prevent text from outpacing the viewport spring.
+4. Refresh-Rate Parity: Time integration is clamped during main-thread hiccups (dt <= 32ms), producing identical settling dynamics on 60Hz and 120Hz (ProMotion) screens.
 
 Install:
 pnpm dsh plugin --profile web add dsh-smooth-stream
 
 GitHub: https://github.com/Laplace-bit/dsh-smooth-stream
+Deep dive & benchmarks: https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html
 
-It is independently maintained and MIT-licensed. Feedback welcome!
+Would love to hear your feedback on the physics model and browser compositor integration!
 ```
 
-### r/LocalLLaMA
+---
 
+### 2. X / Twitter 线程 (Thread)
+
+**Tweet 1 (Hook & Demo):**
 ```text
-Title: Fluid streaming rendering for DeepSeek Harness Web UI
+LLM output arrives in bursty chunks. Reading it shouldn't feel like a series of visual jolts.
 
-Body:
-For anyone running DeepSeek Harness (dsh), dsh-smooth-stream adds fluid streaming rendering and silky scrolling to the Web UI.
+Introducing dsh-smooth-stream: a physics-based stream renderer & zero-reflow viewport follower for DeepSeek Harness.
 
-I built dsh-smooth-stream, a free MIT plugin that:
-- Displays text continuously as the reply arrives
-- Keeps Markdown active throughout the reply
-- Moves line wraps, code blocks, tables, and tool results along one path
-- Keeps one consistent visual rhythm across the turn
-- Supports prefers-reduced-motion
+• Continuous fractional text pacing
+• 2nd-order damped spring on GPU compositor
+• Zero reflow during follow
 
-Install:
+[Attach compare.gif]
+```
+
+**Tweet 2 (How it works):**
+```text
+Why traditional chat UIs jitter:
+Native smooth scrolling restarts its easing curve on every incoming chunk, leading to sluggish lag. Calling scrollTop=scrollHeight causes layout thrashing.
+
+dsh-smooth-stream decouples text reveal from scrolling:
+1. Pacing engine controls character flow
+2. Spring engine drives GPU transform
+3. Closed-loop backpressure balances both
+```
+
+**Tweet 3 (Link & Install):**
+```text
+Install in DeepSeek Harness:
 pnpm dsh plugin --profile web add dsh-smooth-stream
 
-Source:
-https://github.com/Laplace-bit/dsh-smooth-stream
+📦 Gzip ~4.7 kB | MIT Licensed | 120Hz ProMotion Ready
 
-It is independently maintained and MIT-licensed. Happy to talk about implementation details.
+GitHub: https://github.com/Laplace-bit/dsh-smooth-stream
+Architecture notes: https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html
 ```
 
-### r/OpenSource
+---
 
+### 3. V2EX / 掘金 / 知乎技术讨论帖
+
+**标题：** 大模型流式输出的视觉平滑与零重排跟随实践 —— dsh-smooth-stream 技术解析
+
+**正文要点：**
 ```text
-Title: [OC] dsh-smooth-stream – fluid streaming rendering for DeepSeek Harness Web UI
+在大模型 Web UI 中，大家可能经常遇到两个体验痛点：
+1. 模型突然吐出一大段代码或长段落时，内容猛然蹦出，视线被迫重新定位；
+2. 页面跟随滚动时，由于频繁写入 scrollTop 导致动画不断重置、主线程频繁触发布局重排（Reflow）。
 
-Body:
-I open-sourced a small TypeScript/React plugin for DeepSeek Harness (dsh) Web UI.
+我们针对 DeepSeek Harness Web UI 开源了 dsh-smooth-stream 插件，从渲染物理学的角度重新设计了流式体验：
 
-It makes streaming replies feel much smoother:
-- Fluid streaming rendering
-- Silky scrolling as content grows
-- Line wraps and growing blocks move along one path
-- Text and tool results use the same motion
-- prefers-reduced-motion support
+- 揭示节奏引擎：通过分数字符积压积分动态计算当前帧输出量，将 24~28px 的单帧换行冲击分散至多帧（单帧位移 <=8px）。
+- 二阶阻尼弹簧跟随：基于 k=130, c=24 的阻尼弹簧驱动视口，真实滚动条停驻在底部，视口微调完全由 GPU 合成层 transform 吸收，做到跟随阶段零重排。
+- 闭环背压反馈：当文字生成过快时动态减速，确保内容始终保持在弹性可视范围内。
+- 回合结算收敛：回合结束时自动将思考链与工具调用折叠为极简摘要，保持上下文清爽。
+
+安装方式：
+pnpm dsh plugin --profile web add dsh-smooth-stream
+
+源码与架构文档：
+https://github.com/Laplace-bit/dsh-smooth-stream
+```
+
+---
+
+### 4. Reddit (r/LocalLLaMA & r/webdev)
+
+**Title:** A physics-based approach to LLM stream rendering and zero-reflow scrolling (dsh-smooth-stream)
+
+**Body:**
+```text
+Hey everyone,
+
+When streaming tokens from local or API-based LLMs, standard chat interfaces often suffer from visual jumping whenever new lines, markdown tables, or code fences land.
+
+I open-sourced dsh-smooth-stream (MIT) for DeepSeek Harness to explore a physics-grounded solution:
+
+- Decoupled Pacing: Converts bursty SSE chunks into a smooth character flow using an adaptive queue accumulator.
+- Compositor-only Follow: Uses sub-stepped spring physics (k=130, damping=24) applied purely via CSS transform on the message wrapper. The layout engine is never triggered during viewport follow.
+- ProMotion 120Hz / 60Hz wall-clock parity with stall clamping.
+- Zero extra dependencies, ~4.7 kB gzipped.
 
 Repo: https://github.com/Laplace-bit/dsh-smooth-stream
-Install: pnpm dsh plugin --profile web add dsh-smooth-stream
+Interactive demo & math breakdown: https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html
 
-Any feedback is appreciated!
+Feedback and discussions on browser compositor tricks are very welcome!
 ```
 
-### 通用回复
+---
 
+### 5. Product Hunt 打榜文案
+
+- **Product Name**: `dsh-smooth-stream`
+- **Tagline**: Physics-based stream rendering & zero-reflow viewport tracking for DeepSeek Harness
+- **Pricing**: Free / Open Source (MIT)
+
+**Maker First Comment:**
 ```text
-Thanks! The project is open source and MIT-licensed. If you hit any issue, feel free to open a GitHub issue:
-https://github.com/Laplace-bit/dsh-smooth-stream/issues
+Hey Product Hunt! 👋
+
+When reading long-form AI generations, abrupt token bursts and jumpy viewport scrolling create subtle yet real cognitive fatigue.
+
+We built dsh-smooth-stream to make reading AI responses feel as continuous and natural as reading a teleprompter:
+1. Dynamic character reveal queue that adapts to backlog pressure
+2. Second-order spring physics running on the GPU compositor (0 layout reflows)
+3. Automatic turn folding for thinking processes & tool invocations
+
+It’s completely open source and takes one command to install in DeepSeek Harness. Would love your feedback!
 ```
 
-## Quora 回答包
-
-### 建议去回答的问题
-
-- How do I improve DeepSeek Web UI streaming experience?
-- What are the best DeepSeek Harness plugins?
-- How to make AI streaming responses look smoother?
-- Is DeepSeek Harness good for local LLM development?
-- How to install plugins in DeepSeek Harness?
-
-### 回答模板
-
-```text
-If you’re using DeepSeek Harness (dsh) Web UI, dsh-smooth-stream adds fluid rendering and silky scrolling to streaming replies.
-
-One open-source option is dsh-smooth-stream. It brings:
-- fluid streaming rendering,
-- silky scrolling as content grows,
-- Markdown, code blocks, tables, and tool results flowing together,
-- one consistent visual rhythm across the turn,
-- prefers-reduced-motion support.
-
-Install it with:
-
-pnpm dsh plugin --profile web add dsh-smooth-stream
-
-Source:
-https://github.com/Laplace-bit/dsh-smooth-stream
-
-It is independently maintained and MIT-licensed.
-```
-
-## 第一周发布日历
-
-- 第 1 天：GitHub 仓库 final polish；发布 X/Twitter 第一条；发布 LinkedIn。
-- 第 2 天：提交 Product Hunt；发 r/DeepSeek。
-- 第 3 天：发布 Hacker News Show HN；发 Indie Hackers。
-- 第 4 天：提交 There’s An AI For That 等目录；发 r/LocalLLaMA。
-- 第 5 天：发布掘金/知乎教程；发布 dev.to/Medium 教程。
-- 第 6 天：回复所有评论；更新 README 增加用户反馈/截图。
-- 第 7 天：复盘 stars、npm downloads、PH votes、HN comments、site traffic；准备第二轮社媒素材。
-
-## 需要人工完成的部分
-
-- 注册/管理社媒账号。
-- 在 Product Hunt / Hacker News / Indie Hackers / Reddit / Quora 发布内容。
-- 提交到需要登录/验证的 AI 工具目录。
-- Google Search Console / Bing Webmaster 域名验证。
-- 长期回复评论和社区互动。
