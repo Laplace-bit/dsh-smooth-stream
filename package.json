@@ -1,6 +1,6 @@
 {
   "name": "dsh-smooth-stream",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Fluid streaming rendering and silky scrolling for DeepSeek Harness replies, including Markdown, code blocks, tables, and tool results.",
   "license": "MIT",
   "type": "module",
@@ -88,9 +88,6 @@
     "test:smooth": "node scripts/probe-tailbob.mjs 1200 20 && node scripts/verify-overflow.mjs --runs 3",
     "probe:overlap": "node scripts/probe-overlap.mjs"
   },
-  "dependencies": {
-    "@deepseek-ai/dsh-settings": "0.1.0-rc.6"
-  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-connection": "*",
@@ -103,6 +100,7 @@
     "@deepseek-ai/dsh-client-ui-settings-plugins": "*",
     "@deepseek-ai/dsh-client-ui-slots": "*",
     "@deepseek-ai/dsh-host-webserver": "*",
+    "@deepseek-ai/dsh-settings": "*",
     "@deepseek-ai/schemastery": "*",
     "react": "^18.2.0"
   },
@@ -143,6 +141,7 @@
     "@deepseek-ai/dsh-client-connection": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-locale": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-store": "0.1.2-alpha.3",
     "@deepseek-ai/dsh-client-ui-attachment": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-conversation": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.6",

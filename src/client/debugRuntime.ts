@@ -6,7 +6,7 @@
  * while panel edits are staged through the settings-card controller.
  */
 
-import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { createSnapshotStore, type SnapshotStore } from './clientStore.ts'
 import {
   DEFAULT_STREAM_DEBUG_TUNING,
   type StreamDebugTuning,

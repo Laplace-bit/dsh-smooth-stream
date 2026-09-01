@@ -2,3 +2,5 @@
 # approved here; esbuild's postinstall places its native platform binary.
 allowBuilds:
   esbuild: true
+minimumReleaseAgeExclude:
+  - '@deepseek-ai/dsh-client-store@0.1.2-alpha.3'

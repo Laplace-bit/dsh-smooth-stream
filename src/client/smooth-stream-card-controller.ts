@@ -1,6 +1,6 @@
 /** Staged form state for the plugin-owned smooth-stream settings RPC. */
 
-import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { createSnapshotStore, type SnapshotStore } from './clientStore.ts'
 import {
   DEFAULT_STREAM_DEBUG_TUNING,
   DEFAULT_STREAM_SETTINGS,
