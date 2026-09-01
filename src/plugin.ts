@@ -1,7 +1,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+// Type-only: erased at runtime, so the host entry never link-fails on kernels
+// whose dsh-settings no longer ships the value-side helper (issue #17).
+import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import Schema from '@deepseek-ai/schemastery'
 import { DEFAULT_STREAM_CONFIG, type StreamConfig } from './config.ts'
 import { injectStreamConfig } from './boot-config.ts'
@@ -93,8 +95,14 @@ export function apply(ctx: Context, config: Config): void {
   // the durable provider as the authority, but expose this one schema through
   // the plugin's own loopback-only connection channel instead.
   ctx.inject(['settings'], (settingsCtx) => {
+    // 0.1.2 kernels dropped the `settingsNamespace()` helper — a validating
+    // identity on ≤ 0.1.1 — and take the raw string, so the rc-era brand is
+    // reproduced locally instead of statically importing a removed symbol.
+    // The namespace is a compile-time constant matching the kernel's
+    // /^[a-z][a-z0-9-]*$/ pattern.
+    const settingsNamespace = STREAM_SETTINGS_NS as SettingsNamespace
     const scope = settingsCtx.settings.register(
-      settingsNamespace(STREAM_SETTINGS_NS),
+      settingsNamespace,
       StreamSettingsSchema,
       { applies: 'live' },
     )
