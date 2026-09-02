@@ -702,6 +702,24 @@ function ownedBottomSpaceOf(port: HTMLElement): number {
   return runwayOffsetOf(port) + flowPadOf(port)
 }
 
+/**
+ * Completion-window diagnostics. Armed when a follower hands off to its
+ * settle loop; every engine decision and every externally-written scroll
+ * position inside the window prints one compact console line, so a live
+ * host session can be diffed against the lab without a debugger.
+ */
+let followTraceUntilMs = 0
+function traceActive(): boolean {
+  return performance.now() < followTraceUntilMs
+}
+function followTrace(event: string, detail: Record<string, number | string | boolean>): void {
+  if (!traceActive()) return
+  console.log(`[dsh-follow] ${event}`, JSON.stringify(detail))
+}
+function hostShOf(port: HTMLElement): number {
+  return port.scrollHeight
+}
+
 function invalidatePaintLimit(port: HTMLElement): void {
   followPaintLimits.delete(port)
 }
@@ -933,6 +951,13 @@ function safeShiftLimit(
 }
 
 function setFollowScrollTop(port: HTMLElement, nextTop: number): void {
+  const ledger = followScrollLedgers.get(port)
+  // Someone else wrote scrollTop since our last write (host floor-snap,
+  // browser clamp, reader): surface it — a fight between the host's own
+  // follow controller and this engine is the completion-jitter suspect.
+  if (ledger !== undefined && traceActive() && Math.abs(port.scrollTop - ledger) > 1) {
+    followTrace('external-scroll', { from: Math.round(port.scrollTop), to: Math.round(nextTop), ledger: Math.round(ledger) })
+  }
   if (Math.abs(port.scrollTop - nextTop) > 0.01) port.scrollTop = nextTop
   followScrollLedgers.set(port, port.scrollTop)
   const ownedTop = String(port.scrollTop)
@@ -1138,6 +1163,8 @@ function holdCompositorAtRest(element: HTMLElement): void {
 
 /** Remove equal offsets, land on the floor, then retire the compositor quietly. */
 function finishAtNaturalFloor(port: HTMLElement, retainCompositor = true): void {
+  followTraceUntilMs = Math.max(followTraceUntilMs, performance.now() + 10000)
+  followTrace('finish-enter', { sh: hostShOf(port), st: Math.round(port.scrollTop), pad: Math.round(flowPadOf(port)), retain: retainCompositor })
   const surfaces = shiftSurfacesOf(port)
   const status = turnStatusOf(port)
   if (!retainCompositor) {
@@ -1375,8 +1402,26 @@ export function useConversationFollow(
      * which observer sees it first. `-1` until the first owned observation.
      */
     let guardAnchorScreen: number | null = null
+    let settleRetiring = false
     const restoreBeforePaint = (): void => {
       if (!following || port === null || !isLeader(port)) return
+      // HOST COMPLETION COMMITS under the pin must be corrected in THIS
+      // pre-paint task: the settle loop's rAF guard runs after the host's own
+      // follow effects, so a cascade commit (status swap, tail mount) would
+      // otherwise paint one frame pinned to the sunk floor. The screen-space
+      // anchor hold is shared with the settle loop via guardAnchorScreen; the
+      // retiring glide is engine motion and stands down.
+      if (!settleRetiring && guardAnchorScreen !== null) {
+        const tailNow = shiftSurfacesOf(port).at(-1) ?? port
+        const anchorScreen = tailNow.getBoundingClientRect().top
+        const screenDelta = anchorScreen - guardAnchorScreen
+        if (screenDelta > 0.5) {
+          const headroom = Math.max(0, FOLLOW_SETTLE_PAD_CAP_PX - flowPadOf(port))
+          setFlowPad(port, flowPadOf(port) + Math.min(screenDelta, headroom))
+          if (pruneDeadRunway(port)) reservePx = 0
+        }
+        guardAnchorScreen = anchorScreen
+      }
       // A reveal commit changes the measured tail, not the fixed chrome. Keep
       // the paint-limit TTL intact here; ResizeObserver and viewport/chrome
       // changes invalidate it when the cached geometry is no longer valid.
@@ -1870,6 +1915,8 @@ export function useConversationFollow(
       // measure the extent against it):
       let settlePadPx = 0
       let settleQuietMs = 0
+      let settleKidsSig = ''
+      let settleSig = ''
       const lagBeforeCompletionPaint = Math.max(
         0,
         host.scrollHeight - animatedH - runwayOffsetOf(host),
@@ -1885,6 +1932,8 @@ export function useConversationFollow(
         // fast-finishing here would freeze it in place as visible bottom gap.
         && flowPadOf(host) <= FOLLOW_SETTLE_EPSILON_PX
       ) {
+        followTraceUntilMs = Math.max(followTraceUntilMs, performance.now() + 10000)
+        followTrace('fast-gate', { sh: host.scrollHeight, st: Math.round(host.scrollTop), pad: Math.round(flowPadOf(host)) })
         finishAtNaturalFloor(host, !startedAsEntrance)
         followLeaders.delete(host)
         releaseRevealScale()
@@ -1901,8 +1950,10 @@ export function useConversationFollow(
       // pad below the new surface before the first settled paint, or the
       // floor sinks and the pinned transcript slams down with the release
       // already done.
+      followTraceUntilMs = performance.now() + 15000
       const deadRunway = followRunways.get(host)
       if (deadRunway !== undefined && deadRunway.offset > 0.5 && !deadRunway.element.isConnected) {
+        followTrace('cleanup-dead-margin', { sh: host.scrollHeight, lost: Math.round(deadRunway.offset), padBefore: Math.round(flowPadOf(host)) })
         setFlowPad(host, flowPadOf(host) + deadRunway.offset)
         if (pruneDeadRunway(host)) reservePx = 0
       }
@@ -2006,9 +2057,20 @@ export function useConversationFollow(
         const anchorScreen = tailSurface.getBoundingClientRect().top
         if (guardAnchorScreen === null) guardAnchorScreen = anchorScreen
         const screenDelta = anchorScreen - guardAnchorScreen
+        // Which host row moved: diff the flow children's heights each frame.
+        const flowEl = flowElementOf(host)
+        const kidHeights = flowEl
+          ? [...flowEl.children].map(c => `${(c.className || '').toString().split(' ')[0]?.slice(0, 18) ?? ''}:${Math.round(c.getBoundingClientRect().height)}`)
+          : []
+        if (traceActive() && kidHeights.join('|') !== settleKidsSig) {
+          followTrace('host-rows', { kids: kidHeights.join(' '), st: Math.round(host.scrollTop) })
+          settleKidsSig = kidHeights.join('|')
+        }
         if (!settleRetiring && screenDelta > 0.5) {
           const headroom = Math.max(0, FOLLOW_SETTLE_PAD_CAP_PX - flowPadOf(host))
-          setFlowPad(host, flowPadOf(host) + Math.min(screenDelta, headroom))
+          const granted = Math.min(screenDelta, headroom)
+          followTrace('anchor-push', { screenDelta: Math.round(screenDelta), granted: Math.round(granted), st: Math.round(host.scrollTop) })
+          setFlowPad(host, flowPadOf(host) + granted)
           if (pruneDeadRunway(host)) reservePx = 0
         }
         settleQuietMs = !settleRetiring && Math.abs(screenDelta) <= 0.5 ? settleQuietMs + dt : 0
@@ -2053,6 +2115,7 @@ export function useConversationFollow(
           && settleQuietMs >= FOLLOW_SETTLE_QUIET_MS
           && flowPadOf(host) > FOLLOW_SETTLE_EPSILON_PX
         ) {
+          followTrace('retire-start', { pad: Math.round(flowPadOf(host)), sh: host.scrollHeight, st: Math.round(host.scrollTop) })
           settleRetiring = true
         }
         if (settleRetiring) {
@@ -2074,6 +2137,7 @@ export function useConversationFollow(
           && flowPadOf(host) <= FOLLOW_SETTLE_EPSILON_PX
           && settleQuietMs >= FOLLOW_SETTLE_QUIET_MS
         ) {
+          followTrace('finish', { st: Math.round(host.scrollTop), sh: host.scrollHeight, pad: Math.round(flowPadOf(host)) })
           animatedH = host.scrollHeight
           velocityPxPerSec = 0
           finishAtNaturalFloor(host, !startedAsEntrance)
@@ -2095,6 +2159,13 @@ export function useConversationFollow(
         velocityPxPerSec = step.velocityPxPerSec
         settleAtFloor(host)
         animatedH = applyVisual(host, animatedH, reservePx, velocityPxPerSec, runwayOffset)
+        if (traceActive()) {
+          const sig = `${Math.round(host.scrollTop)}|${host.scrollHeight}|${Math.round(flowPadOf(host))}|${Math.round(reservePx)}|${settleRetiring}`
+          if (sig !== settleSig) {
+            followTrace('settle', { st: Math.round(host.scrollTop), sh: host.scrollHeight, pad: Math.round(flowPadOf(host)), reserve: Math.round(reservePx), lag: Math.round(lag * 10) / 10, retiring: settleRetiring })
+            settleSig = sig
+          }
+        }
         reportFollow(host, false)
         requestAnimationFrame(settleFrame)
       }

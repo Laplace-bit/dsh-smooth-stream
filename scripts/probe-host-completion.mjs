@@ -10,37 +10,37 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
 const errors = []
 page.on('pageerror', e => errors.push(String(e).slice(0, 200)))
-await page.goto(URL, { waitUntil: 'networkidle' })
+const followLogs = []
+page.on('console', m => { if (m.text().includes('[dsh-follow]')) followLogs.push(m.text().slice(0, 150)) })
+await page.goto(URL, { waitUntil: "domcontentloaded", timeout: 45000 })
 await page.waitForTimeout(2000)
 
-// Open the model picker (trigger label may show any model now)
-const currentModel = await page.evaluate(() => document.querySelector('.fh7cGa_triggerLabel')?.textContent ?? '')
-const trigger = page.locator(`button:has(span:text("${currentModel}"))`).first()
-await trigger.click()
-await page.waitForTimeout(800)
-if (currentModel !== 'mock-stream') {
-  try {
-    await page.locator('text=模型').first().click({ timeout: 2000 })
-  } catch { console.log('no 模型 row click') }
-  await page.waitForTimeout(1000)
-  const opt = page.locator('text=mock-stream').first()
-  try {
-    await opt.waitFor({ state: 'visible', timeout: 4000 })
-    await opt.click()
-    console.log('model pick: clicked via playwright')
-  } catch {
-    console.log('model pick: option never visible')
-  }
-  await page.waitForTimeout(600)
-} else {
-  console.log('model already mock-stream')
-}
-// Fresh session so we never touch the user's real conversations
+// Fresh session FIRST (stable home view), then pick the model with retries
 try {
   await page.locator('button:has-text("新会话")').first().click({ timeout: 3000 })
   console.log('new session: clicked')
 } catch { console.log('new session: not found') }
 await page.waitForTimeout(800)
+for (let attempt = 1; attempt <= 3; attempt++) {
+  const currentModel = await page.evaluate(() => document.querySelector('.fh7cGa_triggerLabel')?.textContent ?? '')
+  if (currentModel === 'mock-stream') { console.log('model already mock-stream'); break }
+  try {
+    await page.locator(`button:has(span:text("${currentModel}"))`).first().click({ timeout: 3000 })
+    await page.waitForTimeout(900)
+    await page.locator('text=模型').first().click({ timeout: 2500 })
+    await page.waitForTimeout(1000)
+    const opt = page.locator('text=mock-stream').first()
+    await opt.waitFor({ state: 'visible', timeout: 4000 })
+    await opt.click()
+    console.log(`model pick: clicked (attempt ${attempt})`)
+    await page.waitForTimeout(600)
+    break
+  } catch (e) {
+    console.log(`model pick attempt ${attempt} failed: ${String(e).slice(0, 60)}`)
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(800)
+  }
+}
 const label = await page.evaluate(() => [...document.querySelectorAll('span')].map(s => s.textContent).find(t => t === 'mock-stream' || t === 'glm-5-3-flash'))
 console.log('active model label:', label ?? '(picker not found — profile default may persist)')
 
@@ -64,6 +64,39 @@ await page.evaluate(() => {
       }
     })
     obs.observe({ type: 'layout-shift', buffered: false })
+  }
+  // scrollTop setter spy: catch every big backward/forward write with its stack
+  const port0 = document.querySelector('[data-conversation-scroll]')
+  if (port0 && !window.__stSpy) {
+    window.__stSpy = true
+    window.__fights = []
+    const d = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')
+    Object.defineProperty(port0, 'scrollTop', {
+      configurable: true,
+      get() { return d.get.call(this) },
+      set(v) {
+        const prev = d.get.call(this)
+        d.set.call(this, v)
+        const now = d.get.call(this)
+        if (Math.abs(now - prev) > 2 && Math.abs(now - (this.__lastSt ?? 0)) > 2) {
+          window.__fights.push({ kind: 'set', from: Math.round(prev), to: Math.round(now), stack: new Error().stack.split('\n').slice(2, 6).map(l => l.trim().replace(/^at /, '').slice(0, 90)).join(' || ') })
+        }
+        this.__lastSt = now
+      },
+    })
+    for (const method of ['scrollTo', 'scroll', 'scrollBy']) {
+      const inst = port0
+      const orig = inst[method].bind(inst)
+      inst[method] = (...a) => {
+        const prev = d.get.call(inst)
+        orig.apply(inst, a)
+        const now = d.get.call(inst)
+        if (Math.abs(now - prev) > 2) {
+          window.__fights.push({ kind: method, from: Math.round(prev), to: Math.round(now), stack: new Error().stack.split('\n').slice(2, 6).map(l => l.trim().replace(/^at /, '').slice(0, 90)).join(' || ') })
+        }
+        inst.__lastSt = now
+      }
+    }
   }
   const rec = () => {
     const port = document.querySelector('[data-conversation-scroll]')
@@ -125,6 +158,12 @@ console.log('send path:', sent)
 // Sample through the stream + completion + 8s
 await page.waitForTimeout(24000)
 const log = await page.evaluate(() => window.__log)
+const fights = await page.evaluate(() => window.__fights ?? [])
+console.log('ST-FIGHTS:', fights.length)
+console.log('FIGHTS-JSON:')
+for (const f of fights) console.log(JSON.stringify(f))
+console.log('engine-log lines:', followLogs.length)
+for (const l of followLogs.slice(0, 60)) console.log('  ' + l)
 const shifts = await page.evaluate(() => window.__shifts ?? [])
 const endState = await page.evaluate(() => {
   const port = document.querySelector('[data-conversation-scroll]')
