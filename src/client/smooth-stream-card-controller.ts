@@ -155,9 +155,16 @@ export class SmoothStreamCardController {
     }
   }
 
-  /** Complete settings projection consumed by the live SettingsCell bridge. */
+  private valuesCache: StreamSettings | undefined
+
+  /** Complete settings projection consumed by the live SettingsCell bridge.
+    * Cached per publish: the projection is rebuilt per call, and handing
+    * useSyncExternalStore a fresh reference per read trips React #321 even
+    * when the content is identical. publish() drops the cache. */
   values(): StreamSettings {
-    return { ...this.baseValues(), ...this.debugValues() }
+    if (this.valuesCache !== undefined) return this.valuesCache
+    this.valuesCache = { ...this.baseValues(), ...this.debugValues() }
+    return this.valuesCache
   }
 
   private async load(): Promise<void> {
@@ -240,6 +247,7 @@ export class SmoothStreamCardController {
   }
 
   private publish(): void {
+    this.valuesCache = undefined
     this.store.set(this.projection())
   }
 }

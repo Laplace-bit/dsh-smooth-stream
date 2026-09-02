@@ -350,6 +350,15 @@ function AnimatedMarkdownText({
     if (typing && !streaming && shown.length === text.length) setTyping(false)
   }, [shown, streaming, text, typing])
 
+  // A row can mount before the projection flips its assistant step to
+  // `running` (the 0.1.2 optimistic submission echo renders the message DOM
+  // ahead of stream state), which would freeze `typing` at false forever and
+  // leave the reveal engine off for the whole reply. Re-arm on the rising
+  // edge so late stream starts are still smoothed.
+  useEffect(() => {
+    if (streaming) setTyping(true)
+  }, [streaming])
+
   return (
     <FollowHost
       active={live && ownFollow}

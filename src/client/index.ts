@@ -1,5 +1,6 @@
-import { createElement, useSyncExternalStore, type ComponentType } from 'react'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import { createElement, type ComponentType } from 'react'
+import { useSyncExternalStoreWithSelector } from 'use-sync-external-store/shim/with-selector.js'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: the connection Context merge and the plugins section's SlotMap
 // entry ('settings.plugin.item').
@@ -23,6 +24,8 @@ import { DEFAULT_STREAM_SETTINGS, STREAM_SETTINGS_NS, type StreamSettings } from
  * and are wired through `ctx.inject` below so a deployment without them still
  * streams with defaults.
  */
+const identity = <T,>(v: T): T => v
+
 export const inject = ['slots']
 
 type AssistantProps = ChatNodeViewProps<'assistant-step'>
@@ -133,6 +136,8 @@ class SettingsCell {
 
   /** Re-point the cell at the plugin-owned settings controller. */
   attach(card: SmoothStreamCardController): () => void {
+    const w = window as unknown as Record<string, unknown>
+    w.__SS_ATTACH_N__ = ((w.__SS_ATTACH_N__ as number) ?? 0) + 1
     this.card = card
     this.refresh()
     const unsubscribe = card.subscribe(() => { this.refresh() })
@@ -144,10 +149,24 @@ class SettingsCell {
     }
   }
 
+  private cachedRead: StreamSettings | undefined
+
   private read(): StreamSettings {
     const snapshot = this.card?.getSnapshot()
     if (snapshot === undefined || snapshot.status !== 'ready') return this.value
-    return this.card?.values() ?? this.value
+    // values() rebuilds a fresh projection per call; a fresh reference handed
+    // to useSyncExternalStore trips React's infinite-loop guard (#321) even
+    // when the content is identical, so keep the last projection until the
+    // content actually changes.
+    const next = this.card?.values() ?? this.value
+    if (this.cachedRead !== undefined
+      && next.enabled === this.cachedRead.enabled
+      && next.thinkAutoExpand === this.cachedRead.thinkAutoExpand
+      && next.autoCollapse === this.cachedRead.autoCollapse
+      && next.debugEnabled === this.cachedRead.debugEnabled
+      && next.debugTuning === this.cachedRead.debugTuning) return this.cachedRead
+    this.cachedRead = next
+    return next
   }
 
   private refresh(): void {
@@ -162,6 +181,19 @@ class SettingsCell {
       && next.debugTuning === this.value.debugTuning
     ) return
     this.pending = pending
+    // Preserve the previous reference when the content is identical: React's
+    // useSyncExternalStore (#321) treats any reference flip mid-render as an
+    // infinite loop, and this cell is subscribed by the takeover renderer.
+    if (next === this.value
+      || (next.enabled === this.value.enabled
+        && next.thinkAutoExpand === this.value.thinkAutoExpand
+        && next.autoCollapse === this.value.autoCollapse
+        && next.debugEnabled === this.value.debugEnabled
+        && next.debugTuning === this.value.debugTuning)) {
+      this.cachedRead = this.value
+      return
+    }
+    this.cachedRead = next
     this.value = next
     for (const listener of this.listeners) listener()
   }
@@ -171,7 +203,17 @@ class SettingsCell {
     return !this.pending && this.value.enabled
   }
 
-  readonly getSnapshot = (): StreamSettings => this.value
+  /** Whether finished turns should fold behind a summary row right now. */
+  autoCollapseActive(): boolean {
+    return !this.pending && this.value.autoCollapse
+  }
+
+  readonly getSnapshot = (): StreamSettings => {
+    const w = window as unknown as Record<string, unknown>
+    const set = ((w.__SS_GS_REFS__ ??= new Set()) as Set<unknown>)
+    set.add(this.value)
+    return this.value
+  }
 
   readonly subscribe = (listener: () => void): () => void => {
     this.listeners.add(listener)
@@ -256,10 +298,11 @@ export function apply(ctx: ClientContext): void {
   })
 
   const configured = function StreamConfiguredView(props: AssistantProps) {
-    const preferences = useSyncExternalStore(
+    const preferences = useSyncExternalStoreWithSelector(
       settings.subscribe,
       settings.getSnapshot,
-      settings.getSnapshot,
+      undefined,
+      identity,
     )
     return createElement(TypewriterAssistantNodeView, {
       ...props,
@@ -273,6 +316,8 @@ export function apply(ctx: ClientContext): void {
     })
   }
   ctx.slots.inject('conversation.chat.node', () => {
+    try {
+  // __DIAG_WRAPPED__
     let releaseTakeover: (() => void) | undefined
 
     const syncTakeover = (): void => {
@@ -302,6 +347,10 @@ export function apply(ctx: ClientContext): void {
     return () => {
       unsubscribe()
       releaseTakeover?.()
+    }
+    } catch (error) {
+      ;(window as unknown as Record<string, unknown>).__SS_INJECT_ERR__ = String((error as Error)?.stack ?? error)
+      throw error
     }
   })
 }

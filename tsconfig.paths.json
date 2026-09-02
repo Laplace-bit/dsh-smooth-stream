@@ -353,6 +353,15 @@
       "@deepseek-ai/dsh-client-runtime/client": [
         "../deepseek-harness/packages/client/runtime/src/client"
       ],
+      "@deepseek-ai/dsh-client-store": [
+        "../deepseek-harness/packages/client/store/src"
+      ],
+      "@deepseek-ai/dsh-client-ui-renderer": [
+        "../deepseek-harness/packages/client/ui-renderer/src"
+      ],
+      "@deepseek-ai/dsh-client-ui-renderer/client": [
+        "../deepseek-harness/packages/client/ui-renderer/src/client"
+      ],
       "@deepseek-ai/dsh-cordis-client-runner": [
         "../deepseek-harness/packages/extensions/cordis-client-runner/src"
       ],

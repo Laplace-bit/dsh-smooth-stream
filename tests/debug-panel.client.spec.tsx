@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createSnapshotStore } from '../src/client/clientStore.ts'
 import { DebugPanel, type DebugPanelProps } from '../src/client/DebugPanel.tsx'
 import { debugRuntime, type DebugPanelFace, type DebugRuntimeState } from '../src/client/debugRuntime.ts'
 import { en } from '../src/client/locales.ts'
