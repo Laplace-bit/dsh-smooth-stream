@@ -156,15 +156,38 @@ export class SmoothStreamCardController {
   }
 
   private valuesCache: StreamSettings | undefined
+  private valuesSig: string | undefined
 
   /** Complete settings projection consumed by the live SettingsCell bridge.
-    * Cached per publish: the projection is rebuilt per call, and handing
+    * Rebuilt only when the underlying fields change: handing
     * useSyncExternalStore a fresh reference per read trips React #321 even
-    * when the content is identical. publish() drops the cache. */
+    * when the content is identical, so the projection keeps its reference
+    * across publishes until a field actually moves. debugTuning is compared
+    * field-wise (its object identity churns with every rebuild). */
   values(): StreamSettings {
-    if (this.valuesCache !== undefined) return this.valuesCache
-    this.valuesCache = { ...this.baseValues(), ...this.debugValues() }
-    return this.valuesCache
+    const base = this.baseValues()
+    const debug = this.debugValues()
+    const sig = JSON.stringify([base, debug.debugEnabled, debug.debugTuning])
+    const prev = this.valuesCache
+    if (prev !== undefined && sig === this.valuesSig) return prev
+    const tuningStable = prev !== undefined
+      && prev.debugTuning.revealScale === debug.debugTuning.revealScale
+      && prev.debugTuning.queuePressure === debug.debugTuning.queuePressure
+      && prev.debugTuning.maxRevealCps === debug.debugTuning.maxRevealCps
+      && prev.debugTuning.springStiffness === debug.debugTuning.springStiffness
+      && prev.debugTuning.springDamping === debug.debugTuning.springDamping
+      && prev.debugTuning.springMass === debug.debugTuning.springMass
+      && prev.debugTuning.runwayPx === debug.debugTuning.runwayPx
+      && prev.debugTuning.reserveResponseMs === debug.debugTuning.reserveResponseMs
+      && prev.debugTuning.backpressureMinScale === debug.debugTuning.backpressureMinScale
+    const built: StreamSettings = {
+      ...base,
+      debugEnabled: debug.debugEnabled,
+      debugTuning: tuningStable ? prev.debugTuning : debug.debugTuning,
+    }
+    this.valuesSig = sig
+    this.valuesCache = built
+    return built
   }
 
   private async load(): Promise<void> {
@@ -247,7 +270,6 @@ export class SmoothStreamCardController {
   }
 
   private publish(): void {
-    this.valuesCache = undefined
     this.store.set(this.projection())
   }
 }
