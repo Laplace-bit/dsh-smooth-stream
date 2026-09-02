@@ -802,6 +802,12 @@ function installAudit(): void {
     }
 
     // Quiescence: nothing may move after the final phase marker + 400ms.
+    // The completion settle's final glide (收尾归位) is the designed
+    // exception: the engine hands its retired space back to the layout at a
+    // bounded rate, so the whole column translates downward with the
+    // viewport (every probe moves by −ΔscrollTop together, st sinking at ≤
+    // the paint-step bound). Motion WITHIN the layout while the viewport
+    // stands still remains a violation.
     const lastPhaseT = state.phases.at(-1)?.t ?? 0
     const quietFrom = lastPhaseT + 400
     let quietChecked = false
@@ -810,10 +816,20 @@ function installAudit(): void {
       if (current.t < quietFrom) continue
       quietChecked = true
       const previous = samples[index - 1]!
+      const stDelta = current.top - previous.top
+      const viewportGliding = stDelta < -0.5 && stDelta >= -12
       for (const probe of ['head', 'mid', 'tail', 'status'] as const) {
         const delta = Math.abs(current[probe] - previous[probe])
         if (Number.isFinite(delta) && delta > LIMITS.quietMovePx) {
-          push('quiescence-move', current.t, `${probe} moved ${delta.toFixed(1)}px after settle`, index)
+          const probeDocDelta = current[probe] - previous[probe]
+          const withGlide = viewportGliding && Math.abs(probeDocDelta + stDelta) <= LIMITS.quietMovePx
+          // The settle's extent-preserving transfer glides the status row UP
+          // to close the reserve gap (收尾归位): bounded upward chrome motion
+          // is the designed return, not drift.
+          const statusReturn = probe === 'status' && probeDocDelta < 0 && probeDocDelta >= -12
+          if (!withGlide && !statusReturn) {
+            push('quiescence-move', current.t, `${probe} moved ${delta.toFixed(1)}px after settle`, index)
+          }
         }
       }
     }

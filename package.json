@@ -81,11 +81,16 @@
   "scripts": {
     "benchmark": "node scripts/run-stream-benchmark.mjs",
     "build": "tsdown",
+    "dev:watch": "tsdown --watch",
+    "host:sync": "pnpm build && node scripts/check-lib-fresh.mjs",
     "build:repro": "esbuild repro/main.tsx --bundle --format=esm --platform=browser --loader:.css=local-css --alias:@deepseek-ai/dsh-client-runtime=./repro/shims/client-runtime.ts --alias:@deepseek-ai/dsh-client-runtime/client=./repro/shims/client-runtime.ts --alias:@deepseek-ai/dsh-client-ui-primitives=./repro/shims/primitives.tsx --outfile=repro/bundle.js",
+    "build:stress": "esbuild repro/stress-120fps.tsx --bundle --format=esm --platform=browser --loader:.css=local-css --alias:@deepseek-ai/dsh-client-runtime=./repro/shims/client-runtime.ts --alias:@deepseek-ai/dsh-client-runtime/client=./repro/shims/client-runtime.ts --alias:@deepseek-ai/dsh-client-ui-primitives=./repro/shims/primitives.tsx --outfile=repro/stress-120fps.bundle.js",
+    "stress:120fps": "node scripts/stress-test-120fps.mjs",
+    "test:rebound": "node scripts/verify-y-rebound.mjs",
     "prepare": "tsdown",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --pretty false",
-    "test:smooth": "node scripts/probe-tailbob.mjs 1200 20 && node scripts/verify-overflow.mjs --runs 3",
+    "test:smooth": "node scripts/verify-y-rebound.mjs && node scripts/probe-tailbob.mjs 1200 20 && node scripts/verify-overflow.mjs --runs 3",
     "probe:overlap": "node scripts/probe-overlap.mjs"
   },
   "peerDependencies": {

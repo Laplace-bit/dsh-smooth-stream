@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "updatedAtMs": 1788330889870,
+  "windows": [
+    {
+      "activeNavId": "stations",
+      "pinnedWorkbenchContainerId": null
+    }
+  ],
+  "tabs": [],
+  "terminals": [],
+  "workbenchContainers": [
+    {
+      "id": "canvas-main",
+      "stationIds": [
+        "daa6996c-cfbb-4fb6-802f-1e222bcca445",
+        "c6e69e2f-b695-4324-a8a1-9494a90309d6"
+      ],
+      "activeStationId": "daa6996c-cfbb-4fb6-802f-1e222bcca445",
+      "fullscreenStationId": null,
+      "minimizedStationIds": [],
+      "layoutMode": "auto",
+      "customLayout": {
+        "columns": 2,
+        "rows": 2
+      },
+      "mode": "docked",
+      "resumeMode": "docked",
+      "topmost": false,
+      "frame": null
+    }
+  ]
+}

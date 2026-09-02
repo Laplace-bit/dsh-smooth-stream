@@ -116,6 +116,9 @@ export default defineConfig({
       'react/jsx-dev-runtime': resolve(root, 'node_modules/react/jsx-dev-runtime.js'),
       'react-dom': resolve(root, 'node_modules/react-dom'),
       'react-dom/client': resolve(root, 'node_modules/react-dom/client.js'),
+      '@deepseek-ai/dsh-client-runtime/client': resolve(root, 'repro/shims/client-runtime.ts'),
+      '@deepseek-ai/dsh-client-runtime': resolve(root, 'repro/shims/client-runtime.ts'),
+      '@deepseek-ai/dsh-client-store': resolve(root, 'repro/shims/client-runtime.ts'),
     },
   },
   test: {

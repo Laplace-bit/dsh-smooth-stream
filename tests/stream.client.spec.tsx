@@ -620,7 +620,12 @@ describe('assistant renderer', () => {
       tuning: { ...DEFAULT_STREAM_DEBUG_TUNING, runwayPx: 40 },
     })
     await act(() => vi.advanceTimersByTimeAsync(900))
-    expect(Number.parseFloat(status.style.marginTop)).toBeCloseTo(40, 0)
+    // Zero-downward-rebound contract: the follower pins scrollTop to the
+    // floor and the floor rides the owned margin 1:1, so an owned margin is
+    // never shrunk mid-ownership — a lower tuning cap only bounds future
+    // growth. Retiring it here would clamp scrollTop downward and slide the
+    // whole transcript down.
+    expect(Number.parseFloat(status.style.marginTop)).toBeCloseTo(72, 0)
   })
 
   it('restores the transcript min-height when the follow host unmounts', async () => {

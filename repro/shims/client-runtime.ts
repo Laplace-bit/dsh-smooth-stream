@@ -38,3 +38,5 @@ export function createSnapshotStore<T extends object>(init: T): SnapshotStoreLik
     },
   }
 }
+
+export { SlotRegistry } from '../../../deepseek-harness/packages/client/ui-renderer/src/client/registry.ts'

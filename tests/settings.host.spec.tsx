@@ -6,7 +6,13 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler, ConnectionRpcHandlerOptions } from '@deepseek-ai/dsh-client-connection'
-import { SettingsProvider, settingsNamespace, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
+import * as DshSettings from '@deepseek-ai/dsh-settings'
+const { SettingsProvider } = DshSettings
+type SettingsNamespace = DshSettings.SettingsNamespace
+const toNs = (ns: string): SettingsNamespace =>
+  typeof (DshSettings as unknown as { settingsNamespace?: (v: string) => SettingsNamespace }).settingsNamespace === 'function'
+    ? (DshSettings as unknown as { settingsNamespace: (v: string) => SettingsNamespace }).settingsNamespace(ns)
+    : (ns as SettingsNamespace)
 import { afterEach, describe, expect, it } from 'vitest'
 import { STREAM_PACKAGE_NAME, STREAM_PACKAGE_VERSION } from '../src/package-meta.ts'
 import { apply, Config } from '../src/plugin.ts'
@@ -89,7 +95,7 @@ describe('smooth-stream host settings', () => {
     const fiber = ctx.plugin({ apply, Config })
     await fiber.await()
 
-    const ns = settingsNamespace(STREAM_SETTINGS_NS)
+    const ns = toNs(STREAM_SETTINGS_NS)
     expect(ctx.settings.get(ns)).toEqual(DEFAULT_STREAM_SETTINGS)
 
     await ctx.settings.update(ns, { enabled: false, thinkAutoExpand: false })
@@ -130,7 +136,7 @@ describe('smooth-stream host settings', () => {
       signal(),
     )
     expect(updated).toMatchObject({ ok: true, value: { enabled: false, thinkAutoExpand: false, autoCollapse: false } })
-    expect(ctx.settings.get(settingsNamespace(STREAM_SETTINGS_NS))).toEqual({
+    expect(ctx.settings.get(toNs(STREAM_SETTINGS_NS))).toEqual({
       ...DEFAULT_STREAM_SETTINGS,
       enabled: false,
       thinkAutoExpand: false,
@@ -153,7 +159,7 @@ describe('smooth-stream host settings', () => {
       ok: true,
       value: { debugEnabled: true, tuning: { springDamping: 31 } },
     })
-    expect(ctx.settings.get(settingsNamespace(STREAM_SETTINGS_NS))).toMatchObject({
+    expect(ctx.settings.get(toNs(STREAM_SETTINGS_NS))).toMatchObject({
       debugEnabled: true,
       debugTuning: { springDamping: 31 },
     })
@@ -170,7 +176,7 @@ describe('smooth-stream host settings', () => {
       signal(),
     )
     expect(atomicUpdated).toMatchObject({ ok: true, value: { enabled: true, thinkAutoExpand: true } })
-    expect(ctx.settings.get(settingsNamespace(STREAM_SETTINGS_NS))).toMatchObject({
+    expect(ctx.settings.get(toNs(STREAM_SETTINGS_NS))).toMatchObject({
       enabled: true,
       thinkAutoExpand: true,
       debugEnabled: false,
@@ -183,7 +189,7 @@ describe('smooth-stream host settings', () => {
       signal(),
     )
     expect(partialDebug).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
-    expect(ctx.settings.get(settingsNamespace(STREAM_SETTINGS_NS))).toMatchObject({
+    expect(ctx.settings.get(toNs(STREAM_SETTINGS_NS))).toMatchObject({
       enabled: true,
       thinkAutoExpand: true,
       debugEnabled: false,
