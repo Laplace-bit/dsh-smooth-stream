@@ -96,11 +96,14 @@ export const FOLLOW_PAINT_GUARD_PX = 1
 export const FOLLOW_STATUS_RUNWAY_PX = 72
 
 /**
- * Duration of the lockstep runway retirement at stream end. The margin and
- * its canceling transform shrink together, so this duration is invisible;
- * it only bounds how long the owned margin lingers.
+ * Duration of completion runway retirement. The final pad is visible motion:
+ * its shrinking floor brings the transcript down to its natural resting
+ * position. 1.5s keeps the default 72px runway at 48px/s (0.8px per 60Hz
+ * frame), matching the configured default reading-follow velocity instead of
+ * the old 160ms / 450px/s staircase that looked like repeated completion
+ * jumps.
  */
-export const FOLLOW_RUNWAY_RETIRE_MS = 160
+export const FOLLOW_RUNWAY_RETIRE_MS = 1500
 
 /** How long a gesture keeps `isUserInteracting` so the next scroll can unpin. */
 export const FOLLOW_GESTURE_MS = 800
@@ -629,6 +632,170 @@ const followPaintLimits = new WeakMap<HTMLElement, FollowPaintLimit>()
 const followHadChrome = new WeakSet<HTMLElement>()
 /** Last painted shift per port, to spread a wrap's one-line step over frames. */
 const followLastShiftPx = new WeakMap<HTMLElement, number>()
+/**
+ * Screen-space completion anchor per port, SHARED by every follower arm and
+ * the settle loop. Per-arm closures made the guard incoherent across the
+ * completion cascade: block arms hand off leadership mid-turn, each new
+ * settle loop re-seeded its own baseline at the already-jumped position, and
+ * the cascade's one-frame clamp jump painted uncompensated. One baseline per
+ * port also makes concurrent guards idempotent — whoever compensates first
+ * restores the anchor, so the second measure reads ~0 and grants nothing.
+ *
+ * The anchor is the READING surface (the current turn's assistant row), not
+ * the bottom-most shift surface: the cascade mounts/unmounts rows at the
+ * column's bottom (process/tail mount, status swap), which switches
+ * `at(-1)`'s identity mid-guard. Measuring across that switch reads a newly
+ * mounted tail row as a >1000px "content moved down" push and floods the
+ * pad, while the reading surface's real clamp jump goes uncompensated.
+ */
+interface FollowGuardAnchor {
+  readonly element: HTMLElement
+  /** Held viewport top — the position the reader should keep seeing. */
+  readonly top: number
+  /** Flow-child index, to tell an in-place replacement from a new turn. */
+  readonly index: number
+  /**
+   * Compositor shift and owned pad at store time. The engine moves the
+   * rendered anchor between guard passes through TWO channels — the shift
+   * glide (reveal decay: renderedΔ = −shiftΔ) and the pad retirement (the
+   * floor sinks with the pad and the pin follows: renderedΔ = −padΔ). Only
+   * the delta beyond BOTH is host motion worth compensating; without the
+   * pad term the guard reads the retirement's own glide as a host push,
+   * re-grants the pad, and the settle never finishes.
+   */
+  readonly shift: number
+  readonly pad: number
+}
+const followGuardAnchors = new WeakMap<HTMLElement, FollowGuardAnchor>()
+/**
+ * Ports whose completion settle loop owns the follow. The settle drains the
+ * reveal, retires the pad and guards the cascade; the swap that ends the
+ * turn REMOUNTS the follower arms in the same frame cluster, and a freshly
+ * mounted arm primes with a higher generation and would otherwise steal the
+ * port mid-drain — its observers miss the cascade mutations (armed after
+ * the fact) and its state initialization re-materializes engine space.
+ * Ownership is released only when the settle finishes, the reader gestures,
+ * or a genuinely NEW turn arrives (a user row joined since the handoff).
+ */
+const followCompletionSettle = new WeakSet<HTMLElement>()
+/** User-row count at handoff, for the new-turn check above. */
+const followCompletionSettleRows = new WeakMap<HTMLElement, number>()
+
+/** User rows below the flow, or -1 when the host does not label rows with
+ *  `data-chat-flow-kind` (the engine's own audit benches): the new-turn
+ *  check is unsupported there and ownership guarding must stay OFF. */
+function countUserRows(port: HTMLElement): number {
+  const flow = flowElementOf(port)
+  if (flow === null) return -1
+  let count = 0
+  let sawKind = false
+  for (const child of flow.children) {
+    if (!(child instanceof HTMLElement)) continue
+    const kind = child.getAttribute('data-chat-flow-kind')
+    if (kind !== null) sawKind = true
+    if (kind === 'user') count++
+  }
+  return sawKind ? count : -1
+}
+
+/** True while this port's completion settle owns the follow and no new turn
+ *  has arrived since the handoff. */
+function completionSettleGuardsPort(port: HTMLElement): boolean {
+  if (!followCompletionSettle.has(port)) return false
+  const baseline = followCompletionSettleRows.get(port) ?? -1
+  const current = countUserRows(port)
+  return baseline >= 0 && current >= 0 && current <= baseline
+}
+/**
+ * Ports whose completion settle loop owns the follow. A settle loop drains,
+ * retires the pad and guards the cascade; an arm that primes while this is
+ * set with `active === false` (the settled-side static arm mounting in the
+ * very swap frame) must NOT seize leadership — the swap re-renders the node
+ * view, a fresh arm would otherwise steal the port mid-drain with
+ * `reservePx = ownedBottomSpace` (the pad!), re-materialize an equal runway
+ * through applyVisual, double-count the extent and fight the settle's own
+ * guard for the rest of the window. A streaming arm (active === true, the
+ * next turn) still takes over normally and the settle yields.
+ */
+
+function readingAnchorOf(port: HTMLElement): HTMLElement | null {
+  const flow = flowElementOf(port)
+  if (flow === null) return null
+  let anchor: HTMLElement | null = null
+  for (const child of flow.children) {
+    if (!(child instanceof HTMLElement)) continue
+    if (child.getAttribute('data-chat-flow-kind') === 'assistant' || child.querySelector('[data-variant="think"]') !== null) {
+      anchor = child
+    }
+  }
+  return anchor ?? shiftSurfacesOf(port).at(-1) ?? null
+}
+
+/**
+ * Measure the reading surface's screen delta since the last guard pass.
+ * Returns null when there is nothing comparable yet (first observation), or
+ * when the anchor changed identity in a way that is NOT the in-place
+ * live→settled replacement (a new turn's row joined — nothing jumped,
+ * re-seed). Compensation sites must store the POST-compensation held
+ * position via `holdGuardAnchor`, or the guard would read its own
+ * correction as a fresh jump and oscillate.
+ */
+function measureReadingAnchor(port: HTMLElement): { anchor: HTMLElement; index: number; top: number; delta: number } | null {
+  const anchor = readingAnchorOf(port)
+  if (anchor === null) {
+    followGuardAnchors.delete(port)
+    return null
+  }
+  const rect = anchor.getBoundingClientRect()
+  // Unmeasurable geometry (jsdom's zero rects, a detached row): screen-space
+  // comparison is meaningless — never seed or compensate from it.
+  if (!(rect.width > 0 || rect.height > 0)) return null
+  const top = rect.top
+  const shift = currentShiftOf(anchor)
+  const pad = flowPadOf(port)
+  const flow = flowElementOf(port)
+  const index = flow === null ? -1 : [...flow.children].indexOf(anchor)
+  const stored = followGuardAnchors.get(port)
+  if (stored === undefined) {
+    followGuardAnchors.set(port, { element: anchor, top, index, shift, pad })
+    return null
+  }
+  // Host-caused motion only: the engine's own shift glide and pad
+  // retirement cancel out (renderedΔ = shiftΔ − padΔ + hostΔ).
+  const delta = (top - stored.top) - (shift - stored.shift) + (pad - stored.pad)
+  if (stored.element === anchor) {
+    // Refresh the baseline to the current rendered position on every
+    // measurement: between guard passes the viewport legitimately moves
+    // (streaming pins, reveal glide), and a stale baseline would read the
+    // accumulated motion as one giant host jump at the next commit.
+    followGuardAnchors.set(port, { element: anchor, top, index, shift, pad })
+    return { anchor, index, top, delta }
+  }
+  // Identity changed. An in-place replacement (same slot, old node detached)
+  // is the live→settled swap: bridge it by holding the reading surface at
+  // its pre-swap viewport position. Anything else (the next turn's row
+  // joining below, a session swap) is new layout — re-seed, never hold.
+  if (!stored.element.isConnected && stored.index === index) {
+    return { anchor, index, top, delta }
+  }
+  followGuardAnchors.set(port, { element: anchor, top, index, shift, pad })
+  return null
+}
+
+/** Record the position the reader should keep seeing after a correction. */
+function holdGuardAnchor(
+  port: HTMLElement,
+  measured: { anchor: HTMLElement; index: number },
+  heldTop: number,
+): void {
+  followGuardAnchors.set(port, {
+    element: measured.anchor,
+    index: measured.index,
+    top: heldTop,
+    shift: currentShiftOf(measured.anchor),
+    pad: flowPadOf(port),
+  })
+}
 /** Last runway offset seen per port, to rebase the extent when the margin size changes. */
 const followRunwayOffsetHistory = new WeakMap<HTMLElement, number>()
 /** Last observed scroll floor per port, for the slack→overflow runway re-measure. */
@@ -677,6 +844,16 @@ function pruneDeadRunway(port: HTMLElement): boolean {
   return false
 }
 
+/** Preserve a runway whose host row was replaced during completion. */
+function adoptDeadRunwayToFlowPad(port: HTMLElement): number {
+  const runway = followRunways.get(port)
+  if (runway === undefined || runway.element.isConnected || runway.offset <= FOLLOW_SETTLE_EPSILON_PX) return 0
+  const lostPx = runway.offset
+  setFlowPad(port, flowPadOf(port) + lostPx)
+  restoreRunway(port)
+  return lostPx
+}
+
 function setFlowPad(port: HTMLElement, px: number): void {
   const flow = flowElementOf(port)
   if (flow === null) return
@@ -691,7 +868,7 @@ function setFlowPad(port: HTMLElement, px: number): void {
   }
   flow.style.paddingBottom = original === ''
     ? `${px}px`
-    : `calc(${original} + ${px - (existing?.px ?? 0)}px)`
+    : `calc(${original} + ${px}px)`
   followSettlePads.set(port, { element: flow, original, px })
 }
 
@@ -896,6 +1073,39 @@ function ensureRunway(
 
 function runwayOffsetOf(port: HTMLElement): number {
   return followRunways.get(port)?.offset ?? 0
+}
+
+/**
+ * Move owned runway margin into the persistent flow pad without changing the
+ * scroll extent. Returns the actual layout pixels removed from the margin.
+ */
+function transferRunwayToFlowPad(port: HTMLElement, requestedPx: number): number {
+  const runway = followRunways.get(port)
+  if (runway === undefined || requestedPx <= 0 || !runway.element.isConnected) return 0
+  const nextRequestedPx = Math.max(0, runway.requestedPx - requestedPx)
+  const beforeOffset = runway.offset
+  const beforeHeight = port.scrollHeight
+  runway.element.style[runway.property] = nextRequestedPx <= FOLLOW_SETTLE_EPSILON_PX
+    ? runway.original
+    : runway.original === ''
+      ? `${nextRequestedPx}px`
+      : `calc(${runway.original} + ${nextRequestedPx}px)`
+  const nextOffset = Math.max(0, beforeOffset + port.scrollHeight - beforeHeight)
+  const transferredPx = Math.max(0, beforeOffset - nextOffset)
+  if (nextRequestedPx <= FOLLOW_SETTLE_EPSILON_PX || nextOffset <= FOLLOW_SETTLE_EPSILON_PX) {
+    followRunways.delete(port)
+  } else {
+    followRunways.set(port, {
+      ...runway,
+      offset: nextOffset,
+      requestedPx: nextRequestedPx,
+    })
+  }
+  if (transferredPx > 0) {
+    setFlowPad(port, flowPadOf(port) + transferredPx)
+    invalidatePaintLimit(port)
+  }
+  return transferredPx
 }
 
 /** Available paint room below the last message before fixed conversation chrome. */
@@ -1163,6 +1373,7 @@ function holdCompositorAtRest(element: HTMLElement): void {
 
 /** Remove equal offsets, land on the floor, then retire the compositor quietly. */
 function finishAtNaturalFloor(port: HTMLElement, retainCompositor = true): void {
+  followCompletionSettle.delete(port)
   followTraceUntilMs = Math.max(followTraceUntilMs, performance.now() + 10000)
   followTrace('finish-enter', { sh: hostShOf(port), st: Math.round(port.scrollTop), pad: Math.round(flowPadOf(port)), retain: retainCompositor })
   const surfaces = shiftSurfacesOf(port)
@@ -1267,6 +1478,7 @@ export function useConversationFollow(
     let interactTimer: ReturnType<typeof setTimeout> | null = null
     let port: HTMLElement | null = null
     let resize: ResizeObserver | null = null
+    let mutations: MutationObserver | null = null
     let observedTail: HTMLElement | null = null
     let statusWasPresent: boolean | null = null
     let lastStatusHeightPx = 0
@@ -1337,7 +1549,8 @@ export function useConversationFollow(
       if (holding === next && isLeader(next)) return
       holding = next
       const leader = followLeaders.get(next)
-      if (leader === undefined || generation > leader.generation) {
+      if ((leader === undefined || generation > leader.generation) && !completionSettleGuardsPort(next)) {
+        followCompletionSettle.delete(next)
         followLeaders.set(next, { generation, owner })
       }
     }
@@ -1401,26 +1614,150 @@ export function useConversationFollow(
      * settle loop so a host layout shrink is re-opened exactly once no matter
      * which observer sees it first. `-1` until the first owned observation.
      */
-    let guardAnchorScreen: number | null = null
     let settleRetiring = false
+    // Set once this closure's completion handoff has armed its settle loop.
+    // Only a handed-off arm's observers may guard a LEADERLESS port: mid-turn
+    // arms that never handed off must keep standing down (entrance/steaming
+    // successors own the port), while a handed-off arm whose settle loop was
+    // killed by leadership churn is the only pre-paint guard left when the
+    // completion cascade lands in the leaderless window.
+    let handedOff = false
+    /**
+     * Bring the reading surface back down toward its held position after an
+     * upward host push (clamp jump, live→settled swap): spend persistent pad
+     * first — lowering the floor lets the pin carry the text back down —
+     * then raise the compositor shift for whatever pad cannot cover, and
+     * rebase the spring extent so the raise survives the next applyVisual
+     * (which otherwise recomputes the shift from lag and undoes it).
+     */
+    const pullReadingAnchorBack = (
+      host: HTMLElement,
+      measured: { anchor: HTMLElement; index: number; top: number; delta: number },
+      trace = false,
+    ): void => {
+      const need = -measured.delta
+      const released = Math.min(flowPadOf(host), need)
+      if (released > FOLLOW_SETTLE_EPSILON_PX) {
+        if (trace) {
+          followTrace('anchor-pull', { screenDelta: Math.round(measured.delta), released: Math.round(released), st: Math.round(host.scrollTop) })
+        }
+        setFlowPad(host, flowPadOf(host) - released)
+        animatedH = Math.max(0, animatedH - released)
+      }
+      const remainder = need - released
+      let raise = 0
+      if (remainder > 0.5) {
+        const surfaces = shiftSurfacesOf(host)
+        const limit = safeShiftLimit(host, surfaces)
+        const current = currentShiftOf(surfaces.at(-1) ?? host)
+        const target = Math.min(current + remainder, Math.max(0, limit - FOLLOW_PAINT_GUARD_PX))
+        raise = target - current
+        if (raise > 0) {
+          for (const surface of surfaces) setShift(surface, current + raise)
+          followLastShiftPx.set(host, current + raise)
+          animatedH = Math.max(0, animatedH - raise)
+        }
+      }
+      holdGuardAnchor(host, measured, measured.top + released + raise)
+    }
+    /**
+     * THE screen-space anchor hold, shared by every entry point: the
+     * structural-observer path (pre-paint cascade correction), the settle
+     * loop's per-frame poll, and the ACTIVE loop's per-frame poll. The
+     * shift-excluded delta filters the engine's own motion (reveal glide,
+     * wrap lockstep) to ~0, so a live poll may compensate safely — which is
+     * what saves the completion swap: the settled-side arm primes in its
+     * layout effect and steals leadership IN the cascade frame, its own
+     * observers miss the mutations (armed after the fact), and only this
+     * poll sees the jump while it can still be corrected before paint.
+     * Returns the measured delta (null when nothing was comparable).
+     */
+    const enforceReadingAnchor = (host: HTMLElement, trace = false): number | null => {
+      const measured = measureReadingAnchor(host)
+      if (measured === null) return null
+      if (measured.delta > 0.5) {
+        const headroom = Math.max(0, FOLLOW_SETTLE_PAD_CAP_PX - flowPadOf(host))
+        const granted = Math.min(measured.delta, headroom)
+        if (trace) {
+          followTrace('anchor-push', { screenDelta: Math.round(measured.delta), granted: Math.round(granted), st: Math.round(host.scrollTop) })
+        }
+        setFlowPad(host, flowPadOf(host) + granted)
+        if (pruneDeadRunway(host)) reservePx = 0
+        holdGuardAnchor(host, measured, measured.top - granted)
+      } else if (measured.delta < -0.5) {
+        if (pruneDeadRunway(host)) reservePx = 0
+        pullReadingAnchorBack(host, measured, trace)
+      } else {
+        holdGuardAnchor(host, measured, measured.top)
+      }
+      return measured.delta
+    }
+    /** Pre-paint correction (observers, commit subscription). */
     const restoreBeforePaint = (): void => {
-      if (!following || port === null || !isLeader(port)) return
+      if (!following || port === null) return
+      // Yield only to a LIVE owner. Block arms hand off leadership mid-turn
+      // and each handoff kills the previous settle loop; the completion
+      // cascade routinely lands in the leaderless window between that death
+      // and the successor's first frame. Standing down whenever leadership is
+      // merely absent left the cascade's clamp jump uncompensated. While
+      // SOMEONE holds the port, the dead observers must not fight the live
+      // guard; while NOBODY does, a handed-off arm's armed observer is the
+      // only guard left, and the shared followGuardAnchors baseline keeps it
+      // idempotent.
+      const leaderless = !isLeader(port)
+      if (leaderless && (followLeaders.has(port) || !handedOff)) return
+      // Leaderless window: this arm's closure state froze when its loop died.
+      // Sync to the shared per-port motion ledger the last live loop wrote,
+      // or the applyVisual below would replay stale extent/reserve into the
+      // runway and pad ledgers while compensating the cascade.
+      if (leaderless) {
+        const sharedMotion = followMotionStates.get(port)
+        if (sharedMotion !== undefined) {
+          animatedH = Math.min(port.scrollHeight, Math.max(0, sharedMotion.extent))
+          reservePx = sharedMotion.reservePx
+          velocityPxPerSec = sharedMotion.velocityPxPerSec
+        }
+      }
+      // A host keyed replacement can disconnect the element carrying our
+      // margin before MutationObserver runs. Transfer that dead extent to the
+      // surviving flow first, otherwise the browser clamps the floor before
+      // the screen-space comparison below gets a chance to compensate it.
+      adoptDeadRunwayToFlowPad(port)
       // HOST COMPLETION COMMITS under the pin must be corrected in THIS
       // pre-paint task: the settle loop's rAF guard runs after the host's own
       // follow effects, so a cascade commit (status swap, tail mount) would
       // otherwise paint one frame pinned to the sunk floor. The screen-space
-      // anchor hold is shared with the settle loop via guardAnchorScreen; the
-      // retiring glide is engine motion and stands down.
-      if (!settleRetiring && guardAnchorScreen !== null) {
-        const tailNow = shiftSurfacesOf(port).at(-1) ?? port
-        const anchorScreen = tailNow.getBoundingClientRect().top
-        const screenDelta = anchorScreen - guardAnchorScreen
-        if (screenDelta > 0.5) {
+      // anchor hold reads the shared per-port baseline (see
+      // followGuardAnchors); it runs for structural commits only and stands
+      // down while this settle's retirement glide runs (that motion is ours).
+      if (!settleRetiring) {
+        const measured = measureReadingAnchor(port)
+        if (measured !== null && measured.delta > 0.5) {
           const headroom = Math.max(0, FOLLOW_SETTLE_PAD_CAP_PX - flowPadOf(port))
-          setFlowPad(port, flowPadOf(port) + Math.min(screenDelta, headroom))
+          const granted = Math.min(measured.delta, headroom)
+          setFlowPad(port, flowPadOf(port) + granted)
           if (pruneDeadRunway(port)) reservePx = 0
+          holdGuardAnchor(port, measured, measured.top - granted)
+        } else if (measured !== null && measured.delta < -0.5) {
+          if (pruneDeadRunway(port)) reservePx = 0
+          if (!activeRef.current) {
+            // Completion window: pad first, then the shift raise absorbs
+            // whatever pad cannot cover (the swap jump rides this path).
+            pullReadingAnchorBack(port, measured)
+          } else {
+            // Live streaming: the original semantics — release only what the
+            // pad holds and leave the remainder to the frame loop's own
+            // lockstep. A shift raise here would cancel the reveal glide.
+            const released = Math.min(flowPadOf(port), -measured.delta)
+            if (released > FOLLOW_SETTLE_EPSILON_PX) {
+              setFlowPad(port, flowPadOf(port) - released)
+              animatedH = Math.max(0, animatedH - released)
+            }
+            holdGuardAnchor(port, measured, measured.top + released)
+          }
+        } else if (measured !== null) {
+          holdGuardAnchor(port, measured, measured.top)
         }
-        guardAnchorScreen = anchorScreen
       }
       // A reveal commit changes the measured tail, not the fixed chrome. Keep
       // the paint-limit TTL intact here; ResizeObserver and viewport/chrome
@@ -1473,6 +1810,7 @@ export function useConversationFollow(
       if (port !== null) {
         for (const name of GESTURE_EVENTS) port.removeEventListener(name, markGesture)
         resize?.disconnect()
+        mutations?.disconnect()
       }
       unsubscribeCommit?.()
       port = next
@@ -1482,10 +1820,22 @@ export function useConversationFollow(
         port.addEventListener(name, markGesture, { passive: true })
       }
       if (typeof ResizeObserver !== 'undefined') {
-        resize = new ResizeObserver(restoreBeforePaint)
+        resize = new ResizeObserver(() => restoreBeforePaint())
         resize.observe(port)
         const proxy = resizeProxyOf(port)
         if (proxy !== null) resize.observe(proxy)
+      }
+      // Completion is chiefly a child-list transaction (status removal,
+      // live-to-settled replacement, fold/tail insertion). Because following
+      // gives the flow a viewport min-height, those mutations can leave the
+      // flow's border box unchanged and never notify ResizeObserver. Observe
+      // the transaction itself so the anchor hold still runs before paint.
+      if (typeof MutationObserver !== 'undefined') {
+        const flow = flowElementOf(port)
+        if (flow !== null) {
+          mutations = new MutationObserver(() => { restoreBeforePaint() })
+          mutations.observe(flow, { childList: true, subtree: true })
+        }
       }
     }
 
@@ -1531,6 +1881,15 @@ export function useConversationFollow(
       )
 
       if (!primed) {
+        // A completion settle owns this port (the swap remounted this arm in
+        // the same frame cluster): stay a passive watcher. Taking over here
+        // would zero the pad mid-retirement and re-inherit it as reserve —
+        // double-counting the extent for one giant jump.
+        if (completionSettleGuardsPort(nextPort)) {
+          primed = true
+          following = false
+          return
+        }
         const inherited = nextPort.hasAttribute(FOLLOW_OWNED_ATTR)
           ? followMotionStates.get(nextPort)
           : undefined
@@ -1573,7 +1932,9 @@ export function useConversationFollow(
           // Adopt-time reclaim, exactly once and in this same pre-paint task:
           // the previous completion's pad becomes this stream's reserve gap,
           // so the extent — and the pinned floor — never steps between turns.
-          setFlowPad(nextPort, 0)
+          // A completion settle still owning the port keeps its ledgers: the
+          // swap's remounted arms must not zero the pad mid-retirement.
+          if (!completionSettleGuardsPort(nextPort)) setFlowPad(nextPort, 0)
           statusWasPresent = hasStatus
           velocityPxPerSec = 0
           // The committed row/growth delta has already moved the new floor.
@@ -1853,6 +2214,29 @@ export function useConversationFollow(
       }
       updateRevealScale(nextPort, elapsedMs)
       reportFollow(nextPort, true)
+      // Keep the previous painted tail as the completion handoff baseline.
+      // The active loop is the only place that sees the old surface before a
+      // host live->settled replacement disconnects it.
+      // Per-frame anchor hold — completion window only. During live
+      // streaming the lockstep in this very frame's applyVisual already
+      // cancels wraps; a guard running here fights it (its pad/raise writes
+      // shift the next frame's lag bookkeeping) and visibly degrades the
+      // reveal. The completion cascade is different: the settled-side arm
+      // that primes IN the swap frame has active=false from mount, so ITS
+      // first poll runs before paint and compensates the swap jump that the
+      // older arms' observers were too late (or too unprivileged) to fix.
+      // Track the reading surface's rendered position so the completion
+      // guard inherits the exact last-painted baseline (never a stale or
+      // already-jumped one) when the stream hands off. Compensation is NOT
+      // done from this poll (a guard beside the active loop's own lockstep
+      // fights it and degrades the reveal), and a NON-leader arm must not
+      // even refresh the baseline: its measurement would store the very
+      // jump the owning guard is about to correct and neutralize its next
+      // pass.
+      if (isLeader(nextPort)) {
+        if (!activeRef.current) enforceReadingAnchor(nextPort)
+        else measureReadingAnchor(nextPort)
+      }
       const remainingEntranceLag = Math.max(
         0,
         nextPort.scrollHeight - animatedH - runwayOffsetOf(nextPort),
@@ -1870,6 +2254,7 @@ export function useConversationFollow(
       unsubscribeCommit?.()
       if (interactTimer !== null) clearTimeout(interactTimer)
       resize?.disconnect()
+      mutations?.disconnect()
       if (port !== null) {
         for (const name of GESTURE_EVENTS) port.removeEventListener(name, markGesture)
       }
@@ -1913,9 +2298,7 @@ export function useConversationFollow(
       // caps animatedH against the shrinking extent directly.
       // Settle state (declared before the handoff so the completion paths can
       // measure the extent against it):
-      let settlePadPx = 0
       let settleQuietMs = 0
-      let settleKidsSig = ''
       let settleSig = ''
       const lagBeforeCompletionPaint = Math.max(
         0,
@@ -1951,11 +2334,10 @@ export function useConversationFollow(
       // floor sinks and the pinned transcript slams down with the release
       // already done.
       followTraceUntilMs = performance.now() + 15000
-      const deadRunway = followRunways.get(host)
-      if (deadRunway !== undefined && deadRunway.offset > 0.5 && !deadRunway.element.isConnected) {
-        followTrace('cleanup-dead-margin', { sh: host.scrollHeight, lost: Math.round(deadRunway.offset), padBefore: Math.round(flowPadOf(host)) })
-        setFlowPad(host, flowPadOf(host) + deadRunway.offset)
-        if (pruneDeadRunway(host)) reservePx = 0
+      const deadRunwayPx = adoptDeadRunwayToFlowPad(host)
+      if (deadRunwayPx > FOLLOW_SETTLE_EPSILON_PX) {
+        followTrace('cleanup-dead-margin', { sh: host.scrollHeight, lost: Math.round(deadRunwayPx), padBefore: Math.round(flowPadOf(host) - deadRunwayPx) })
+        reservePx = 0
       }
       // The completion handoff keeps at least one real runway open so the
       // final height has reserved paint room to drain through: with zero
@@ -1973,6 +2355,12 @@ export function useConversationFollow(
         Math.max(reservePx, Math.max(0, completionTuning.runwayPx - flowPadOf(host))),
       )
       const completionRunway = runwayOffsetOf(host)
+      // The reading anchor's baseline is already live (the active loop
+      // refreshed it every frame, and the guard observers keep it current);
+      // only seed it here when this port somehow has none, so the first
+      // completion commit has a real screen-space baseline to compare
+      // against instead of silently adopting the jumped position.
+      measureReadingAnchor(host)
       // Rebase the spring extent onto the new offset domain before the paint:
       // adding the margin drops targetHeight by the same amount, so animatedH
       // must drop in lockstep or the margin's px release as an instant shift.
@@ -2006,11 +2394,35 @@ export function useConversationFollow(
       }
       const stopSettleListeners = (): void => {
         for (const name of GESTURE_EVENTS) host.removeEventListener(name, markGesture)
+        resize?.disconnect()
+        mutations?.disconnect()
         if (interactTimer !== null) {
           clearTimeout(interactTimer)
           interactTimer = null
         }
       }
+      // Re-arm pre-paint observation for the whole completion cascade. The
+      // active effect's observers were disconnected above, but status/tail
+      // commits continue while the detached settle loop owns the port.
+      if (typeof ResizeObserver !== 'undefined') {
+        resize = new ResizeObserver(() => restoreBeforePaint())
+        resize.observe(host)
+        const proxy = resizeProxyOf(host)
+        if (proxy !== null) resize.observe(proxy)
+      }
+      if (typeof MutationObserver !== 'undefined') {
+        const flow = flowElementOf(host)
+        if (flow !== null) {
+          mutations = new MutationObserver(() => { restoreBeforePaint() })
+          mutations.observe(flow, { childList: true, subtree: true })
+        }
+      }
+      // From here this closure's observers are the completion guard of last
+      // resort (see `handedOff` above), and this settle OWNS the port until
+      // it finishes.
+      followCompletionSettle.add(host)
+      followCompletionSettleRows.set(host, countUserRows(host))
+      handedOff = true
       let settleLast = performance.now()
       // Settle-pad transfer state lives above the completion handoff; the
       // loop below only drives it frame by frame. `settleRetiring` marks the
@@ -2018,7 +2430,6 @@ export function useConversationFollow(
       // commit pixel-stable is handed back to the layout at the bounded
       // settle rate and the pinned viewport glides down to the natural
       // resting position against the composer.
-      let settleRetiring = false
       const settleFrame = (now: number): void => {
         if (!isLeader(host)) {
           stopSettleListeners()
@@ -2028,6 +2439,7 @@ export function useConversationFollow(
           readerGestureIntent = false
           handBackVisual(host)
           clearVisual(host)
+          followCompletionSettle.delete(host)
           followLeaders.delete(host)
           releaseRevealScale()
           debugRuntime.reportFollow(host, null)
@@ -2045,36 +2457,15 @@ export function useConversationFollow(
         // ownership until the cascade has been quiet for
         // FOLLOW_SETTLE_QUIET_MS, so the host's own floor-snap never paints a
         // host action as a single-frame slam of the whole transcript.
-        // ANCHOR SCREEN HOLD: the completion cascade moves the reading anchor's
-        // viewport position (status swap, row replacement, uncompensated
-        // inserts). The pad backs the floor so the pin can pull the anchor
-        // back: pad += the downward screen push, and the pin (scrollTop =
-        // floor) cancels it in the same frame. Host commits that already
-        // compensated their own anchor (the fold pass) measure zero here and
-        // are left untouched. While the pad retires, extent motion is OUR OWN
-        // glide — the hold stands down.
-        const tailSurface = shiftSurfacesOf(host).at(-1) ?? host
-        const anchorScreen = tailSurface.getBoundingClientRect().top
-        if (guardAnchorScreen === null) guardAnchorScreen = anchorScreen
-        const screenDelta = anchorScreen - guardAnchorScreen
-        // Which host row moved: diff the flow children's heights each frame.
-        const flowEl = flowElementOf(host)
-        const kidHeights = flowEl
-          ? [...flowEl.children].map(c => `${(c.className || '').toString().split(' ')[0]?.slice(0, 18) ?? ''}:${Math.round(c.getBoundingClientRect().height)}`)
-          : []
-        if (traceActive() && kidHeights.join('|') !== settleKidsSig) {
-          followTrace('host-rows', { kids: kidHeights.join(' '), st: Math.round(host.scrollTop) })
-          settleKidsSig = kidHeights.join('|')
-        }
-        if (!settleRetiring && screenDelta > 0.5) {
-          const headroom = Math.max(0, FOLLOW_SETTLE_PAD_CAP_PX - flowPadOf(host))
-          const granted = Math.min(screenDelta, headroom)
-          followTrace('anchor-push', { screenDelta: Math.round(screenDelta), granted: Math.round(granted), st: Math.round(host.scrollTop) })
-          setFlowPad(host, flowPadOf(host) + granted)
-          if (pruneDeadRunway(host)) reservePx = 0
-        }
-        settleQuietMs = !settleRetiring && Math.abs(screenDelta) <= 0.5 ? settleQuietMs + dt : 0
-        guardAnchorScreen = anchorScreen
+        // ANCHOR SCREEN HOLD: the completion cascade moves the reading
+        // anchor's viewport position (status swap, live→settled replacement,
+        // clamp jumps). The reading-surface baseline lives in the shared
+        // followGuardAnchors ledger; the shift-excluded delta filters the
+        // engine's own glide, so the per-frame poll only answers real host
+        // motion. While the pad retires, extent motion is OUR OWN glide —
+        // the hold stands down.
+        const guardDelta = !settleRetiring ? enforceReadingAnchor(host, true) : null
+        settleQuietMs = !settleRetiring && (guardDelta === null || Math.abs(guardDelta) <= 0.5) ? settleQuietMs + dt : 0
         // ZERO-DOWNWARD-REBOUND (root cause): scrollTop is pinned to the floor
         // and the floor rides the owned margin 1:1, so the settle must NOT
         // shrink the margin — that clamps scrollTop downward with no shift
@@ -2086,19 +2477,23 @@ export function useConversationFollow(
         // up to close the reserve gap — the completion 归位, with zero
         // downward motion.
         const settleStatus = turnStatusOf(host)
-        if (settleStatus !== null && reservePx > FOLLOW_SETTLE_EPSILON_PX) {
-          const transferPx = Math.min(
-            reservePx,
-            ((tuning.runwayPx || FOLLOW_STATUS_RUNWAY_PX) / FOLLOW_RUNWAY_RETIRE_MS) * dt,
-          )
-          reservePx -= transferPx
-          settlePadPx += transferPx
-          // Extent bookkeeping: the transfer raises the extent target by 2δ
-          // (runway offset −δ with the extent held by the matching padding)
-          // without any real growth; absorb both so lag — and the painted
-          // shift — are untouched and the drain stays purely spring-driven.
-          animatedH += 2 * transferPx
-          setFlowPad(host, flowPadOf(host) + transferPx)
+        const ownedRunwayPx = runwayOffsetOf(host)
+        if (ownedRunwayPx > FOLLOW_SETTLE_EPSILON_PX) {
+          const requestedTransferPx = settleStatus === null
+            ? ownedRunwayPx
+            : Math.min(
+                reservePx,
+                ((tuning.runwayPx || FOLLOW_STATUS_RUNWAY_PX) / FOLLOW_RUNWAY_RETIRE_MS) * dt,
+              )
+          const transferredPx = transferRunwayToFlowPad(host, requestedTransferPx)
+          reservePx = Math.max(0, reservePx - transferredPx)
+          // targetHeight = scrollHeight - runway. The equal margin-to-pad
+          // transfer keeps scrollHeight fixed and lowers runway by δ, so the
+          // logical extent rises by exactly δ (not 2δ). Both this rebase and
+          // applyVisual's offset-history rebase are required: dropping either
+          // one stalls the spring or leaks residual motion into the quiet
+          // window (audit burst-gap/ramp quiescence-move).
+          animatedH += transferredPx
         }
         const runwayOffset = runwayOffsetOf(host)
         const lag = Math.max(0, host.scrollHeight - animatedH - runwayOffset)
@@ -2158,6 +2553,12 @@ export function useConversationFollow(
         )
         velocityPxPerSec = step.velocityPxPerSec
         settleAtFloor(host)
+        // A completion commit that GROWS the extent (tail/process rows, think
+        // re-measure) sinks the floor under the pin and applyVisual answers
+        // with the matching shift raise — the same lockstep the active loop
+        // paints for a wrap. That raise is compensation, not reversal: the
+        // probe's screen-space criteria, not the transform value, decide
+        // whether the text moved.
         animatedH = applyVisual(host, animatedH, reservePx, velocityPxPerSec, runwayOffset)
         if (traceActive()) {
           const sig = `${Math.round(host.scrollTop)}|${host.scrollHeight}|${Math.round(flowPadOf(host))}|${Math.round(reservePx)}|${settleRetiring}`

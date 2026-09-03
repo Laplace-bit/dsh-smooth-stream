@@ -2241,6 +2241,7 @@ describe('assistant renderer', () => {
       </div>,
     )
     const port = view.container.querySelector('[data-conversation-scroll]') as HTMLElement
+    const flow = view.container.querySelector('[data-chat-flow]') as HTMLElement
     const transcript = view.container.querySelector('[data-chat-transcript]') as HTMLElement
     const status = view.container.querySelector('[data-chat-turn-status]') as HTMLElement
     const composer = view.container.querySelector('[data-composer-seat]') as HTMLElement
@@ -2249,7 +2250,8 @@ describe('assistant renderer', () => {
       configurable: true,
       get: () => baseHeight
         + (Number.parseFloat(status.style.marginTop) || 0)
-        + (Number.parseFloat(transcript.style.marginBottom) || 0),
+        + (Number.parseFloat(transcript.style.marginBottom) || 0)
+        + (Number.parseFloat(flow.style.paddingBottom) || 0),
     })
     vi.spyOn(transcript, 'getBoundingClientRect').mockImplementation(() => ({
       top: 0,
@@ -2276,8 +2278,12 @@ describe('assistant renderer', () => {
       </div>,
     )
 
-    for (let elapsed = 0; elapsed < 1200; elapsed += 16) {
+    let previousTop = port.scrollTop
+    let worstDownwardFrame = 0
+    for (let elapsed = 0; elapsed < 2400; elapsed += 16) {
       await act(() => vi.advanceTimersByTimeAsync(16))
+      worstDownwardFrame = Math.max(worstDownwardFrame, previousTop - port.scrollTop)
+      previousTop = port.scrollTop
       const shift = currentTranslate(transcript)
       const runway = Number.parseFloat(transcript.style.marginBottom) || 0
       // While the temporary runway contributes to the scroll floor, an equal
@@ -2287,6 +2293,7 @@ describe('assistant renderer', () => {
     }
     expect(transcript.style.transform).toBe('')
     expect(transcript.style.marginBottom).toBe('')
+    expect(worstDownwardFrame).toBeLessThanOrEqual(1)
     expect(port.scrollTop).toBe(600)
   })
 

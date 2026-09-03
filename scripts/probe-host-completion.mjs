@@ -17,15 +17,21 @@ await page.waitForTimeout(2000)
 
 // Fresh session FIRST (stable home view), then pick the model with retries
 try {
-  await page.locator('button:has-text("新会话")').first().click({ timeout: 3000 })
+  // The brand button also contains “新会话” in current host builds; click the
+  // actual sidebar new-session control so the probe never reuses an old turn.
+  await page.locator('button[aria-label="新建会话"].newSession, button[aria-label="新建会话"]').filter({ hasText: '新会话' }).last().click({ timeout: 3000 })
   console.log('new session: clicked')
 } catch { console.log('new session: not found') }
 await page.waitForTimeout(800)
 for (let attempt = 1; attempt <= 3; attempt++) {
-  const currentModel = await page.evaluate(() => document.querySelector('.fh7cGa_triggerLabel')?.textContent ?? '')
-  if (currentModel === 'mock-stream') { console.log('model already mock-stream'); break }
+  const currentModel = await page.evaluate(() => document.querySelector('button[aria-label^="选择模型"]')?.getAttribute('aria-label')?.replace(/^选择模型，当前\s*/u, '') ?? document.querySelector('.fh7cGa_triggerLabel')?.textContent ?? '')
+  // Match the provider-qualified route, not the bare id: an aria label like
+  // "选择模型，当前 deepseek-official/mock-stream" contains "mock-stream" but
+  // routes to the built-in provider without a key, so the send silently never
+  // streams and the probe reports a confusing tail=missing verdict.
+  if (currentModel.startsWith('dsh-mock/') && currentModel.includes('mock-stream')) { console.log('model already mock-stream'); break }
   try {
-    await page.locator(`button:has(span:text("${currentModel}"))`).first().click({ timeout: 3000 })
+    await page.locator('button[aria-label^="选择模型"]').first().click({ timeout: 3000 })
     await page.waitForTimeout(900)
     await page.locator('text=模型').first().click({ timeout: 2500 })
     await page.waitForTimeout(1000)
@@ -79,7 +85,7 @@ await page.evaluate(() => {
         d.set.call(this, v)
         const now = d.get.call(this)
         if (Math.abs(now - prev) > 2 && Math.abs(now - (this.__lastSt ?? 0)) > 2) {
-          window.__fights.push({ kind: 'set', from: Math.round(prev), to: Math.round(now), stack: new Error().stack.split('\n').slice(2, 6).map(l => l.trim().replace(/^at /, '').slice(0, 90)).join(' || ') })
+          window.__fights.push({ t: Math.round(performance.now()), kind: 'set', from: Math.round(prev), to: Math.round(now), sh: this.scrollHeight, stack: new Error().stack.split('\n').slice(2, 6).map(l => l.trim().replace(/^at /, '').slice(0, 90)).join(' || ') })
         }
         this.__lastSt = now
       },
@@ -92,7 +98,7 @@ await page.evaluate(() => {
         orig.apply(inst, a)
         const now = d.get.call(inst)
         if (Math.abs(now - prev) > 2) {
-          window.__fights.push({ kind: method, from: Math.round(prev), to: Math.round(now), stack: new Error().stack.split('\n').slice(2, 6).map(l => l.trim().replace(/^at /, '').slice(0, 90)).join(' || ') })
+          window.__fights.push({ t: Math.round(performance.now()), kind: method, from: Math.round(prev), to: Math.round(now), sh: inst.scrollHeight, stack: new Error().stack.split('\n').slice(2, 6).map(l => l.trim().replace(/^at /, '').slice(0, 90)).join(' || ') })
         }
         inst.__lastSt = now
       }
@@ -104,11 +110,24 @@ await page.evaluate(() => {
       const flow = port.querySelector('[data-chat-flow]')
       const kids = flow ? [...flow.children] : []
       const user = kids[0]?.getBoundingClientRect().top ?? null
-      const assistant = kids.find(c => (c.getAttribute('class') || '').includes('13:assistant') || c.querySelector('[data-variant="think"]'))
+      const assistant = kids.findLast(c => c.getAttribute('data-chat-flow-kind') === 'assistant' || c.querySelector('[data-variant="think"]'))
       const assistantRect = assistant?.getBoundingClientRect() ?? null
+      // Row identity: a per-element counter exposes whether the swap REPLACES
+      // the assistant row element or only mutates inside it.
+      window.__rowIds ??= new WeakMap()
+      let nextRowId = window.__nextRowId ?? 1
+      const rowId = el => {
+        if (!el) return null
+        let id = window.__rowIds.get(el)
+        if (id === undefined) { id = nextRowId++; window.__rowIds.set(el, id) }
+        window.__nextRowId = nextRowId
+        return id
+      }
+      var assistantRowId = rowId(assistant)
+      var rowIds = kids.map(rowId)
       const think = assistant?.querySelector('[data-variant="think"]')
-      const turnTail = kids.find(c => (c.className || '').toString().includes('turn-tail'))
-      const turnProcess = kids.find(c => (c.className || '').toString().includes('turn-process'))
+      const turnTail = kids.find(c => c.getAttribute('data-chat-flow-kind') === 'turn-tail')
+      const turnProcess = kids.find(c => c.getAttribute('data-chat-flow-kind') === 'turn-process')
       const turnStatus = kids.find(c => (c.className || '').toString().includes('turnStatus') || c.getAttribute('role') === 'status')
       const emptyRows = kids.filter(c => (c.className || '').toString().includes('input-message') && Math.round(c.getBoundingClientRect().height) === 0).length
       const surface = assistant?.querySelector('[data-variant="think"]')?.parentElement ?? assistant
@@ -120,6 +139,10 @@ await page.evaluate(() => {
         userTop: user,
         assistantTop: assistantRect?.top ?? null,
         assistantBottom: assistantRect?.bottom ?? null,
+        assistantTransform: assistant?.style.transform ?? '',
+        assistantRowId,
+        rowIds: rowIds.join(','),
+        assistantMarginBottom: assistant?.style.marginBottom ?? '',
         assistantH: assistantRect ? Math.round(assistantRect.height) : null,
         thinkState: think?.getAttribute('data-state') ?? null,
         thinkH: think ? Math.round(think.getBoundingClientRect().height) : null,
@@ -163,7 +186,13 @@ console.log('ST-FIGHTS:', fights.length)
 console.log('FIGHTS-JSON:')
 for (const f of fights) console.log(JSON.stringify(f))
 console.log('engine-log lines:', followLogs.length)
-for (const l of followLogs.slice(0, 60)) console.log('  ' + l)
+const noisy = l => l.includes('guard-measure') || l.includes('mo-fire')
+const shown = followLogs.filter(l => !noisy(l))
+for (const l of shown) console.log('  ' + l)
+const suppressed = followLogs.length - shown.length
+if (suppressed > 0) console.log(`  (suppressed ${suppressed} guard-measure/mo-fire lines)`)
+const moFires = followLogs.filter(l => l.includes('mo-fire')).length
+console.log('mo-fire throttled count:', moFires)
 const shifts = await page.evaluate(() => window.__shifts ?? [])
 const endState = await page.evaluate(() => {
   const port = document.querySelector('[data-conversation-scroll]')
@@ -204,8 +233,19 @@ const compStart = tailAt !== undefined ? tailAt - 1200 : active.at(-1).t - 6000
 const comp = active.filter(f => f.t >= compStart)
 const stream = active.filter(f => f.t < compStart)
 
+if (tailAt !== undefined) {
+  const tailIndex = active.findIndex(f => f.t === tailAt)
+  console.log('\nframe dump around host tail/process mount:')
+  for (let i = Math.max(1, tailIndex - 6); i <= Math.min(active.length - 1, tailIndex + 8); i++) {
+    const f = active[i]
+    const p = active[i - 1]
+    console.log(`  t=+${Math.round(f.t - t0)} st=${f.st.toFixed(1)} sh=${f.sh} aTop=${f.assistantTop?.toFixed(1)} aBottom=${f.assistantBottom?.toFixed(1)} aH=${f.assistantH} tr='${f.assistantTransform}' mb='${f.assistantMarginBottom}' dA=${f.assistantTop !== null && p.assistantTop !== null ? (f.assistantTop - p.assistantTop).toFixed(2) : '-'} row=${f.assistantRowId}(prev ${p.assistantRowId}) status=${f.statusPresent}/${f.statusH} process=${f.processH} tail=${f.tailH} owned=${f.owned}`)
+  }
+}
+
 // Downward moves + jumps
 let worstUserDown = 0
+let worstUserDownFrame = null
 const events = []
 const scan = (frames, label) => {
   for (let i = 1; i < frames.length; i++) {
@@ -213,7 +253,10 @@ const scan = (frames, label) => {
     const c = frames[i]
     const userDown = (c.userTop !== null && p.userTop !== null) ? c.userTop - p.userTop : 0
     const aTop = (c.assistantTop !== null && p.assistantTop !== null) ? c.assistantTop - p.assistantTop : 0
-    if (userDown > worstUserDown) worstUserDown = userDown
+    if (userDown > worstUserDown) {
+      worstUserDown = userDown
+      worstUserDownFrame = c
+    }
     const flags = []
     if (userDown > 0.35) flags.push(`USER_DOWN=${userDown.toFixed(2)}`)
     if (Math.abs(aTop) > 4) flags.push(`aTopΔ=${aTop.toFixed(1)}`)
@@ -233,6 +276,15 @@ console.log(`\ncompletion window frames=${comp.length}, stream frames=${stream.l
 console.log(`worst userDown=${worstUserDown.toFixed(2)}px`)
 console.log(`events(${events.length}):`)
 for (const e of events.slice(0, 40)) console.log('  ' + e)
+if (worstUserDownFrame !== null) {
+  const worstIndex = active.indexOf(worstUserDownFrame)
+  console.log('\nframe dump around worst downward move:')
+  for (let i = Math.max(1, worstIndex - 5); i <= Math.min(active.length - 1, worstIndex + 5); i++) {
+    const f = active[i]
+    const p = active[i - 1]
+    console.log(`  t=+${Math.round(f.t - t0)} st=${f.st.toFixed(1)} sh=${f.sh} userTop=${f.userTop?.toFixed(1)} dUser=${f.userTop !== null && p.userTop !== null ? (f.userTop - p.userTop).toFixed(2) : '-'} status=${f.statusPresent}/${f.statusH} process=${f.processH} tail=${f.tailH} owned=${f.owned}`)
+  }
+}
 // Detailed frame dump across the completion transition (search all active frames)
 const bigIdx = active.findIndex((f, i) => i > 0 && f.userTop !== null && active[i - 1].userTop !== null && f.userTop - active[i - 1].userTop > 10)
 if (bigIdx > 0) {
@@ -247,3 +299,30 @@ if (bigIdx > 0) {
     )
   }
 }
+
+const abruptCompletionDown = comp.some((f, i) => i > 0
+  && f.userTop !== null
+  && comp[i - 1].userTop !== null
+  && f.userTop - comp[i - 1].userTop > 2)
+// Screen-space verdict. The transform value is NOT the user-visible signal:
+// when the host grows the extent under the pin (tail/process mount), the
+// floor sinks, scrollTop clamps and the matching shift raise is lockstep
+// COMPENSATION — the rendered text stays put. Judging the transform flagged
+// those corrections as "rebound" and, once clamped, left the raw clamp jump
+// (assistant one-frame 170px up) unpunished. Judge the rendered anchor.
+const parseShift = f => Number.parseFloat(/,\s*(-?[\d.]+)px/.exec(f.assistantTransform)?.[1] ?? '0')
+const visibleJumps = []
+const clampEvents = []
+for (let i = 1; i < comp.length; i++) {
+  const f = comp[i]
+  const p = comp[i - 1]
+  const dA = f.assistantTop !== null && p.assistantTop !== null ? f.assistantTop - p.assistantTop : 0
+  const dU = f.userTop !== null && p.userTop !== null ? f.userTop - p.userTop : 0
+  if (Math.abs(dA) > 10) visibleJumps.push(`t=+${Math.round(f.t - t0)}ms aTopΔ=${dA.toFixed(1)} stΔ=${(f.st - p.st).toFixed(1)} shΔ=${Math.round(f.sh - p.sh)} trΔ=${(parseShift(f) - parseShift(p)).toFixed(1)}`)
+  if (Math.abs(dU) > 2.5) clampEvents.push(`t=+${Math.round(f.t - t0)}ms dUser=${dU.toFixed(1)} trΔ=${(parseShift(f) - parseShift(p)).toFixed(1)}`)
+}
+for (const j of visibleJumps) console.log('  VISIBLE-JUMP ' + j)
+for (const j of clampEvents) console.log('  clamp-event (lockstep if trΔ cancels dUser): ' + j)
+const passed = tailAt !== undefined && !abruptCompletionDown && visibleJumps.length === 0
+console.log(`\nVERDICT: ${passed ? 'PASS' : 'FAIL'} (tail=${tailAt === undefined ? 'missing' : 'observed'}, completion frame-down limit=2px, visible |aTopΔ|>10px frames=${visibleJumps.length})`)
+process.exitCode = passed ? 0 : 1

@@ -1,93 +1,111 @@
-# 交接文档：流式结束时刻的滚动位置抖动（未彻底修复）
+# 交接文档：流式完成时刻的滚动抖动——根因链与残余（2026-09-03）
 
-> 2026-09-02。写给下一位接手者。所有数据均来自真实宿主（deepseek-harness web profile）+ mock LLM 流式端到端实测，非推测。
+> 写给下一位接手者。所有结论均来自真实宿主（deepseek-harness web profile）+ mock 流端到端帧级实测，
+> 探针与判据已固化在本仓库 `scripts/probe-host-completion.mjs`，可直接复现。
 
-## 一、问题现象（用户视角）
+## 一、用户诉求与现状
 
-- **流式过程中**（回复正在逐字输出时）：滚动完全平滑，无任何问题（用户确认"稳定性非常好"）。
-- **流式结束时刻**（回复输出完成、宿主收尾）：对话内容发生**可见的位置抖动**——整个文本列瞬时下坠/上跳数像素到数十像素。用户原话："结束的时候仍然会发生位置抖动"。
-- **历史演变**：
-  1. 最初：结束时出现 68~97px 的多帧猛坠（已修复，见下文）。
-  2. 修复后：稳定性好，但引擎保留的空间变成文本与输入框之间的永久空白（用户截图红框）→ 用"pad 退休滑行"修复。
-  3. 现在：**结束时刻仍有残留抖动**（实测每次完成 1~2 次 painted layout-shift，约 0.011~0.012 值 ≈ 8~15px；部分运行为 0）。
+- 用户诉求（2026-09-03 原话）：流式结束时文本不要 Y 轴往复移动，"最好能稳定些"。
+- 流式过程中滚动完全平滑（用户确认，多轮验证未破坏）。
+- 本轮后实测形态（两次探针完全一致，确定性达标）：
+  1. 交换帧（turnStatus 卸载/turn-process、turn-tail 挂载同帧）：assistant 渲染位置**单帧上跳 ~100-150px**；
+  2. 交换后 3 帧：±21px 的拉锯（守卫过补偿 ~22px/帧 × 3，pad 耗尽后收敛）；
+  3. 之后进入 1.5s 限速归位（0.8px/帧，用户已接受该形态）。
+- 对比本轮开始：单帧跳变 170px、且存在（后来发现的）退休-重发无限循环的隐患。
 
-## 二、系统架构与文件地图
+## 二、本轮钉死的完整根因链（五层，全部有帧级实证）
 
-**插件（本仓库，工作目录 `/Users/dzlin/work/project/dsh-smooth-stream`）**：
-- `src/client/teleprompterGlide.ts`（~2100 行）— 跟随引擎核心：
-  - 每帧把 scrollTop 钉在 floor（= scrollHeight − clientHeight），视口始终贴内容底部；
-  - 揭示滞后以合成器 transform（`translate3d`，正向=下移）画在流行上；
-  - "预留跑道"= 挂在 TurnStatus 行 `marginTop` 上的 0~72px margin（随揭示速度爬升），新行落在该间隙里；换行周期：floor +L、shift +L 同帧抵消 → shift 限速衰减（8px/帧）→ 内容平滑上行一行；
-  - 完成期 settle 循环（cleanup 里启动）：排空弹簧 lag → 把 margin 逐帧搬进 flow 的 `paddingBottom`（"pad"，extent 守恒）→ 静默 240ms → **pad 退休段**（0.45px/ms 限速把 pad 还给布局，floor 随之下沉、视口平滑下滑到自然位置）。
-- `src/client/FollowHost.tsx` — 组件封装（挂 useConversationFollow）。
-- `src/client/TypewriterAssistantNodeView.tsx` — 真实节点视图：**两个 FollowHost 臂**（352 行 per-block、660 行 root）；流式结束时有 **live→settled 交换**（打字机渲染换成静态 markdown，React 会 re-key/替换 assistant 行元素！）。
-- `src/client/useSmoothStreamContent.ts` — 打字机揭示引擎（本问题未改动，工作正常）。
+1. **完成级联帧会重挂 FollowHost 臂**：live→settled 交换时 React 重渲染节点视图，
+   settled 侧新臂以更高 generation 在 layout effect 里同步 prime，`hold()` 从正在排水的
+   settle 循环手里**抢走领导权**（探针实证 `lead-take gen:7 st:1179` 与交换帧同帧）。
+2. **抢权后无人能补交换帧**：前任臂的观察器因 `!isLeader` 跳过（`rbp-skip` 风暴）；
+   新臂的 MutationObserver 是在变异之后才 observe 的，**收不到那批记录**；
+   新臂 prime 的 `measureReadingAnchor` 只刷新基线——把已发生的跳变**采纳为新基线**。
+3. **ceiling 方案（上一轮）被证伪并移除**：`setDirectShift` 的 WeakMap 单调上限把 settle 循环的
+   锁步补偿钳死（交换帧 shift 该抬 +133 被钳到 28），还把 ceiling 棘轮下拧**把跳变锁进画面**；
+   且 transform 增长 ≠ 文本移动——同帧 extent 增长下的 shift 抬升是**补偿**（净位移 ≈0）。
+   以"transform 单调"为判据是误诊，已全部删除。
+4. **旧守卫锚定 `shiftSurfacesOf(port).at(-1)` 会随级联换身份**：tail/process 行挂载后
+   `at(-1)` 从 assistant 行切换到新行，把"tail 出现在视口内"测成 >1000px 的向下推，
+   pad 被灌到 212px，再花 4 秒退休——"上跳 + 缓动下沉"的往复即此。
+5. **pad 退休的自身滑行会被守卫误判**：守卫若不排除 pad 项，退休（pad −δ → 内容下移 δ）
+   被读成宿主下推 → 重新 grant pad → **退休-重发无限循环**（ST-FIGHTS 栈实证 settleFrame
+   在流结束后 19s 仍以 ~2.9s 周期反复 1061↔1177）。修复 = 锚点基线同时存储 shift 与 pad，
+   宿主增量 = `topΔ − shiftΔ + padΔ`。
 
-**宿主（`/Users/dzlin/work/project/deepseek-harness`，用户以 `pnpm dsh web` 或 `node --import tsx/esm apps/cli/src/bin.ts web` 启动）**：
-- `packages/client/ui-chat/src/client/chat/ChatView.tsx` — 宿主**自己的**滚动控制器（与插件引擎并行运行、共享同一个滚动容器！）：
-  - `toBottom(el)`（~392 行）：`el.scrollTop = el.scrollHeight` —— 硬钉到全部 extent；
-  - ~518 行：`if (appendedUser || … || (tipMoved && atBottomRef.current)) toBottom(el)` —— **tail 签名一变就硬钉**，运行在 layout effect（绘制前）；
-  - ~486-497 行：anchored-prepend 路径：`el.scrollTop += flowTop(row, el) − anchor.top`（可向任意方向调整）；
-  - ~528-563 行 onScroll：用 observed-top 账本做"是否读者滚动"归因；非 at-bottom 时 `chatScroll.save(position)` 保存锚点。
-- 插件经 `~/.dsh/profiles/web/node_modules/dsh-smooth-stream`（`link:` → 本仓库）注入，宿主服务的 client bundle 由各插件的 `lib/client.js` 合并而成（`/plugins/??…&rev=hash`），**rev 在宿主启动时计算**——改源码后必须 `pnpm build`（tsdown → lib/）+ 完全重启宿主。
+## 三、本轮落地的修复（均已提交/在工作区）
 
-## 三、完成时刻的宿主动作序列（帧级实测）
+引擎（`src/client/teleprompterGlide.ts`）：
+- 移除整套 monotone shift ceiling（含 `setDirectShift` 的钳制、settle 的棘轮、handoff 的武装）。
+- **共享屏幕空间锚点** `followGuardAnchors`（per-port，含 element 身份 + top + shift + pad），
+  所有臂与 settle 读写同一基线 → 守卫幂等（先到者补偿、后到者测得 ≈0）。
+- **锚点 = 阅读行**（`readingAnchorOf`：flow 子节点中最后一个 kind=assistant 或含 think 的行），
+  并带 flow 子节点索引：同槽位且旧节点已断开 = live→settled 原位替换 → 桥接保持阅读位置；
+  新回合行追加（旧节点仍连接）→ 重置基线不补偿。
+- **`enforceReadingAnchor`**：push（宿主下推 → grant pad）、pull（上推 → 先释放 pad、
+  pad 不足用 shift raise 补齐并 `animatedH -= raise` 使抬升在弹簧模型中粘住）、deadband 跟踪。
+  补偿后基线存**补偿后的保持位置**（部分补偿单调收敛，不振荡）。
+- **完成 settle 所有权**（`followCompletionSettle` + 用户行计数）：settle 排水/退休期间
+  swap 重挂臂不得抢领导权、不得 reclaim pad、不得刷新共享基线；真正的新回合
+  （用户行数增长）正常接管。宿主无 `data-chat-flow-kind` 属性（引擎自带台架）时自动禁用。
+- 流式期守卫退化为原始语义（push 保留、pull 仅释放 pad、**无 raise**）——否则与活动循环的
+  wrap 锁步打架，冻结揭示（verify-y-rebound 600CPS 场景曾因此红，已修复恢复 5/5）。
+- jsdom 零矩形（gBCR 恒 0）时跳过屏幕测量——单测环境免疫。
 
-回复流式结束（生产者 complete → 揭示排空）前后，宿主在一个到几个提交里做：
+探针（`scripts/probe-host-completion.mjs`，判红工具，本轮大幅强化）：
+- 模型路由校验修复：aria 里 `deepseek-official/mock-stream` 含 "mock-stream" 子串但路由到
+  无 key 内置 provider——必须校验 `dsh-mock/` 前缀，否则静默不发流、误报 tail=missing。
+- 判据改为**屏幕空间**：完成窗内单帧 |aTopΔ|>10px（可见跳变，双向）、userDown>2px；
+  transform 增长不再判 FAIL（是补偿不是反转），改为打印 clamp-event 信息行。
+- 行元素身份追踪（WeakMap 计数器）、MO/RO 记录分类、scrollTop 间谍带栈、全量过滤日志。
+- 已知坑：mock LLM 服务器（:49731）可能中途死掉，探针前先 `curl /v1/models` 探活；
+  宿主 token 含 `_`/`-`，`grep -o 'token=[^ ]*'` 取全。
 
-1. `turnStatus` 行（高 26px，其 marginTop 上骑着引擎最多 72px 的跑道 margin）**卸载**；同帧一个 `turn-process` 行（41px）在 **assistant 行上方**挂载。净 extent **−53 ~ −97px**（一帧）。
-2. **live→settled 交换**：React 替换 assistant 行的 DOM 元素（re-key）——引擎写在旧行上的 margin **随元素死亡**；新行没有任何 margin。
-3. 三个高度为 0 的 `input-message` 行（model-retry ChatNodeSeat）位于 process 行与 assistant 行之间。
-4. `turn-tail` 指标行（~28px）在 assistant 下方挂载（用户截图中的"用量 x tok · 用时 x 秒"行）。
-5. Think 块自动折叠（AnimatedDisclosure 的 grid-rows 过渡，在 assistant 行内部，实测 ~180px）。
-6. 宿主自身的 composer/header 区也在此窗口重排（layout-shift 的 sources 含 `unmL2W_trailing`、`hvvBTq_headerActions`——这些在滚动容器之外/属于宿主 chrome）。
+## 四、闸门现状（会话内多次实测）
 
-**几何本质**：滚动视口全程钉在 floor（= extent − clientH）。extent 任何收缩 → floor 下沉 → 浏览器把 scrollTop 钳制下调 → **全部可见内容整体下移**。这就是抖动的物理来源；extent 任何增长则反向。
+| 闸门 | 现状 | 基线(4b8677f) | 说明 |
+|---|---|---|---|
+| 单测 | 203/203 ✓ | 203/203 | |
+| verify-y-rebound | 5/5 ✓ | 5/5 | 600CPS 曾红（流式守卫打架），已修 |
+| verify-overflow | 10/10 ✓ | 10/10 | 台架 kind 缺失导致 6/10，已修 |
+| run-render-audit | **9/10** | 10/10 | burst-gap/ramp 偶发 1px/帧 quiescence-move（见五-3） |
+| probe-host-multiturn | adopt -92px | **同 -92px** | 基线既有，非本轮回归 |
+| probe-host-completion | FAIL（1 跳 + 3 拉锯帧） | FAIL（1 跳 170px） | 见五-1/五-2 |
 
-## 四、当前修复方案与已验证效果（提交 ac74ea7 + 59c5739）
+## 五、给接手者的下一步（按优先级）
 
-引擎在 flow 元素（`[data-chat-flow]`，宿主从不重写其内联样式——minHeight 先例）上维护一个 **pad（paddingBottom）**，把宿主级联造成的 extent 损失**同帧补回**，使 extent/floor/scrollTop/内容像素全部静止：
+1. **交换帧 -100~-150px 上跳**：交换的多批 React 提交（status 卸载→extent 增长→settled 重排）
+   使 gen5 守卫与 settle poll 各补到一部分，仍漏大头。方向：在 settle 所有权保护下，
+   让 settle 循环的 poll 在交换后的前 2-3 帧用**全部三项账本差**（top/shift/pad 之外再加
+   runwayOffset 项）做一次性总补偿，而不是逐帧追。
+2. **交换后 3 帧 ±21px 拉锯**：`pullReadingAnchorBack` 每帧过补偿 ~22px（补偿的 rendered
+   效应与下一帧宿主重排存在相位差）。方向：pull 分支加每帧限速（如 ≤8px/帧，复用
+   FOLLOW_PAINT_SHIFT_MAX_STEP_PX），或交换后静默 2 帧再一次性补偿。
+3. **audit 9/10 的 quiescence-move**：跑道→pad 转移期间 ~1px/帧残余位移。已证伪两个方向
+   （去掉 settle 的 `animatedH += transferredPx` 会令 burst-gap 恶化到 40-57 次——弹簧停滞；
+   改回 160ms 退休会恶化到 5/10——幅度变大）。该转移的账本在 settle 与 applyVisual 的
+   offsetHistory rebase 之间可能存在真实的 δ 残差，需在台架里对 sh 做逐帧断言定位。
+4. probe 判据阈值（10px/2px/2.5px）按用户实际观感校准后再定为门禁。
 
-- 守卫点 1：`restoreBeforePaint`（RO + notifyFollowCommit 路径，**绘制前**）；
-- 守卫点 2：settle 循环（rAF）；
-- 守卫点 3：cleanup 的死 margin 精确转换（registry 元素 `!isConnected` 时 `setFlowPad(+offset)` + `pruneDeadRunway` + `reservePx = 0`）；
-- 补偿量 = **锚点屏幕下推量**（`getBoundingClientRect().top` 差值，封顶 `FOLLOW_SETTLE_PAD_CAP_PX`=144）；宿主已自行补偿的动作（如审计台架的 fold 补偿）测得 0，不重复补偿；
-- pad 退休段：级联静默（240ms）且排空结束后，0.45px/ms 把 pad 还给布局，视口平滑下滑到自然位置。
+## 六、复现环境（一条命令序列）
 
-**实验室实测**（mock LLM，真实宿主，Layout Instability API 绘制级判据）：每次完成 1~2 次 layout-shift，值 ≈0.011~0.012（≈8px），sources 同时含引擎元素（`div.I17U7q_follow`）与宿主 chrome（`unmL2W_trailing`、`hvvBTq_headerActions`）；约 1/3 运行完全为零。回归闸门全绿：verify-y-rebound 5/5、run-render-audit 5/5、203 单测、tailbob、overflow、流式 painted Δv p95=0.0133（基线 0.015）。
+```bash
+# 1. mock LLM（临时，测完删 settings 里的 dsh-mock）
+node scripts/mock-llm-server.mjs > /tmp/dsh-mock-llm.log 2>&1 &
+# 2. settings.yaml 的 llm-pi-ai.providers 下加 dsh-mock（apiKeyEnv: DSH_MOCK_KEY,
+#    api: openai-completions, baseURL: http://127.0.0.1:49731/v1, models: [mock-stream]）
+#    且 agent-default-model 需 provider: dsh-mock + model: mock-stream
+# 3. 起宿主（lib rev 启动时固化：改 src 必须 pnpm build + 完全重启）
+cd /Users/dzlin/work/project/deepseek-harness
+DSH_MOCK_KEY=mock node --import tsx/esm apps/cli/src/bin.ts web --no-open
+# 4. 探针（token 从宿主日志取，含 _ 和 -）
+node scripts/probe-host-completion.mjs "http://127.0.0.1:3080/?token=<...>"
+```
 
-## 五、尚未解决的残余（用户仍在真实环境看到抖动）
+## 七、硬性约束（不变）
 
-**残余现象**：用户真实环境（真实模型流、真实会话）中完成时刻仍有抖动；我的 mock 实验室只能复现 ~8px 级别，无法完全复现用户所见幅度。
-
-**已知/怀疑的机制（按可疑度排序）**：
-
-1. **双控制器竞争窗口**：宿主 ChatView 的 `toBottom`（layout effect，绘制前）在级联提交把视口钉到**塌缩后的 extent**，而引擎的 settle 守卫跑在 rAF（晚于宿主 effect）→ 宿主那一帧先画出下沉。已把守卫前置到 `restoreBeforePaint`（RO 路径），但**并非所有级联提交都会触发 RO/notifyFollowCommit**（如 turn-process 行挂载在 assistant 上方时，被观察的 tail 表面不改变尺寸）→ 存在漏捕获的提交。
-2. **宿主锚点系统的种子效应**：一次 at-bottom 误判（floor − st > 25 的单帧）就会让宿主保存锚点（`chatScroll.save` / `anchorRef`），此后宿主的恢复路径反复把 scrollTop 拉回旧锚点，与引擎的 floor 钉制形成振荡（日志曾见 `external-scroll {from:16,to:52,ledger:52}` ×5——引擎每次钉 52，总有东西拉回 16）。
-3. **live→settled 交换的行内重排**：settled 解析与 live 揭示的 markdown 几何不完全一致（行内回流，layout-shift sources 含 follow root 自身）——滚动层无法补偿，需揭示侧保证交换前后几何一致。
-4. **宿主 chrome 的同窗重排**：composer/header 的重排不属于滚动引擎管辖。
-
-## 六、诊断工具（已就位）
-
-- **`[dsh-follow]` console 日志**：完成窗口自动武装（任何 finish 路径 15s 窗口），事件：`finish-enter` / `fast-gate` / `cleanup-dead-margin` / `host-rows`（逐帧 flow 子元素高度差）/ `anchor-push` / `settle`（状态变化帧）/ `retire-start` / `finish` / `external-scroll`（在 setFollowScrollTop 检测到非引擎滚动写入：宿主硬钉/浏览器钳制的直接证据）。
-- `scripts/probe-host-completion.mjs <url>`：端到端（选 mock-stream 模型 → 发送 → 帧采样 + layout-shift PO + scrollTop 间谍 + 引擎日志捕获）。
-- `scripts/probe-host-multiturn.mjs`：多轮（pad 回收路径）。
-- `scripts/mock-llm-server.mjs`：本地 OpenAI 兼容 SSE mock（reasoning_content 触发 Think 块）；需在 `~/.dsh/settings.yaml` 的 `llm-pi-ai.providers` 下临时加 `dsh-mock` provider（apiKeyEnv: DSH_MOCK_KEY，baseURL: http://127.0.0.1:49731/v1），用 `DSH_MOCK_KEY=mock` 启动宿主；**测完删掉**（宿主会把 settings 重写回它的内存态）。
-- `scripts/verify-y-rebound.mjs`（Y 轴零回弹闸门，glide-aware）、`scripts/run-render-audit.mjs`（5 画像完成链审计）、`scripts/check-lib-fresh.mjs`（lib 陈旧检测）。
-- 页面内 scrollTop 间谍（probe 内置）：拦截属性写入带调用栈；**注意 `element.scrollTo()` 不走该 setter**（已在间谍中单独包装）。
-
-## 七、硬性约束（修复不得破坏）
-
-1. 流式期间：会话内容**零向下位移**（verify-y-rebound，容差 0.35px，glide-aware 豁免：extent 逐帧递减且步长 ≤10px 的限速归位不算违规）。
-2. 完成态：**不残留引擎空间**（文本必须自然紧贴 composer；flow pad 终值必须为 0）。
-3. 流式丝滑：painted Δv p95 ≤ 0.015 px/ms（`scripts/probe-velocity.mjs`）。
-4. 弹簧参数不可动：`FOLLOW_SPRING_STIFFNESS=130 / DAMPING=24 / MASS=1 / SUBSTEPS=4`。
-5. 全部闸门保持绿：rebound 5/5、run-render-audit 5/5、203 单测、tailbob、overflow 2/2。
-
-## 八、给接手者的建议方向
-
-1. **用 `[dsh-follow]` 日志在用户真实环境抓一次完整完成窗口**（用户已同意复制 console 输出）——重点看 `external-scroll` 与 `anchor-push` 的交错时序，确认残余抖动是"宿主 toBottom 钉到塌缩 extent"还是"锚点恢复路径"还是"settled 交换行内重排"。
-2. 若是 (1)：考虑让引擎在**提交落 DOM 的同一任务**（layout effect 或 notifyFollowCommit）覆盖所有级联提交的 pre-paint 纠正——现状只覆盖触发 RO/notifyFollowCommit 的提交；或与宿主协商：ChatView 的 `toBottom` 在 `data-follow-owned` 存在时跳过（插件已导出 `hasRecentConversationFollow`）。
-3. 若是 (2)：排查 at-bottom 误判的种子帧（溢出开始时 margin 一次性物化的 +72 帧）；宿主侧修复 = 恢复路径检查 `hasRecentConversationFollow`。
-4. 若是 (3)：在揭示引擎侧让 settled 解析与 live 揭示的末态几何一致，或在交换时由插件测量 `swapDelta` 并做等量 extent 补偿。
-5. 修改后必跑：`pnpm build` → **完全重启宿主**（bundle rev 启动时固化，只刷新页面无效）→ `node scripts/check-lib-fresh.mjs` → 全套闸门。
+1. 流式期零向下位移（verify-y-rebound 5/5，glide-aware 豁免）。
+2. 完成态不残留引擎空间（pad 终值 0，文本紧贴 composer）。
+3. 弹簧参数不可动：`FOLLOW_SPRING_STIFFNESS=130 / DAMPING=24 / MASS=1 / SUBSTEPS=4`。
+4. 台架（audit.html 等）无 `data-chat-flow-kind`——任何依赖行 kind 的逻辑必须带 -1 回退。
+5. 改 src 后必须 `pnpm build` + **完全重启宿主**（bundle rev 启动时固化）。
