@@ -28,10 +28,10 @@ afterEach(() => {
 const developmentView: StreamSettingsView = {
   version: '0.1.0',
   installation: 'development',
-  writable: true,
-  enabled: true,
-  thinkAutoExpand: true,
-  autoCollapse: true,
+    writable: true,
+    enabled: true,
+    controlScroll: true,
+    thinkAutoExpand: true,
   canUpgrade: false,
 }
 
@@ -92,12 +92,10 @@ async function bench(options: BenchOptions = {}): Promise<{
       const settings = payload as {
         enabled?: unknown
         thinkAutoExpand?: unknown
-        autoCollapse?: unknown
         debugEnabled?: unknown
         debugTuning?: unknown
       }
-      if (typeof settings.enabled !== 'boolean' || typeof settings.thinkAutoExpand !== 'boolean'
-        || typeof settings.autoCollapse !== 'boolean') {
+      if (typeof settings.enabled !== 'boolean' || typeof settings.thinkAutoExpand !== 'boolean') {
         return { ok: false as const, error: { code: 'internal', message: 'bad payload' } }
       }
       if (options.failWrite === true) {
@@ -108,7 +106,6 @@ async function bench(options: BenchOptions = {}): Promise<{
         ...view,
         enabled: settings.enabled,
         thinkAutoExpand: settings.thinkAutoExpand,
-        autoCollapse: settings.autoCollapse,
       }
       if (typeof settings.debugEnabled === 'boolean' && typeof settings.debugTuning === 'object' && settings.debugTuning !== null) {
         debugView = { debugEnabled: settings.debugEnabled, tuning: settings.debugTuning as StreamDebugSettingsView['tuning'] }
@@ -235,9 +232,9 @@ describe('smooth-stream settings card', () => {
     expect(coreDescribe).not.toHaveBeenCalled()
   })
 
-  it('rejects a settings response whose auto-collapse flag is malformed', async () => {
+  it('rejects a settings response whose control-scroll flag is malformed', async () => {
     const { ctx, slots } = await bench({
-      readValue: { ...developmentView, autoCollapse: 'true' },
+      readValue: { ...developmentView, controlScroll: 'true' },
     })
     declareCardSlot(slots)
     await ctx.plugin({ inject: [...inject], apply }).await()
@@ -277,31 +274,8 @@ describe('smooth-stream settings card', () => {
     })
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
       enabled: true,
+      controlScroll: true,
       thinkAutoExpand: false,
-      autoCollapse: true,
-    })
-  })
-
-  it('stages and persists the finished-turn collapse switch independently', async () => {
-    const { ctx, slots, call } = await bench()
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
-
-    face.edit({ autoCollapse: false })
-    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ dirty: true, autoCollapse: false })
-    face.save()
-    await vi.waitFor(() => {
-      expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-        dirty: false,
-        autoCollapse: false,
-      })
-    })
-    expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
-      enabled: true,
-      thinkAutoExpand: true,
-      autoCollapse: false,
     })
   })
 
@@ -350,8 +324,8 @@ describe('smooth-stream settings card', () => {
 
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
       enabled: false,
+      controlScroll: true,
       thinkAutoExpand: true,
-      autoCollapse: true,
       debugEnabled: true,
       debugTuning: tuning,
     })

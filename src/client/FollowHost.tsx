@@ -19,7 +19,10 @@ export function FollowHost({
   revealScaleRef,
   predictive = true,
   predictiveRef,
+  controlScroll = true,
   hostRef,
+  className,
+  entranceActive,
   children,
 }: {
   active: boolean
@@ -32,8 +35,13 @@ export function FollowHost({
   revealScaleRef?: { current: number } | undefined
   predictive?: boolean
   predictiveRef?: { current: boolean } | undefined
+  /** False leaves conversation bottom-follow to the Host. */
+  controlScroll?: boolean
   hostRef?: { current: HTMLDivElement | null } | undefined
   children: ReactNode
+  className?: string | undefined
+  /** Optional marker for a generic row's one-shot entrance animation. */
+  entranceActive?: boolean | undefined
 }) {
   const localRootRef = useRef<HTMLDivElement>(null)
   const rootRef = hostRef ?? localRootRef
@@ -48,6 +56,7 @@ export function FollowHost({
     predictiveRef,
     entranceExtentRef,
     revealedCharsRef,
+    controlScroll,
   )
   useEffect(() => {
     if (onGrowth === undefined || typeof ResizeObserver === 'undefined') return
@@ -79,5 +88,13 @@ export function FollowHost({
       if (growthFrame !== null) cancelAnimationFrame(growthFrame)
     }
   }, [onGrowth])
-  return <div ref={rootRef} className={css.follow}>{children}</div>
+  return (
+    <div
+      ref={rootRef}
+      className={className === undefined ? css.follow : `${css.follow} ${className}`}
+      data-entrance={entranceActive === undefined ? undefined : entranceActive ? 'active' : 'idle'}
+    >
+      {children}
+    </div>
+  )
 }

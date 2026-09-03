@@ -22,8 +22,8 @@ export interface SmoothStreamCardState {
   saving: boolean
   failed: boolean
   enabled: boolean
+  controlScroll: boolean
   thinkAutoExpand: boolean
-  autoCollapse: boolean
   debugEnabled: boolean
   debugTuning: StreamDebugTuning
   debugAvailable: boolean
@@ -52,7 +52,7 @@ export class SmoothStreamCardController {
   private readonly store = createSnapshotStore<SmoothStreamCardState>(this.projection())
   private loaded: StreamSettingsView | undefined
   private loadedDebug: StreamDebugSettingsView | undefined
-  private stagedBase: Pick<StreamSettings, 'enabled' | 'thinkAutoExpand' | 'autoCollapse'> | undefined
+  private stagedBase: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'thinkAutoExpand'> | undefined
   private stagedDebug: Pick<StreamSettings, 'debugEnabled' | 'debugTuning'> | undefined
   private saving = false
   private failed = false
@@ -90,12 +90,12 @@ export class SmoothStreamCardController {
       hooks: { smoothStreamCard: this.store },
       edit: (patch) => {
         if (this.saving) return
-        if (patch.enabled !== undefined || patch.thinkAutoExpand !== undefined || patch.autoCollapse !== undefined) {
+        if (patch.enabled !== undefined || patch.controlScroll !== undefined || patch.thinkAutoExpand !== undefined) {
           this.stagedBase = {
             ...this.baseValues(),
             ...(patch.enabled === undefined ? {} : { enabled: patch.enabled }),
+            ...(patch.controlScroll === undefined ? {} : { controlScroll: patch.controlScroll }),
             ...(patch.thinkAutoExpand === undefined ? {} : { thinkAutoExpand: patch.thinkAutoExpand }),
-            ...(patch.autoCollapse === undefined ? {} : { autoCollapse: patch.autoCollapse }),
           }
         }
         if (this.loadedDebug !== undefined && (patch.debugEnabled !== undefined || patch.debugTuning !== undefined)) {
@@ -140,11 +140,11 @@ export class SmoothStreamCardController {
     }
   }
 
-  private baseValues(): Pick<StreamSettings, 'enabled' | 'thinkAutoExpand' | 'autoCollapse'> {
+  private baseValues(): Pick<StreamSettings, 'enabled' | 'controlScroll' | 'thinkAutoExpand'> {
     return this.stagedBase ?? {
       enabled: this.loaded?.enabled ?? DEFAULT_STREAM_SETTINGS.enabled,
+      controlScroll: this.loaded?.controlScroll ?? DEFAULT_STREAM_SETTINGS.controlScroll,
       thinkAutoExpand: this.loaded?.thinkAutoExpand ?? DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
-      autoCollapse: this.loaded?.autoCollapse ?? DEFAULT_STREAM_SETTINGS.autoCollapse,
     }
   }
 

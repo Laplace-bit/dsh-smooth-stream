@@ -25,10 +25,10 @@ export interface StreamSettingsView {
   writable: boolean
   /** Whether smooth-stream currently owns conversation rendering. */
   enabled: boolean
+  /** Whether smooth-stream also owns conversation bottom-follow. */
+  controlScroll: boolean
   /** Current resolved preference. */
   thinkAutoExpand: boolean
-  /** Whether finished turns fold their work process behind a summary row. */
-  autoCollapse: boolean
   /** Whether a fixed npm update command is safe to offer. */
   canUpgrade: boolean
 }

@@ -12,7 +12,7 @@ import { DEFAULT_STREAM_SETTINGS } from '../settings.ts'
 import css from './TypewriterAssistantNodeView.module.css'
 
 type AssistantProps = ChatNodeViewProps<'assistant-step'>
-type MarkdownProps = Pick<ComponentProps<typeof MarkdownText>, 'codeLabels' | 'fileMentions' | 'text'>
+type MarkdownProps = Pick<ComponentProps<typeof MarkdownText>, 'labels' | 'fileMentions' | 'text'>
 
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(
@@ -38,6 +38,7 @@ interface AnimatedMarkdownTextProps extends MarkdownProps {
   onPredictiveChange?: ((predictive: boolean) => void) | undefined
   preset: StreamSmoothingPreset
   shouldHoldBack: () => boolean
+  controlScroll?: boolean
 }
 
 /** Conservative fallback before the streaming Markdown tail has geometry. */
@@ -286,7 +287,7 @@ const StreamAnnouncement = memo(function StreamAnnouncement({
  */
 function AnimatedMarkdownText({
   text,
-  codeLabels,
+  labels,
   fileMentions,
   streaming,
   ownFollow,
@@ -296,6 +297,7 @@ function AnimatedMarkdownText({
   onPredictiveChange,
   preset,
   shouldHoldBack,
+  controlScroll = true,
 }: AnimatedMarkdownTextProps) {
   const reduced = usePrefersReducedMotion()
   const [typing, setTyping] = useState(streaming)
@@ -355,6 +357,7 @@ function AnimatedMarkdownText({
       revealedCharsRef={followRevealedCharsRef}
       revealScaleRef={followRevealScaleRef}
       predictive={streaming}
+      controlScroll={controlScroll}
       hostRef={followRootRef}
     >
       <MarkdownText
@@ -363,7 +366,7 @@ function AnimatedMarkdownText({
         // Rendering `text` early bypasses the drain and teleports the tail.
         text={live ? shown : text}
         streaming={live}
-        codeLabels={codeLabels}
+        labels={labels}
         fileMentions={live ? undefined : fileMentions}
       />
     </FollowHost>
@@ -514,6 +517,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   scrollSpeedPxPerSec: _scrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.scrollSpeedPxPerSec,
   maxScrollSpeedPxPerSec: _maxScrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.maxScrollSpeedPxPerSec,
   thinkAutoExpand = DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+  controlScroll = true,
   node,
   useTurnData,
   openFile,
@@ -527,6 +531,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   scrollSpeedPxPerSec?: number
   maxScrollSpeedPxPerSec?: number
   thinkAutoExpand?: boolean
+  controlScroll?: boolean
 }) {
   const data = node.data
   const streaming = data.status === 'running'
@@ -568,7 +573,10 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
     () => owner === undefined ? undefined : fileMentions(owner),
     [fileMentions, owner],
   )
-  const codeLabels = useMemo(() => ({ copyLabel: t('copy'), copiedLabel: t('copied') }), [t])
+  const markdownLabels = useMemo(() => ({
+    code: { copyLabel: t('copy'), copiedLabel: t('copied') },
+    footnotes: t('markdown.footnotes'),
+  }), [t])
   const imageLoader: ImageLoader = loadImage ?? (async () => {
     throw new Error(t('image.serviceUnavailable'))
   })
@@ -597,7 +605,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
           <AnimatedMarkdownText
             key={index}
             text={block.text}
-            codeLabels={codeLabels}
+            labels={markdownLabels}
             fileMentions={mentions}
             streaming={streaming}
             ownFollow={!streaming && index === lastFollow}
@@ -607,6 +615,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
             onPredictiveChange={index === lastFollow ? updateTextPrediction : undefined}
             preset={preset}
             shouldHoldBack={shouldHoldBack}
+            controlScroll={controlScroll}
           />,
         )
         break
@@ -663,6 +672,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
         revealedCharsRef={rootRevealedCharsRef}
         revealScaleRef={rootRevealScaleRef}
         predictiveRef={rootPredictiveRef}
+        controlScroll={controlScroll}
       >
         <div className={css.body}>
           {rendered}

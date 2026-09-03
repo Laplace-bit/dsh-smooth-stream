@@ -55,8 +55,8 @@ export const Config: Schema<Config> = Schema.object({
  */
 export const StreamSettingsSchema: Schema<StreamSettings> = Schema.object({
   enabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.enabled),
+  controlScroll: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.controlScroll),
   thinkAutoExpand: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand),
-  autoCollapse: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.autoCollapse),
   debugEnabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.debugEnabled),
   debugTuning: Schema.object({
     revealScale: Schema.number().min(0.25).max(2).default(DEFAULT_STREAM_SETTINGS.debugTuning.revealScale),
@@ -117,8 +117,8 @@ export function apply(ctx: Context, config: Config): void {
           installation: installation.kind,
           writable: connectionCtx.settings.writable,
           enabled: settings.enabled,
+          controlScroll: settings.controlScroll,
           thinkAutoExpand: settings.thinkAutoExpand,
-          autoCollapse: settings.autoCollapse,
           canUpgrade: installation.kind === 'npm',
         }
       }
@@ -159,13 +159,14 @@ export function apply(ctx: Context, config: Config): void {
         if (endpoint === STREAM_SETTINGS_RPC.write) {
           if (typeof payload !== 'object' || payload === null || Array.isArray(payload)
             || typeof (payload as { enabled?: unknown }).enabled !== 'boolean'
+            || typeof (payload as { controlScroll?: unknown }).controlScroll !== 'boolean'
             || typeof (payload as { thinkAutoExpand?: unknown }).thinkAutoExpand !== 'boolean'
-            || typeof (payload as { autoCollapse?: unknown }).autoCollapse !== 'boolean') {
+          ) {
             return {
               ok: false,
               error: {
                 code: 'settings-rejected',
-                message: 'enabled, thinkAutoExpand and autoCollapse must be booleans',
+                message: 'enabled, controlScroll and thinkAutoExpand must be booleans',
                 details: { ns: STREAM_SETTINGS_NS },
               },
             }
@@ -183,8 +184,8 @@ export function apply(ctx: Context, config: Config): void {
           try {
             const next = payload as {
               enabled: boolean
+              controlScroll: boolean
               thinkAutoExpand: boolean
-              autoCollapse: boolean
               debugEnabled?: unknown
               debugTuning?: unknown
             }
@@ -201,8 +202,8 @@ export function apply(ctx: Context, config: Config): void {
             }
             await scope.update({
               enabled: next.enabled,
+              controlScroll: next.controlScroll,
               thinkAutoExpand: next.thinkAutoExpand,
-              autoCollapse: next.autoCollapse,
               ...(hasDebug ? { debugEnabled: next.debugEnabled, debugTuning: next.debugTuning } : {}),
             })
           } catch {

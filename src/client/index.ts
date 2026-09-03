@@ -7,7 +7,6 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { TypewriterAssistantNodeView } from './TypewriterAssistantNodeView.tsx'
-import { AutoCollapseController } from './auto-collapse-controller.ts'
 import { wrapFollowNodeView, type FollowWrapProps } from './TypewriterToolNodeView.tsx'
 import { SmoothStreamCard } from './SmoothStreamCard.tsx'
 import { SmoothStreamCardController } from './smooth-stream-card-controller.ts'
@@ -88,7 +87,10 @@ function readBootConfig(): StreamConfig {
  * @param ctx - Browser context carrying the slot registry.
  * @returns Restorer that puts the original components back.
  */
-function wrapAgentChatRows(ctx: ClientContext): () => void {
+function wrapAgentChatRows(
+  ctx: ClientContext,
+  useControlScroll: () => boolean,
+): () => void {
   const restores: Array<() => void> = []
   const wrapped = new WeakSet<object>()
 
@@ -99,7 +101,7 @@ function wrapAgentChatRows(ctx: ClientContext): () => void {
       const current = entry.component
       if (!isWrappableComponent(current) || wrapped.has(current)) continue
       const inner = current as ComponentType<FollowWrapProps>
-      const next = wrapFollowNodeView(inner)
+      const next = wrapFollowNodeView(inner, useControlScroll)
       wrapped.add(next)
       entry.component = next
       restores.push(() => {
@@ -154,8 +156,8 @@ class SettingsCell {
     if (
       pending === this.pending
       && next.enabled === this.value.enabled
+      && next.controlScroll === this.value.controlScroll
       && next.thinkAutoExpand === this.value.thinkAutoExpand
-      && next.autoCollapse === this.value.autoCollapse
       && next.debugEnabled === this.value.debugEnabled
       && next.debugTuning === this.value.debugTuning
     ) return
@@ -167,11 +169,6 @@ class SettingsCell {
   /** False while an available settings service is resolving its authority. */
   takeoverEnabled(): boolean {
     return !this.pending && this.value.enabled
-  }
-
-  /** Whether finished turns should fold behind a summary row right now. */
-  autoCollapseActive(): boolean {
-    return !this.pending && this.value.autoCollapse
   }
 
   readonly getSnapshot = (): StreamSettings => this.value
@@ -196,25 +193,11 @@ class SettingsCell {
 export function apply(ctx: ClientContext): void {
   const config = readBootConfig()
   const settings = new SettingsCell()
-
-  // Auto-collapse works at the DOM level and is independent of the renderer
-  // takeover: it also folds finished turns when the built-in Harness renderer
-  // owns the conversation. The lifecycle rides the guaranteed `slots` service
-  // (this entry's own inject list) and follows the same live settings cell, so
-  // flipping the preference restores every folded row immediately.
-  ctx.inject(['slots'], () => {
-    const autoCollapse = new AutoCollapseController()
-    const syncAutoCollapse = (): void => {
-      if (settings.autoCollapseActive()) autoCollapse.start()
-      else autoCollapse.stop()
-    }
-    const unsubscribe = settings.subscribe(syncAutoCollapse)
-    syncAutoCollapse()
-    return () => {
-      unsubscribe()
-      autoCollapse.stop()
-    }
-  })
+  const useControlScroll = (): boolean => useSyncExternalStore(
+    settings.subscribe,
+    () => settings.getSnapshot().controlScroll,
+    () => settings.getSnapshot().controlScroll,
+  )
 
   // The card talks to the plugin-owned loopback RPC, so the core settings
   // namespace allowlist cannot make it disappear. The stream still applies
@@ -286,6 +269,7 @@ export function apply(ctx: ClientContext): void {
       scrollSpeedPxPerSec: config.scrollSpeedPxPerSec,
       maxScrollSpeedPxPerSec: config.maxScrollSpeedPxPerSec,
       thinkAutoExpand: preferences.thinkAutoExpand,
+      controlScroll: preferences.controlScroll,
     })
   }
   ctx.slots.inject('conversation.chat.node', () => {
@@ -298,7 +282,7 @@ export function apply(ctx: ClientContext): void {
         return
       }
       if (releaseTakeover !== undefined) return
-      const unwrap = wrapAgentChatRows(ctx)
+      const unwrap = wrapAgentChatRows(ctx, useControlScroll)
       const unshadow = ctx.slots.register({
         name: 'conversation.chat.node',
         key: 'assistant-step',

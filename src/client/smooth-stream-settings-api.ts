@@ -23,8 +23,8 @@ function settingsView(value: unknown): StreamSettingsView {
     || !['npm', 'development', 'unmanaged'].includes(data.installation as string)
     || typeof data.writable !== 'boolean'
     || typeof data.enabled !== 'boolean'
+    || typeof data.controlScroll !== 'boolean'
     || typeof data.thinkAutoExpand !== 'boolean'
-    || typeof data.autoCollapse !== 'boolean'
     || typeof data.canUpgrade !== 'boolean') {
     throw new Error('dsh-smooth-stream: malformed settings response')
   }
@@ -68,7 +68,7 @@ function accepted(result: Awaited<ReturnType<ConnectionHandle['rpc']['call']>>):
 /** Narrow client contract consumed by the staged settings-card controller. */
 export interface SmoothStreamSettingsApi {
   read(): Promise<StreamSettingsView>
-  write(settings: Pick<StreamSettings, 'enabled' | 'thinkAutoExpand' | 'autoCollapse'> & Partial<Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>>): Promise<StreamSettingsView>
+  write(settings: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'thinkAutoExpand'> & Partial<Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>>): Promise<StreamSettingsView>
   readDebug(): Promise<StreamDebugSettingsView>
   writeDebug(settings: Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>): Promise<StreamDebugSettingsView>
   upgrade(): Promise<StreamUpgradeView>
@@ -80,14 +80,14 @@ export function createSmoothStreamSettingsApi(connection: ConnectionHandle): Smo
     async read(): Promise<StreamSettingsView> {
       return settingsView(accepted(await connection.rpc.call(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.read, {})))
     },
-    async write(settings: Pick<StreamSettings, 'enabled' | 'thinkAutoExpand' | 'autoCollapse'> & Partial<Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>>): Promise<StreamSettingsView> {
+    async write(settings: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'thinkAutoExpand'> & Partial<Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>>): Promise<StreamSettingsView> {
       return settingsView(accepted(await connection.rpc.call(
         STREAM_SETTINGS_RPC_CHANNEL,
         STREAM_SETTINGS_RPC.write,
         {
           enabled: settings.enabled,
+          controlScroll: settings.controlScroll,
           thinkAutoExpand: settings.thinkAutoExpand,
-          autoCollapse: settings.autoCollapse,
           ...(settings.debugEnabled === undefined || settings.debugTuning === undefined
             ? {}
             : { debugEnabled: settings.debugEnabled, debugTuning: settings.debugTuning }),

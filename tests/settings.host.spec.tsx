@@ -124,23 +124,23 @@ describe('smooth-stream host settings', () => {
         installation: 'development',
         writable: true,
         enabled: DEFAULT_STREAM_SETTINGS.enabled,
+        controlScroll: DEFAULT_STREAM_SETTINGS.controlScroll,
         thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
-        autoCollapse: DEFAULT_STREAM_SETTINGS.autoCollapse,
         canUpgrade: false,
       },
     })
 
     const updated = await registration.handler(
       STREAM_SETTINGS_RPC.write,
-      { enabled: false, thinkAutoExpand: false, autoCollapse: false },
+      { enabled: false, controlScroll: true, thinkAutoExpand: false },
       signal(),
     )
-    expect(updated).toMatchObject({ ok: true, value: { enabled: false, thinkAutoExpand: false, autoCollapse: false } })
+      expect(updated).toMatchObject({ ok: true, value: { enabled: false, controlScroll: true, thinkAutoExpand: false } })
     expect(ctx.settings.get(toNs(STREAM_SETTINGS_NS))).toEqual({
       ...DEFAULT_STREAM_SETTINGS,
       enabled: false,
+      controlScroll: true,
       thinkAutoExpand: false,
-      autoCollapse: false,
     })
 
     const debugInitial = await registration.handler(STREAM_SETTINGS_RPC.debugRead, {}, signal())
@@ -168,8 +168,8 @@ describe('smooth-stream host settings', () => {
       STREAM_SETTINGS_RPC.write,
       {
         enabled: true,
+        controlScroll: true,
         thinkAutoExpand: true,
-        autoCollapse: true,
         debugEnabled: false,
         debugTuning: { ...DEFAULT_STREAM_SETTINGS.debugTuning, springDamping: 34 },
       },
@@ -185,7 +185,7 @@ describe('smooth-stream host settings', () => {
 
     const partialDebug = await registration.handler(
       STREAM_SETTINGS_RPC.write,
-      { enabled: false, thinkAutoExpand: false, autoCollapse: true, debugEnabled: true },
+      { enabled: false, controlScroll: true, thinkAutoExpand: false, debugEnabled: true },
       signal(),
     )
     expect(partialDebug).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
@@ -204,12 +204,12 @@ describe('smooth-stream host settings', () => {
     const malformed = await registration.handler(STREAM_SETTINGS_RPC.write, { thinkAutoExpand: 'false' }, signal())
     expect(malformed).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
 
-    const missingAutoCollapse = await registration.handler(
+    const missingControlScroll = await registration.handler(
       STREAM_SETTINGS_RPC.write,
       { enabled: true, thinkAutoExpand: true },
       signal(),
     )
-    expect(missingAutoCollapse).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
+    expect(missingControlScroll).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
 
     const blockedUpdate = await registration.handler(STREAM_SETTINGS_RPC.upgrade, {}, signal())
     expect(blockedUpdate).toMatchObject({ ok: false, error: { code: 'internal' } })

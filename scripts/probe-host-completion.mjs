@@ -104,6 +104,45 @@ await page.evaluate(() => {
       }
     }
   }
+  // Wrap observers created after this point so we can tell whether engine's
+  // MutationObserver correction runs in the mutation task, between rAF
+  // callbacks, or after the sampler has already observed the jump.
+  window.__moLog = []
+  window.__rafLog = []
+  const OriginalMutationObserver = MutationObserver
+  window.MutationObserver = class extends OriginalMutationObserver {
+    constructor(callback) {
+      super((records, observer) => {
+        const startedAt = performance.now()
+        const before = window.__sampleCompletionDom?.()
+        callback(records, observer)
+        const after = window.__sampleCompletionDom?.()
+        window.__moLog.push({ startedAt, before, after, count: records.length })
+      })
+    }
+  }
+  const OriginalRaf = requestAnimationFrame.bind(window)
+  window.requestAnimationFrame = callback => OriginalRaf(now => {
+    const entry = { t: now, before: window.__sampleCompletionDom?.() }
+    callback(now)
+    entry.after = window.__sampleCompletionDom?.()
+    window.__rafLog.push(entry)
+  })
+  window.__sampleCompletionDom = () => {
+    const port = document.querySelector('[data-conversation-scroll]')
+    const flow = port?.querySelector('[data-chat-flow]')
+    const assistant = [...flow?.children ?? []].findLast(c => c.getAttribute('data-chat-flow-kind') === 'assistant' || c.querySelector('[data-variant="think"]'))
+    return {
+      t: performance.now(),
+      st: port?.scrollTop ?? null,
+      sh: port?.scrollHeight ?? null,
+      pad: flow?.style.paddingBottom ?? '',
+      aTop: assistant?.getBoundingClientRect().top ?? null,
+      transform: assistant?.style.transform ?? '',
+      status: !!port?.querySelector('[role="status"]'),
+      tail: !!port?.querySelector('[data-chat-flow-kind="turn-tail"]'),
+    }
+  }
   const rec = () => {
     const port = document.querySelector('[data-conversation-scroll]')
     if (port) {
@@ -131,6 +170,7 @@ await page.evaluate(() => {
       const turnStatus = kids.find(c => (c.className || '').toString().includes('turnStatus') || c.getAttribute('role') === 'status')
       const emptyRows = kids.filter(c => (c.className || '').toString().includes('input-message') && Math.round(c.getBoundingClientRect().height) === 0).length
       const surface = assistant?.querySelector('[data-variant="think"]')?.parentElement ?? assistant
+      const lastSurface = [...(assistant?.querySelectorAll('*') ?? [])].at(-1)
       window.__log.push({
         t: performance.now(),
         st: port.scrollTop,
@@ -143,6 +183,10 @@ await page.evaluate(() => {
         assistantRowId,
         rowIds: rowIds.join(','),
         assistantMarginBottom: assistant?.style.marginBottom ?? '',
+        flowPad: flow?.style.paddingBottom ?? '',
+        flowMinH: flow?.style.minHeight ?? '',
+        lastSurfaceTag: lastSurface?.tagName ?? '',
+        lastSurfaceH: lastSurface ? Math.round(lastSurface.getBoundingClientRect().height) : null,
         assistantH: assistantRect ? Math.round(assistantRect.height) : null,
         thinkState: think?.getAttribute('data-state') ?? null,
         thinkH: think ? Math.round(think.getBoundingClientRect().height) : null,
@@ -205,6 +249,23 @@ const endState = await page.evaluate(() => {
   }
 })
 console.log('END-STATE:', JSON.stringify(endState))
+const moLog = await page.evaluate(() => window.__moLog ?? [])
+console.log('MO-LOG:')
+for (const e of moLog) {
+  if (e.before?.tail || e.after?.tail || Math.abs((e.before?.pad ? Number.parseFloat(e.before.pad) : 0) - (e.after?.pad ? Number.parseFloat(e.after.pad) : 0)) > 0.5) {
+    console.log(JSON.stringify(e))
+  }
+}
+const rafLog = await page.evaluate(() => window.__rafLog ?? [])
+const moTimes = moLog.filter(e => e.before?.tail || e.after?.tail || e.before?.pad !== e.after?.pad).map(e => e.startedAt)
+const rafWindowStart = moTimes.length ? Math.min(...moTimes) - 60 : 0
+const rafWindowEnd = moTimes.length ? Math.max(...moTimes) + 180 : 0
+console.log('RAF-LOG around completion:')
+for (const e of rafLog.filter(e => e.t >= rafWindowStart && e.t <= rafWindowEnd)) {
+  const p = Number.parseFloat(e.before?.pad || '0') || 0
+  const q = Number.parseFloat(e.after?.pad || '0') || 0
+  if (e.before?.tail || e.after?.tail || Math.abs(p - q) > 0.5) console.log(JSON.stringify(e))
+}
 const trace = await page.evaluate(() => (window.__ftrace ?? []).slice(-40))
 await browser.close()
 console.log('engine trace (last 40):')
@@ -294,7 +355,7 @@ if (bigIdx > 0) {
     const p = active[i - 1]
     console.log(
       `t=+${Math.round(f.t - t0)} st=${f.st.toFixed(1)} sh=${f.sh} aTop=${f.assistantTop?.toFixed(1)} aH=${f.assistantH} think=${f.thinkState}/${f.thinkH}`
-      + ` proc=${f.processH} status=${f.statusPresent}/${f.statusH} mt='${f.statusMT}' mb='${f.statusMB}' tail=${f.tailH} empty=${f.emptyRows} owned=${f.owned}`
+      + ` proc=${f.processH} status=${f.statusPresent}/${f.statusH} mt='${f.statusMT}' mb='${f.statusMB}' pad='${f.flowPad}' min='${f.flowMinH}' tail=${f.tailH} last=${f.lastSurfaceTag}/${f.lastSurfaceH} empty=${f.emptyRows} owned=${f.owned}`
       + ` dSt=${(f.st - p.st).toFixed(1)}`,
     )
   }

@@ -2,6 +2,7 @@ import { createElement, useCallback, useEffect, useLayoutEffect, useRef, useStat
 import { FollowHost } from './FollowHost.tsx'
 import { useProgressiveDomText } from './useProgressiveDomText.ts'
 import { hasRecentConversationFollow } from './teleprompterGlide.ts'
+import entranceCss from './AgentRowEntrance.module.css'
 
 /** Props forwarded through a follow wrap; extra kit seats pass through. */
 export type FollowWrapProps = {
@@ -118,8 +119,12 @@ function liveAgentTailMode(root: HTMLElement): 'turn' | 'handoff' | null {
  * @param Inner - The already-registered row component.
  * @returns A follow-hosted row.
  */
-export function wrapFollowNodeView(Inner: ComponentType<FollowWrapProps>) {
+export function wrapFollowNodeView(
+  Inner: ComponentType<FollowWrapProps>,
+  useControlScroll?: () => boolean,
+) {
   return function TypewriterFollowNodeView(props: FollowWrapProps) {
+    const controlScroll = useControlScroll?.() ?? true
     const speedCpsRef = useRef(35)
     const hostRef = useRef<HTMLDivElement>(null)
     const growing = isGrowingChatNode(props.node)
@@ -215,12 +220,15 @@ export function wrapFollowNodeView(Inner: ComponentType<FollowWrapProps>) {
         onGrowth={followable ? onGrowth : undefined}
         entranceExtentRef={growthExtentRef}
         speedCpsRef={speedCpsRef}
+        controlScroll={controlScroll}
         // Generic Agent rows reveal and spring their measured growth, but do
         // not continuously reserve space for a future Markdown line wrap.
         // Keeping that assistant-only prediction here creates an idle gap
         // above TurnStatus and a visible return when a short Tool row settles.
         predictive={false}
         hostRef={hostRef}
+        className={entranceCss.surface}
+        entranceActive={entering || growthPulse}
       >
         {createElement(Inner, props)}
       </FollowHost>
