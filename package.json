@@ -91,7 +91,8 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --pretty false",
     "test:smooth": "node scripts/verify-y-rebound.mjs && node scripts/probe-tailbob.mjs 1200 20 && node scripts/verify-overflow.mjs --runs 3",
-    "probe:overlap": "node scripts/probe-overlap.mjs"
+    "probe:overlap": "node scripts/probe-overlap.mjs",
+    "probe:stability": "node scripts/verify-follow-stability.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

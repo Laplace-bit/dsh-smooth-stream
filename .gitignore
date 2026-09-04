@@ -15,7 +15,9 @@ repro/audit.bundle.js
 repro/audit.bundle.css
 repro/overlap.bundle.js
 repro/overlap.bundle.css
+repro/artifacts/
 .mt-probe.*
 benchmarks/results/
 .workbuddy/
+.gtoffice/
 skills-lock.json
