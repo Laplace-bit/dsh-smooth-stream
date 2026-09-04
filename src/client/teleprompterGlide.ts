@@ -139,9 +139,11 @@ export const FOLLOW_CATCHUP_MAX_STEP_PX = 8
  * line glides in (slow start) instead of snapping.
  */
 /**
- * Per-frame bound on the DECAY side of the painted shift only (runway
- * retirement and settle). The growth side is wrap compensation and must stay
- * unlimited — see the clamp site in `applyVisual`.
+ * Per-frame bound on the DECAY side of the painted shift (runway retirement
+ * and settle), widened by any same-frame floor drop so extent collapses are
+ * always fully repainted — see the clamp site in `applyVisual`. The growth
+ * side stays unlimited: it is wrap compensation locked to the same-frame
+ * floor step.
  */
 export const FOLLOW_PAINT_SHIFT_MAX_STEP_PX = 8
 
@@ -632,6 +634,8 @@ const followPaintLimits = new WeakMap<HTMLElement, FollowPaintLimit>()
 const followHadChrome = new WeakSet<HTMLElement>()
 /** Last painted shift per port, to spread a wrap's one-line step over frames. */
 const followLastShiftPx = new WeakMap<HTMLElement, number>()
+/** Last settled floor per port, to size the shift decay bound against extent collapse. */
+const followLastFloorPx = new WeakMap<HTMLElement, number>()
 /**
  * Screen-space completion anchor per port, SHARED by every follower arm and
  * the settle loop. Per-arm closures made the guard incoherent across the
@@ -1346,9 +1350,25 @@ function applyVisual(
   const idlePromotion = promoteAtRest && motionShift <= 0.01 && availableShift > 0 ? 0.1 : 0
   let shift = Math.max(motionShift, idlePromotion)
   const previousShift = followLastShiftPx.get(port)
-  const maxDecayPx = dtMs <= 0
-    ? FOLLOW_PAINT_SHIFT_MAX_STEP_PX
-    : Math.max(1, (FOLLOW_PAINT_SHIFT_MAX_STEP_PX / 16.67) * dtMs)
+  // The per-frame decay bound paces the engine's OWN glide (the margin
+  // transfer retires at well under 8px/frame, so the limiter never binds for
+  // it). It must NOT cap the compensation for a floor the engine did not
+  // choose: the host completion cascade (think auto-collapse, status swap)
+  // collapses the extent tens of px in one frame, scrollTop follows the
+  // floor 1:1, and a decay capped at 8px/frame leaves the unpainted
+  // remainder on screen — the completion 回弹 (visible 14-26px/frame sink).
+  // Widen the bound by the floor's drop so the shift can always repaint what
+  // the extent took away; the retire glide is unaffected because its
+  // motionShift never moves.
+  const previousFloor = followLastFloorPx.get(port)
+  const floorDropPx = Math.max(0, (previousFloor ?? floor) - floor)
+  const maxDecayPx = Math.max(
+    dtMs <= 0
+      ? FOLLOW_PAINT_SHIFT_MAX_STEP_PX
+      : Math.max(1, (FOLLOW_PAINT_SHIFT_MAX_STEP_PX / 16.67) * dtMs),
+    floorDropPx,
+  )
+  followLastFloorPx.set(port, floor)
   if (previousShift !== undefined && shift < previousShift - maxDecayPx) {
     // Decay-only rate limit. Growth is a WRAP COMPENSATION: the floor already
     // jumped one line in the same layout pass and `scrollTop` followed it, so
@@ -1358,7 +1378,21 @@ function applyVisual(
     // is a real animation and keeps its per-frame bound.
     shift = previousShift - maxDecayPx
   }
-
+  // COMPLETION RISE FUNDING. In the completion window a shift rise is only
+  // invisible when it cancels floor growth the reader actually gets. The
+  // handoff re-opens the runway while the think disclosure is still
+  // collapsing: a same-task paint funded on the measured extent growth
+  // over-covers by whatever the transition retracts before the paint lands —
+  // the drain-onset 回弹. Same-task painters are therefore ceiling-frozen
+  // (see the observer and the handoff below) and this clamp funds the
+  // settle's rAF-frame rise on the growth CONFIRMED since the previous
+  // paint; a completion without a collapse covers the runway in full on the
+  // first frame (the drain contract). The streaming path never enters this
+  // branch — wrap compensation stays unlimited there.
+  if (followCompletionSettle.has(port) && previousShift !== undefined && previousFloor !== undefined) {
+    const confirmedGrowthPx = Math.max(0, floor - previousFloor)
+    if (shift > previousShift + confirmedGrowthPx) shift = previousShift + confirmedGrowthPx
+  }
   followLastShiftPx.set(port, shift)
   const requestedShift = trajectoryShiftPx ?? (baselineShift + requestedLag)
   const effectiveLag = Math.max(0, shift - baselineShift)
@@ -1395,6 +1429,7 @@ function clearVisual(port: HTMLElement): void {
   restoreRunway(port)
   followMotionStates.delete(port)
   followLastShiftPx.delete(port)
+  followLastFloorPx.delete(port)
   invalidatePaintLimit(port)
 }
 
@@ -1899,7 +1934,15 @@ export function useConversationFollow(
         reservePx,
         velocityPxPerSec,
         tuning.runwayPx,
-        Number.POSITIVE_INFINITY,
+        // COMPLETION RISE FREEZE: this observer runs in the mutation's
+        // microtask, but the paint lands one vsync later — extent a CSS
+        // transition retracts in between makes any rise funded here
+        // over-cover by exactly that retraction (the drain-onset 回弹).
+        // Freeze rises same-task; the settle's rAF frame re-reads the floor
+        // within its own paint tick and funds the confirmed growth there.
+        activeRef.current
+          ? Number.POSITIVE_INFINITY
+          : (followLastShiftPx.get(port) ?? Number.POSITIVE_INFINITY),
         !predictGrowth,
         trajectoryShift,
         0,
@@ -2473,9 +2516,13 @@ export function useConversationFollow(
         return
       }
       const completionShift = currentShiftOf(shiftSurfacesOf(host).at(-1) ?? host)
-      const completionShiftCeiling = completionShift > FOLLOW_SETTLE_EPSILON_PX
-        ? completionShift
-        : Number.POSITIVE_INFINITY
+      // Freeze, never raise, in this same-task paint — same race as the
+      // observer above; the settle's first rAF frame funds the re-open.
+      // Entrance handoffs are mount transients with no collapse in flight:
+      // their first cover must paint immediately (the soften contract).
+      const completionShiftCeiling = startedAsEntrance && completionShift <= FOLLOW_SETTLE_EPSILON_PX
+        ? Number.POSITIVE_INFINITY
+        : completionShift
       if (hostOwnsScroll) {
         clearVisual(host)
         setFollowScrollTop(host, Math.max(0, host.scrollHeight - host.clientHeight))
