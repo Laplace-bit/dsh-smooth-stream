@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from 'react'
 import { IconThinkOutline14, JsonBlock, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ImageGallery, type ImageLoader, type MessageImageLabels } from '@deepseek-ai/dsh-client-ui-attachment'
 import type { ChatNodeViewProps, TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -413,6 +413,61 @@ function imageLabels(t: AssistantProps['t']): MessageImageLabels {
   }
 }
 
+/**
+ * Apply searchable hidden state without unmounting a stable subtree — the
+ * Host's completion fold hides the answer-inline reasoning this way, so the
+ * takeover renderer must reproduce it to stay inside the contract: the row
+ * disappears into the Host's process summary and comes back on find-in-page.
+ * (Mirrors the Harness chat kit's `useSearchableHidden`.)
+ */
+function useSearchableHidden(
+  hidden: boolean,
+  reveal: () => void,
+): RefObject<HTMLDivElement> {
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (element === null) return
+    if (hidden && element.contains(element.ownerDocument.activeElement)) {
+      reveal()
+      return
+    }
+    if (hidden) element.setAttribute('hidden', 'until-found')
+    else element.removeAttribute('hidden')
+  }, [hidden, reveal])
+  useEffect(() => {
+    const element = ref.current
+    if (element === null) return
+    element.addEventListener('beforematch', reveal)
+    return () => { element.removeEventListener('beforematch', reveal) }
+  }, [reveal])
+  return ref
+}
+
+/**
+ * One answer-inline reasoning block wrapped in the Host's fold contract. The
+ * Host computes the fold decision (turn closed, compact transcript, this node
+ * is the answer) and delivers it through the `turnProcess` owner prop; when
+ * folded the block hides into the Host's "thought" summary row instead of
+ * staying mounted above the answer.
+ */
+function FoldableReasoning({
+  hidden,
+  reveal,
+  children,
+}: {
+  hidden: boolean
+  reveal: () => void
+  children: ReactNode
+}) {
+  const ref = useSearchableHidden(hidden, reveal)
+  return (
+    <div ref={ref} data-turn-process-inline={hidden || undefined}>
+      {children}
+    </div>
+  )
+}
+
 function firstLine(text: string): string {
   const newline = text.indexOf('\n')
   return newline === -1 ? text : text.slice(0, newline)
@@ -552,6 +607,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   openFile,
   loadImage,
   fileMentions,
+  turnProcess,
   t,
 }: AssistantProps & {
   mode?: StreamMode
@@ -566,6 +622,16 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   const data = node.data
   const streaming = data.status === 'running'
   const reduced = useMotionReduced(motionPreference)
+  // The Host's completion-fold decision for THIS node's inline reasoning:
+  // only the answer step folds, only in compact-transcript mode, and only
+  // once the turn has closed (foldable implies it). Mirrors the built-in
+  // assistant renderer so the takeover keeps the official behavior.
+  const reasoningHidden = turnProcess !== undefined
+    && turnProcess.foldable
+    && turnProcess.spec.answerStep === data.step
+    && turnProcess.spec.inlineReasoning
+    && !turnProcess.open
+  const revealProcess = useCallback(() => { turnProcess?.setOpen(true) }, [turnProcess])
   const { ref: guardRef, shouldHoldBack } = useFpsGuard(streaming)
   const rootSpeedRef = useRef(35)
   const rootRevealedCharsRef = useRef(0)
@@ -652,18 +718,19 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
         break
       case 'reasoning':
         rendered.push(
-          <AnimatedReasoning
-            key={index}
-            text={block.text}
-            running={streaming && index === last}
-            preset={preset}
-            thinkAutoExpand={thinkAutoExpand}
-            motionReduced={reduced}
-            shouldHoldBack={shouldHoldBack}
-            followSpeedCpsRef={reasoningOwnsSpeed && index === last ? rootSpeedRef : undefined}
-            followRevealScaleRef={reasoningOwnsSpeed && index === last ? rootRevealScaleRef : undefined}
-            t={t}
-          />,
+          <FoldableReasoning key={index} hidden={reasoningHidden} reveal={revealProcess}>
+            <AnimatedReasoning
+              text={block.text}
+              running={streaming && index === last}
+              preset={preset}
+              thinkAutoExpand={thinkAutoExpand}
+              motionReduced={reduced}
+              shouldHoldBack={shouldHoldBack}
+              followSpeedCpsRef={reasoningOwnsSpeed && index === last ? rootSpeedRef : undefined}
+              followRevealScaleRef={reasoningOwnsSpeed && index === last ? rootRevealScaleRef : undefined}
+              t={t}
+            />
+          </FoldableReasoning>,
         )
         break
       case 'image': {

@@ -867,6 +867,45 @@ describe('assistant renderer', () => {
     expect(view.container.textContent).toContain(LONG_STREAM_TEXT)
   })
 
+  it('hides answer-inline reasoning when the Host folds the turn process', () => {
+    const setOpen = vi.fn()
+    const view = render(
+      <TypewriterAssistantNodeView
+        {...assistantProps('settled', [{ kind: 'reasoning', text: 'step one' }])}
+        turnProcess={{ spec: { answerStep: 1, inlineReasoning: true }, foldable: true, open: false, setOpen }}
+      />,
+    )
+    // The Host's summary row owns the folded semantics; the block must not
+    // stay mounted above the answer.
+    const wrapper = view.container.querySelector('[data-turn-process-inline]')
+    expect(wrapper).not.toBeNull()
+    expect(wrapper!.getAttribute('hidden')).toBe('until-found')
+    // Find-in-page reveals through the Host's persisted open state.
+    wrapper!.dispatchEvent(new Event('beforematch'))
+    expect(setOpen).toHaveBeenCalledWith(true)
+  })
+
+  it('keeps answer-inline reasoning visible while the fold is open or not foldable', () => {
+    const block = [{ kind: 'reasoning', text: 'step one' }]
+    const open = render(
+      <TypewriterAssistantNodeView
+        {...assistantProps('settled', block)}
+        turnProcess={{ spec: { answerStep: 1, inlineReasoning: true }, foldable: true, open: true, setOpen: vi.fn() }}
+      />,
+    )
+    // The wrapper only carries the marker while hidden; assert on its DOM state.
+    const openWrapper = open.container.querySelector('[data-variant="think"]')!.parentElement!
+    expect(openWrapper.getAttribute('hidden')).toBeNull()
+    const foreignStep = render(
+      <TypewriterAssistantNodeView
+        {...assistantProps('settled', block)}
+        turnProcess={{ spec: { answerStep: 2, inlineReasoning: true }, foldable: true, open: false, setOpen: vi.fn() }}
+      />,
+    )
+    const foreignWrapper = foreignStep.container.querySelector('[data-variant="think"]')!.parentElement!
+    expect(foreignWrapper.getAttribute('hidden')).toBeNull()
+  })
+
   it('renders streaming text through Markdown without a raw-text tail', async () => {
     const block = { kind: 'text', text: '**finished**' }
     const view = render(<TypewriterAssistantNodeView {...assistantProps('running', [block])} />)
