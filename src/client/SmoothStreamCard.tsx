@@ -82,7 +82,7 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
                       ['force-smooth', 'motionForceSmooth', 'motionForceSmoothHint'],
                       ['force-reduced', 'motionForceReduced', 'motionForceReducedHint'],
                     ] as const).map(([value, label, hint]) => (
-                      <label key={value} className={css.choice} title={t(hint)}>
+                      <span key={value} className={css.choice} title={t(hint)}>
                         <input
                           type="radio"
                           className={css.choiceInput}
@@ -92,7 +92,7 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
                           onChange={() => { props.edit({ motionPreference: value }) }}
                         />
                         {t(label)}
-                      </label>
+                      </span>
                     ))}
                   </span>                </label>
                 <label className={state.enabled ? css.field : `${css.field} ${css.fieldDisabled}`}>
