@@ -27,6 +27,8 @@ export interface StreamSettingsView {
   enabled: boolean
   /** Whether smooth-stream also owns conversation bottom-follow. */
   controlScroll: boolean
+  /** How the reveal honors the OS reduced-motion preference. */
+  motionPreference: import('./settings.ts').StreamMotionPreference
   /** Current resolved preference. */
   thinkAutoExpand: boolean
   /** Whether a fixed npm update command is safe to offer. */

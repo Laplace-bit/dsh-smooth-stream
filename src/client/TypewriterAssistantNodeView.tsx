@@ -8,7 +8,7 @@ import { useSmoothStreamContent, type StreamSmoothingPreset } from './useSmoothS
 import { useFpsGuard } from './useFpsGuard.ts'
 import { FollowHost } from './FollowHost.tsx'
 import { DEFAULT_STREAM_CONFIG, type StreamMode } from '../config.ts'
-import { DEFAULT_STREAM_SETTINGS } from '../settings.ts'
+import { DEFAULT_STREAM_SETTINGS, type StreamMotionPreference } from '../settings.ts'
 import css from './TypewriterAssistantNodeView.module.css'
 
 type AssistantProps = ChatNodeViewProps<'assistant-step'>
@@ -28,8 +28,25 @@ function usePrefersReducedMotion(): boolean {
   return reduced
 }
 
+/**
+ * Resolve whether the reveal engine should stay off for this view. The OS
+ * preference wins only in `auto` mode: `force-smooth` keeps the engine on
+ * machines where a system-wide reduce-motion switch (or a forced browser
+ * flag) would otherwise silently bypass smoothing, and `force-reduced`
+ * disables it even when the OS asks for motion. Credit: three-state design
+ * proposed by @Zn-Dk in #21/#22.
+ */
+function useMotionReduced(preference: StreamMotionPreference): boolean {
+  const system = usePrefersReducedMotion()
+  if (preference === 'force-smooth') return false
+  if (preference === 'force-reduced') return true
+  return system
+}
+
 interface AnimatedMarkdownTextProps extends MarkdownProps {
   streaming: boolean
+  /** Whether the resolved reduced-motion gate keeps the reveal engine off. */
+  motionReduced: boolean
   /** True on the last text block: that block owns conversation follow. */
   ownFollow: boolean
   followSpeedCpsRef?: { current: number } | undefined
@@ -290,6 +307,7 @@ function AnimatedMarkdownText({
   labels,
   fileMentions,
   streaming,
+  motionReduced,
   ownFollow,
   followSpeedCpsRef,
   followRevealedCharsRef,
@@ -299,7 +317,7 @@ function AnimatedMarkdownText({
   shouldHoldBack,
   controlScroll = true,
 }: AnimatedMarkdownTextProps) {
-  const reduced = usePrefersReducedMotion()
+  const reduced = motionReduced
   const [typing, setTyping] = useState(streaming)
   const localSpeedCpsRef = useRef(35)
   const followRootRef = useRef<HTMLDivElement>(null)
@@ -349,6 +367,14 @@ function AnimatedMarkdownText({
   useEffect(() => {
     if (typing && !streaming && shown.length === text.length) setTyping(false)
   }, [shown, streaming, text, typing])
+
+  // A row can mount before the projection flips its assistant step to
+  // `running`, which would freeze `typing` at false forever and leave the
+  // reveal engine off for the whole reply. Re-arm on the rising edge so late
+  // stream starts are still smoothed. (Adopted from #22 by @Zn-Dk.)
+  useEffect(() => {
+    if (streaming) setTyping(true)
+  }, [streaming])
 
   return (
     <FollowHost
@@ -412,6 +438,7 @@ function AnimatedReasoning({
   running,
   preset,
   thinkAutoExpand,
+  motionReduced,
   shouldHoldBack,
   followSpeedCpsRef,
   followRevealScaleRef,
@@ -421,12 +448,13 @@ function AnimatedReasoning({
   running: boolean
   preset: StreamSmoothingPreset
   thinkAutoExpand: boolean
+  motionReduced: boolean
   shouldHoldBack: () => boolean
   followSpeedCpsRef?: { current: number } | undefined
   followRevealScaleRef?: { current: number } | undefined
   t: AssistantProps['t']
 }) {
-  const reduced = usePrefersReducedMotion()
+  const reduced = motionReduced
   const [expanded, setExpanded] = useState(running && thinkAutoExpand)
   const [autoClosed, setAutoClosed] = useState(false)
   const summaryRef = useRef<HTMLSpanElement>(null)
@@ -518,6 +546,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   maxScrollSpeedPxPerSec: _maxScrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.maxScrollSpeedPxPerSec,
   thinkAutoExpand = DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
   controlScroll = true,
+  motionPreference = DEFAULT_STREAM_SETTINGS.motionPreference,
   node,
   useTurnData,
   openFile,
@@ -532,10 +561,11 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   maxScrollSpeedPxPerSec?: number
   thinkAutoExpand?: boolean
   controlScroll?: boolean
+  motionPreference?: StreamMotionPreference
 }) {
   const data = node.data
   const streaming = data.status === 'running'
-  const reduced = usePrefersReducedMotion()
+  const reduced = useMotionReduced(motionPreference)
   const { ref: guardRef, shouldHoldBack } = useFpsGuard(streaming)
   const rootSpeedRef = useRef(35)
   const rootRevealedCharsRef = useRef(0)
@@ -608,6 +638,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
             labels={markdownLabels}
             fileMentions={mentions}
             streaming={streaming}
+            motionReduced={reduced}
             ownFollow={!streaming && index === lastFollow}
             followSpeedCpsRef={index === lastFollow ? rootSpeedRef : undefined}
             followRevealedCharsRef={index === lastFollow ? rootRevealedCharsRef : undefined}
@@ -627,6 +658,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
             running={streaming && index === last}
             preset={preset}
             thinkAutoExpand={thinkAutoExpand}
+            motionReduced={reduced}
             shouldHoldBack={shouldHoldBack}
             followSpeedCpsRef={reasoningOwnsSpeed && index === last ? rootSpeedRef : undefined}
             followRevealScaleRef={reasoningOwnsSpeed && index === last ? rootRevealScaleRef : undefined}

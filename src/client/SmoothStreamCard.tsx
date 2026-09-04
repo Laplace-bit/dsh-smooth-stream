@@ -84,6 +84,35 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
                   </span>
                   <span className={css.hint}>{t('controlScrollHint')}</span>
                 </label>
+                {/* Motion preference is a radio group, so this row is a div:
+                    nesting the choice labels inside a field <label> would be
+                    illegal HTML (label within label) and browsers route the
+                    inner click away, so React never sees onChange. */}
+                <div className={state.enabled ? css.field : `${css.field} ${css.fieldDisabled}`}>
+                  <span className={css.fieldHead}>
+                    <span className={css.label}>{t('motionPreference')}</span>
+                  </span>
+                  <span className={css.hint}>{t('motionPreferenceHint')}</span>
+                  <span className={css.choiceRow} role="radiogroup" aria-label={t('motionPreference')}>
+                    {([
+                      ['auto', 'motionAuto', 'motionAutoHint'],
+                      ['force-smooth', 'motionForceSmooth', 'motionForceSmoothHint'],
+                      ['force-reduced', 'motionForceReduced', 'motionForceReducedHint'],
+                    ] as const).map(([value, label, hint]) => (
+                      <label key={value} className={css.choice} title={t(hint)}>
+                        <input
+                          type="radio"
+                          className={css.choiceInput}
+                          name="smooth-stream-motion"
+                          checked={state.motionPreference === value}
+                          disabled={!state.writable || state.saving || !state.enabled}
+                          onChange={() => { props.edit({ motionPreference: value }) }}
+                        />
+                        {t(label)}
+                      </label>
+                    ))}
+                  </span>
+                </div>
                 <label className={state.enabled ? css.field : `${css.field} ${css.fieldDisabled}`}>
                   <span className={css.fieldHead}>
                     <span className={css.label}>{t('thinkAutoExpand')}</span>

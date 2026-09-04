@@ -46,6 +46,18 @@ export const DEFAULT_STREAM_DEBUG_TUNING: StreamDebugTuning = {
 }
 
 /**
+ * How the typewriter reveal responds to the OS reduced-motion preference.
+ * Credit: three-state design proposed by @Zn-Dk in #21/#22.
+ */
+export type StreamMotionPreference =
+  /** Follow the OS preference: reduced-motion users get raw text (accessibility first). */
+  | 'auto'
+  /** Always run the smoothing engine, ignoring the OS preference. */
+  | 'force-smooth'
+  /** Always render raw text, ignoring the OS preference. */
+  | 'force-reduced'
+
+/**
  * Preferences a user may set. Deliberately separate from {@link StreamConfig}
  * because the two change at different times: composition-time values go
  * through the boot global, a live UI edit goes through the protected plugin RPC.
@@ -62,6 +74,13 @@ export interface StreamSettings {
    */
   controlScroll: boolean
   /**
+   * How the reveal honors the OS reduced-motion preference. `auto` preserves
+   * the accessibility-first default; `force-smooth` keeps the engine on
+   * machines where a system-wide reduce-motion switch (performance tooling,
+   * RDP sessions, forced browser flags) would otherwise bypass it silently.
+   */
+  motionPreference: StreamMotionPreference
+  /**
    * Whether a reasoning ("Think") block auto-expands while it is the
    * streaming tail. Off keeps the block collapsed — the user can still open
    * it by hand — and stops the running state from re-owning the disclosure.
@@ -77,6 +96,7 @@ export interface StreamSettings {
 export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   enabled: true,
   controlScroll: true,
+  motionPreference: 'auto',
   thinkAutoExpand: true,
   debugEnabled: false,
   debugTuning: DEFAULT_STREAM_DEBUG_TUNING,

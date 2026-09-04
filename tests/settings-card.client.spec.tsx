@@ -31,6 +31,7 @@ const developmentView: StreamSettingsView = {
     writable: true,
     enabled: true,
     controlScroll: true,
+    motionPreference: 'auto',
     thinkAutoExpand: true,
   canUpgrade: false,
 }
@@ -275,8 +276,34 @@ describe('smooth-stream settings card', () => {
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
       enabled: true,
       controlScroll: true,
+      motionPreference: 'auto',
       thinkAutoExpand: false,
     })
+  })
+
+  it('stages a motion-preference pick from the radio group without nested labels', async () => {
+    const { ctx, slots } = await bench()
+    declareCardSlot(slots)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const face = cardFace(slots)
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
+    render(<SmoothStreamCard {...cardProps(face)} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /smooth stream/i }))
+    const radios = screen.getAllByRole('radio')
+    expect(radios).toHaveLength(3)
+    expect(radios.map(radio => (radio as HTMLInputElement).checked)).toEqual([true, false, false])
+    fireEvent.click(radios[1]!)
+    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+      dirty: true,
+      motionPreference: 'force-smooth',
+    })
+    // The pick's <label> must not sit inside another <label>: browsers route
+    // the inner click away from React's synthetic events in that shape, so
+    // onChange would never fire. Its nearest label ancestor is itself.
+    const choiceLabel = radios[1]!.closest('label')
+    expect(choiceLabel).not.toBeNull()
+    expect(choiceLabel!.parentElement!.closest('label')).toBeNull()
   })
 
   it('stages and persists the diagnostics switch through its compatible endpoint', async () => {
@@ -325,6 +352,7 @@ describe('smooth-stream settings card', () => {
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
       enabled: false,
       controlScroll: true,
+      motionPreference: 'auto',
       thinkAutoExpand: true,
       debugEnabled: true,
       debugTuning: tuning,

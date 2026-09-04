@@ -5,6 +5,7 @@ import {
   DEFAULT_STREAM_DEBUG_TUNING,
   DEFAULT_STREAM_SETTINGS,
   type StreamDebugTuning,
+  type StreamMotionPreference,
   type StreamSettings,
 } from '../settings.ts'
 import type {
@@ -23,6 +24,7 @@ export interface SmoothStreamCardState {
   failed: boolean
   enabled: boolean
   controlScroll: boolean
+  motionPreference: StreamMotionPreference
   thinkAutoExpand: boolean
   debugEnabled: boolean
   debugTuning: StreamDebugTuning
@@ -52,7 +54,7 @@ export class SmoothStreamCardController {
   private readonly store = createSnapshotStore<SmoothStreamCardState>(this.projection())
   private loaded: StreamSettingsView | undefined
   private loadedDebug: StreamDebugSettingsView | undefined
-  private stagedBase: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'thinkAutoExpand'> | undefined
+  private stagedBase: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'motionPreference' | 'thinkAutoExpand'> | undefined
   private stagedDebug: Pick<StreamSettings, 'debugEnabled' | 'debugTuning'> | undefined
   private saving = false
   private failed = false
@@ -90,11 +92,12 @@ export class SmoothStreamCardController {
       hooks: { smoothStreamCard: this.store },
       edit: (patch) => {
         if (this.saving) return
-        if (patch.enabled !== undefined || patch.controlScroll !== undefined || patch.thinkAutoExpand !== undefined) {
+        if (patch.enabled !== undefined || patch.controlScroll !== undefined || patch.motionPreference !== undefined || patch.thinkAutoExpand !== undefined) {
           this.stagedBase = {
             ...this.baseValues(),
             ...(patch.enabled === undefined ? {} : { enabled: patch.enabled }),
             ...(patch.controlScroll === undefined ? {} : { controlScroll: patch.controlScroll }),
+            ...(patch.motionPreference === undefined ? {} : { motionPreference: patch.motionPreference }),
             ...(patch.thinkAutoExpand === undefined ? {} : { thinkAutoExpand: patch.thinkAutoExpand }),
           }
         }
@@ -140,10 +143,11 @@ export class SmoothStreamCardController {
     }
   }
 
-  private baseValues(): Pick<StreamSettings, 'enabled' | 'controlScroll' | 'thinkAutoExpand'> {
+  private baseValues(): Pick<StreamSettings, 'enabled' | 'controlScroll' | 'motionPreference' | 'thinkAutoExpand'> {
     return this.stagedBase ?? {
       enabled: this.loaded?.enabled ?? DEFAULT_STREAM_SETTINGS.enabled,
       controlScroll: this.loaded?.controlScroll ?? DEFAULT_STREAM_SETTINGS.controlScroll,
+      motionPreference: this.loaded?.motionPreference ?? DEFAULT_STREAM_SETTINGS.motionPreference,
       thinkAutoExpand: this.loaded?.thinkAutoExpand ?? DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
     }
   }

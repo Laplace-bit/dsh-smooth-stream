@@ -157,6 +157,7 @@ class SettingsCell {
       pending === this.pending
       && next.enabled === this.value.enabled
       && next.controlScroll === this.value.controlScroll
+      && next.motionPreference === this.value.motionPreference
       && next.thinkAutoExpand === this.value.thinkAutoExpand
       && next.debugEnabled === this.value.debugEnabled
       && next.debugTuning === this.value.debugTuning
@@ -270,6 +271,7 @@ export function apply(ctx: ClientContext): void {
       maxScrollSpeedPxPerSec: config.maxScrollSpeedPxPerSec,
       thinkAutoExpand: preferences.thinkAutoExpand,
       controlScroll: preferences.controlScroll,
+      motionPreference: preferences.motionPreference,
     })
   }
   ctx.slots.inject('conversation.chat.node', () => {

@@ -125,6 +125,7 @@ describe('smooth-stream host settings', () => {
         writable: true,
         enabled: DEFAULT_STREAM_SETTINGS.enabled,
         controlScroll: DEFAULT_STREAM_SETTINGS.controlScroll,
+        motionPreference: DEFAULT_STREAM_SETTINGS.motionPreference,
         thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
         canUpgrade: false,
       },
@@ -210,6 +211,20 @@ describe('smooth-stream host settings', () => {
       signal(),
     )
     expect(missingControlScroll).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
+
+    const badMotionPreference = await registration.handler(
+      STREAM_SETTINGS_RPC.write,
+      { enabled: true, controlScroll: true, thinkAutoExpand: true, motionPreference: 'shake' },
+      signal(),
+    )
+    expect(badMotionPreference).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
+
+    const motionPreference = await registration.handler(
+      STREAM_SETTINGS_RPC.write,
+      { enabled: true, controlScroll: true, thinkAutoExpand: true, motionPreference: 'force-smooth' },
+      signal(),
+    )
+    expect(motionPreference).toMatchObject({ ok: true, value: { motionPreference: 'force-smooth' } })
 
     const blockedUpdate = await registration.handler(STREAM_SETTINGS_RPC.upgrade, {}, signal())
     expect(blockedUpdate).toMatchObject({ ok: false, error: { code: 'internal' } })

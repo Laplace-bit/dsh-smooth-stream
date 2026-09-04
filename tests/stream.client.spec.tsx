@@ -57,6 +57,9 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** Long enough that 400ms of reveal cannot drain it. */
+const LONG_STREAM_TEXT = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ')
+
 function assistantProps(
   status: 'running' | 'settled',
   blocks: unknown[],
@@ -806,6 +809,62 @@ describe('assistant renderer', () => {
     const block = { kind: 'text', text: 'hello' }
     const view = render(<TypewriterAssistantNodeView {...assistantProps('running', [block])} />)
     expect(view.container.textContent).not.toContain('▍')
+  })
+
+  it('renders raw text immediately when the auto preference sees reduced motion', async () => {
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }))
+    const block = { kind: 'text', text: LONG_STREAM_TEXT }
+    const view = render(<TypewriterAssistantNodeView {...assistantProps('running', [block])} />)
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    // Accessibility-first default: no reveal queue, the full text is present.
+    expect(view.container.textContent).toContain(LONG_STREAM_TEXT)
+  })
+
+  it('keeps revealing through reduced motion when the preference is force-smooth', async () => {
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }))
+    const block = { kind: 'text', text: LONG_STREAM_TEXT }
+    const view = render(
+      <TypewriterAssistantNodeView {...assistantProps('running', [block])} motionPreference="force-smooth" />,
+    )
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    // The engine still owns the cadence: the tail has not been dumped.
+    expect(view.container.textContent).not.toContain(LONG_STREAM_TEXT)
+    await act(() => vi.advanceTimersByTimeAsync(12000))
+    expect(view.container.textContent).toContain(LONG_STREAM_TEXT)
+  })
+
+  it('renders raw text immediately when the preference is force-reduced', async () => {
+    const block = { kind: 'text', text: LONG_STREAM_TEXT }
+    const view = render(
+      <TypewriterAssistantNodeView {...assistantProps('running', [block])} motionPreference="force-reduced" />,
+    )
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    expect(view.container.textContent).toContain(LONG_STREAM_TEXT)
+  })
+
+  it('re-arms the reveal engine when streaming starts after the row mounts', async () => {
+    // The 0.1.2 optimistic echo can mount the row before its step turns
+    // `running`; the reveal queue must engage on the rising edge so later
+    // chunks keep their smoothed cadence.
+    const head = Array.from({ length: 30 }, (_, i) => `word${i}`).join(' ')
+    const view = render(<TypewriterAssistantNodeView {...assistantProps('settled', [{ kind: 'text', text: '' }])} />)
+    view.rerender(<TypewriterAssistantNodeView {...assistantProps('running', [{ kind: 'text', text: head }])} />)
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    view.rerender(<TypewriterAssistantNodeView {...assistantProps('running', [{ kind: 'text', text: LONG_STREAM_TEXT }])} />)
+    await act(() => vi.advanceTimersByTimeAsync(400))
+    // Without the re-arm `typing` freezes at false, `live` stays off, and the
+    // appended tail would render raw at once.
+    expect(view.container.textContent).not.toContain(LONG_STREAM_TEXT)
+    await act(() => vi.advanceTimersByTimeAsync(12000))
+    expect(view.container.textContent).toContain(LONG_STREAM_TEXT)
   })
 
   it('renders streaming text through Markdown without a raw-text tail', async () => {

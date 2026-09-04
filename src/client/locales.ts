@@ -8,6 +8,10 @@ export type SmoothStreamLocaleKey =
   | 'title' | 'description'
   | 'enabled' | 'enabledHint'
   | 'controlScroll' | 'controlScrollHint'
+  | 'motionPreference' | 'motionPreferenceHint'
+  | 'motionAuto' | 'motionAutoHint'
+  | 'motionForceSmooth' | 'motionForceSmoothHint'
+  | 'motionForceReduced' | 'motionForceReducedHint'
   | 'thinkAutoExpand' | 'thinkAutoExpandHint'
   | 'debugEnabled' | 'debugEnabledHint' | 'debugUnavailable'
   | 'debugPanelTitle' | 'debugPanelToggle' | 'debugPanelClose' | 'debugGuide'
@@ -37,6 +41,14 @@ export const en: Record<SmoothStreamLocaleKey, string> = {
   enabledHint: 'Let this plugin render and follow streaming replies. Turn off to use the built-in Harness renderer.',
   controlScroll: 'Take over scrolling',
   controlScrollHint: 'On by default; smooth-stream writes the conversation scroll position. Turn off to leave bottom-follow to Harness.',
+  motionPreference: 'Motion',
+  motionPreferenceHint: 'How streaming responds to the system reduce-motion setting.',
+  motionAuto: 'Follow system',
+  motionAutoHint: 'Reduced-motion systems get raw text (accessibility first).',
+  motionForceSmooth: 'Always smooth',
+  motionForceSmoothHint: 'Keep the smoothing engine even when the system asks for reduced motion.',
+  motionForceReduced: 'Always raw',
+  motionForceReducedHint: 'Render raw text even when the system allows motion.',
   thinkAutoExpand: 'Auto-expand thinking',
   thinkAutoExpandHint: 'Open the thinking block while it streams. Turn off to keep it collapsed.',
   debugEnabled: 'Show render diagnostics',
@@ -117,6 +129,14 @@ export const zh: Record<SmoothStreamLocaleKey, string> = {
   enabledHint: '由本插件渲染并跟随流式回复；关闭后使用 Harness 内置渲染。',
   controlScroll: '接管滚动',
   controlScrollHint: '默认开启，由丝滑流式写入会话滚动位置；关闭后贴底滚动交给 Harness。',
+  motionPreference: '动效偏好',
+  motionPreferenceHint: '流式渲染如何响应系统的「减少动态效果」设置。',
+  motionAuto: '跟随系统',
+  motionAutoHint: '系统开启减少动态效果时直接呈现原始文本（优先无障碍）。',
+  motionForceSmooth: '始终平滑',
+  motionForceSmoothHint: '即使系统要求减少动态效果，仍保持平滑流式渲染。',
+  motionForceReduced: '始终原始',
+  motionForceReducedHint: '即使系统允许动效，也直接呈现原始文本。',
   thinkAutoExpand: '自动展开思考',
   thinkAutoExpandHint: '思考块在流式时自动展开；关闭后保持折叠，可手动展开。',
   debugEnabled: '显示渲染调试面板',
