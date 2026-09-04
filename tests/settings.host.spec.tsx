@@ -124,8 +124,7 @@ describe('smooth-stream host settings', () => {
         installation: 'development',
         writable: true,
         enabled: DEFAULT_STREAM_SETTINGS.enabled,
-        controlScroll: DEFAULT_STREAM_SETTINGS.controlScroll,
-        thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+        motionPreference: DEFAULT_STREAM_SETTINGS.motionPreference,        thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
         canUpgrade: false,
       },
     })

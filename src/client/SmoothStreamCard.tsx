@@ -73,17 +73,28 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
                 </label>
                 <label className={state.enabled ? css.field : `${css.field} ${css.fieldDisabled}`}>
                   <span className={css.fieldHead}>
-                    <span className={css.label}>{t('controlScroll')}</span>
-                    <input
-                      type="checkbox"
-                      className={css.toggle}
-                      checked={state.controlScroll}
-                      disabled={!state.writable || state.saving || !state.enabled}
-                      onChange={(event) => { props.edit({ controlScroll: event.target.checked }) }}
-                    />
+                    <span className={css.label}>{t('motionPreference')}</span>
                   </span>
-                  <span className={css.hint}>{t('controlScrollHint')}</span>
-                </label>
+                  <span className={css.hint}>{t('motionPreferenceHint')}</span>
+                  <span className={css.choiceRow} role="radiogroup" aria-label={t('motionPreference')}>
+                    {([
+                      ['auto', 'motionAuto', 'motionAutoHint'],
+                      ['force-smooth', 'motionForceSmooth', 'motionForceSmoothHint'],
+                      ['force-reduced', 'motionForceReduced', 'motionForceReducedHint'],
+                    ] as const).map(([value, label, hint]) => (
+                      <label key={value} className={css.choice} title={t(hint)}>
+                        <input
+                          type="radio"
+                          className={css.choiceInput}
+                          name="smooth-stream-motion"
+                          checked={state.motionPreference === value}
+                          disabled={!state.writable || state.saving || !state.enabled}
+                          onChange={() => { props.edit({ motionPreference: value }) }}
+                        />
+                        {t(label)}
+                      </label>
+                    ))}
+                  </span>                </label>
                 <label className={state.enabled ? css.field : `${css.field} ${css.fieldDisabled}`}>
                   <span className={css.fieldHead}>
                     <span className={css.label}>{t('thinkAutoExpand')}</span>

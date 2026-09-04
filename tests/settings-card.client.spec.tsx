@@ -28,11 +28,11 @@ afterEach(() => {
 const developmentView: StreamSettingsView = {
   version: '0.1.0',
   installation: 'development',
-    writable: true,
-    enabled: true,
-    controlScroll: true,
-    thinkAutoExpand: true,
-  canUpgrade: false,
+  writable: true,
+  enabled: true,
+  motionPreference: 'auto',
+  thinkAutoExpand: true,
+  autoCollapse: true,  canUpgrade: false,
 }
 
 const developmentDebugView: StreamDebugSettingsView = {
@@ -274,9 +274,33 @@ describe('smooth-stream settings card', () => {
     })
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
       enabled: true,
-      controlScroll: true,
+      motionPreference: 'auto',
       thinkAutoExpand: false,
+      autoCollapse: true,
     })
+  })
+
+  it('stages and persists the finished-turn collapse switch independently', async () => {
+    const { ctx, slots, call } = await bench()
+    declareCardSlot(slots)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const face = cardFace(slots)
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
+
+    face.edit({ autoCollapse: false })
+    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ dirty: true, autoCollapse: false })
+    face.save()
+    await vi.waitFor(() => {
+      expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
+        dirty: false,
+        autoCollapse: false,
+      })
+    })
+    expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
+      enabled: true,
+      motionPreference: 'auto',
+      thinkAutoExpand: true,
+      autoCollapse: false,    })
   })
 
   it('stages and persists the diagnostics switch through its compatible endpoint', async () => {
@@ -324,8 +348,7 @@ describe('smooth-stream settings card', () => {
 
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
       enabled: false,
-      controlScroll: true,
-      thinkAutoExpand: true,
+      motionPreference: 'auto',      thinkAutoExpand: true,
       debugEnabled: true,
       debugTuning: tuning,
     })

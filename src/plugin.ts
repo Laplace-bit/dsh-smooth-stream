@@ -55,8 +55,11 @@ export const Config: Schema<Config> = Schema.object({
  */
 export const StreamSettingsSchema: Schema<StreamSettings> = Schema.object({
   enabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.enabled),
-  controlScroll: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.controlScroll),
-  thinkAutoExpand: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand),
+  motionPreference: Schema.union([
+    Schema.const('auto'),
+    Schema.const('force-smooth'),
+    Schema.const('force-reduced'),
+  ] as const).default(DEFAULT_STREAM_SETTINGS.motionPreference),  thinkAutoExpand: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand),
   debugEnabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.debugEnabled),
   debugTuning: Schema.object({
     revealScale: Schema.number().min(0.25).max(2).default(DEFAULT_STREAM_SETTINGS.debugTuning.revealScale),
@@ -117,8 +120,7 @@ export function apply(ctx: Context, config: Config): void {
           installation: installation.kind,
           writable: connectionCtx.settings.writable,
           enabled: settings.enabled,
-          controlScroll: settings.controlScroll,
-          thinkAutoExpand: settings.thinkAutoExpand,
+          motionPreference: settings.motionPreference,          thinkAutoExpand: settings.thinkAutoExpand,
           canUpgrade: installation.kind === 'npm',
         }
       }
@@ -184,8 +186,7 @@ export function apply(ctx: Context, config: Config): void {
           try {
             const next = payload as {
               enabled: boolean
-              controlScroll: boolean
-              thinkAutoExpand: boolean
+              motionPreference?: unknown              thinkAutoExpand: boolean
               debugEnabled?: unknown
               debugTuning?: unknown
             }
@@ -200,10 +201,27 @@ export function apply(ctx: Context, config: Config): void {
                 },
               }
             }
+            if (
+              next.motionPreference !== undefined
+              && next.motionPreference !== 'auto'
+              && next.motionPreference !== 'force-smooth'
+              && next.motionPreference !== 'force-reduced'
+            ) {
+              return {
+                ok: false,
+                error: {
+                  code: 'settings-rejected',
+                  message: 'motionPreference must be one of auto | force-smooth | force-reduced',
+                  details: { ns: STREAM_SETTINGS_NS },
+                },
+              }
+            }
             await scope.update({
               enabled: next.enabled,
               controlScroll: next.controlScroll,
               thinkAutoExpand: next.thinkAutoExpand,
+              autoCollapse: next.autoCollapse,
+              ...(next.motionPreference === undefined ? {} : { motionPreference: next.motionPreference }),
               ...(hasDebug ? { debugEnabled: next.debugEnabled, debugTuning: next.debugTuning } : {}),
             })
           } catch {

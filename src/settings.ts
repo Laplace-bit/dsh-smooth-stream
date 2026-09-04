@@ -50,6 +50,15 @@ export const DEFAULT_STREAM_DEBUG_TUNING: StreamDebugTuning = {
  * because the two change at different times: composition-time values go
  * through the boot global, a live UI edit goes through the protected plugin RPC.
  */
+/** How the typewriter reveal responds to the OS reduced-motion preference. */
+export type StreamMotionPreference =
+  /** Follow the OS preference: reduced-motion users get raw text (accessibility first). */
+  | 'auto'
+  /** Always run the smoothing engine, ignoring the OS preference. */
+  | 'force-smooth'
+  /** Always render raw text, ignoring the OS preference. */
+  | 'force-reduced'
+
 export interface StreamSettings {
   /**
    * Whether this plugin replaces and wraps Harness conversation renderers.
@@ -57,11 +66,12 @@ export interface StreamSettings {
    */
   enabled: boolean
   /**
-   * Whether this plugin also takes over conversation bottom-follow. Off leaves
-   * scroll ownership to the Harness; text reveal still runs.
+   * Whether the typewriter reveal honors the OS reduced-motion preference.
+   * `auto` preserves the accessibility-first default; `force-smooth` keeps the
+   * smoothing engine on machines where a system-wide reduce-motion switch
+   * (or a forced browser flag) would otherwise bypass it.
    */
-  controlScroll: boolean
-  /**
+  motionPreference: StreamMotionPreference  /**
    * Whether a reasoning ("Think") block auto-expands while it is the
    * streaming tail. Off keeps the block collapsed — the user can still open
    * it by hand — and stops the running state from re-owning the disclosure.
@@ -76,8 +86,7 @@ export interface StreamSettings {
 /** Defaults shared by the Host schema and the client-side fallback. */
 export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   enabled: true,
-  controlScroll: true,
-  thinkAutoExpand: true,
+  motionPreference: 'auto',  thinkAutoExpand: true,
   debugEnabled: false,
   debugTuning: DEFAULT_STREAM_DEBUG_TUNING,
 }

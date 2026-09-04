@@ -161,6 +161,7 @@ class SettingsCell {
     const next = this.card?.values() ?? this.value
     if (this.cachedRead !== undefined
       && next.enabled === this.cachedRead.enabled
+      && next.motionPreference === this.cachedRead.motionPreference
       && next.thinkAutoExpand === this.cachedRead.thinkAutoExpand
       && next.autoCollapse === this.cachedRead.autoCollapse
       && next.debugEnabled === this.cachedRead.debugEnabled
@@ -175,8 +176,7 @@ class SettingsCell {
     if (
       pending === this.pending
       && next.enabled === this.value.enabled
-      && next.controlScroll === this.value.controlScroll
-      && next.thinkAutoExpand === this.value.thinkAutoExpand
+      && next.motionPreference === this.value.motionPreference      && next.thinkAutoExpand === this.value.thinkAutoExpand
       && next.debugEnabled === this.value.debugEnabled
       && next.debugTuning === this.value.debugTuning
     ) return
@@ -186,6 +186,7 @@ class SettingsCell {
     // infinite loop, and this cell is subscribed by the takeover renderer.
     if (next === this.value
       || (next.enabled === this.value.enabled
+        && next.motionPreference === this.value.motionPreference
         && next.thinkAutoExpand === this.value.thinkAutoExpand
         && next.autoCollapse === this.value.autoCollapse
         && next.debugEnabled === this.value.debugEnabled
@@ -312,8 +313,7 @@ export function apply(ctx: ClientContext): void {
       scrollSpeedPxPerSec: config.scrollSpeedPxPerSec,
       maxScrollSpeedPxPerSec: config.maxScrollSpeedPxPerSec,
       thinkAutoExpand: preferences.thinkAutoExpand,
-      controlScroll: preferences.controlScroll,
-    })
+      motionPreference: preferences.motionPreference,    })
   }
   ctx.slots.inject('conversation.chat.node', () => {
     try {
