@@ -545,6 +545,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   scrollSpeedPxPerSec: _scrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.scrollSpeedPxPerSec,
   maxScrollSpeedPxPerSec: _maxScrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.maxScrollSpeedPxPerSec,
   thinkAutoExpand = DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+  controlScroll = DEFAULT_STREAM_SETTINGS.controlScroll,
   motionPreference = DEFAULT_STREAM_SETTINGS.motionPreference,  node,
   useTurnData,
   openFile,
@@ -558,6 +559,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   scrollSpeedPxPerSec?: number
   maxScrollSpeedPxPerSec?: number
   thinkAutoExpand?: boolean
+  controlScroll?: boolean
   motionPreference?: StreamMotionPreference}) {
   const data = node.data
   const streaming = data.status === 'running'

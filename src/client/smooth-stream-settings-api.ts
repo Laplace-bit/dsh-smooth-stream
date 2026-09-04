@@ -23,7 +23,9 @@ function settingsView(value: unknown): StreamSettingsView {
     || !['npm', 'development', 'unmanaged'].includes(data.installation as string)
     || typeof data.writable !== 'boolean'
     || typeof data.enabled !== 'boolean'
-    || !['auto', 'force-smooth', 'force-reduced'].includes(data.motionPreference as string)    || typeof data.thinkAutoExpand !== 'boolean'
+    || typeof data.controlScroll !== 'boolean'
+    || !['auto', 'force-smooth', 'force-reduced'].includes(data.motionPreference as string)
+    || typeof data.thinkAutoExpand !== 'boolean'
     || typeof data.canUpgrade !== 'boolean') {
     throw new Error('dsh-smooth-stream: malformed settings response')
   }
@@ -67,7 +69,8 @@ function accepted(result: Awaited<ReturnType<ConnectionHandle['rpc']['call']>>):
 /** Narrow client contract consumed by the staged settings-card controller. */
 export interface SmoothStreamSettingsApi {
   read(): Promise<StreamSettingsView>
-  write(settings: Pick<StreamSettings, 'enabled' | 'motionPreference' | 'thinkAutoExpand' | 'autoCollapse'> & Partial<Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>>): Promise<StreamSettingsView>  readDebug(): Promise<StreamDebugSettingsView>
+  write(settings: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'motionPreference' | 'thinkAutoExpand'> & Partial<Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>>): Promise<StreamSettingsView>
+  readDebug(): Promise<StreamDebugSettingsView>
   writeDebug(settings: Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>): Promise<StreamDebugSettingsView>
   upgrade(): Promise<StreamUpgradeView>
 }
@@ -78,12 +81,14 @@ export function createSmoothStreamSettingsApi(connection: ConnectionHandle): Smo
     async read(): Promise<StreamSettingsView> {
       return settingsView(accepted(await connection.rpc.call(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.read, {})))
     },
-    async write(settings: Pick<StreamSettings, 'enabled' | 'motionPreference' | 'thinkAutoExpand' | 'autoCollapse'> & Partial<Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>>): Promise<StreamSettingsView> {      return settingsView(accepted(await connection.rpc.call(
+    async write(settings: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'motionPreference' | 'thinkAutoExpand'> & Partial<Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>>): Promise<StreamSettingsView> {      return settingsView(accepted(await connection.rpc.call(
         STREAM_SETTINGS_RPC_CHANNEL,
         STREAM_SETTINGS_RPC.write,
         {
           enabled: settings.enabled,
-          motionPreference: settings.motionPreference,          thinkAutoExpand: settings.thinkAutoExpand,
+          controlScroll: settings.controlScroll,
+          motionPreference: settings.motionPreference,
+          thinkAutoExpand: settings.thinkAutoExpand,
           ...(settings.debugEnabled === undefined || settings.debugTuning === undefined
             ? {}
             : { debugEnabled: settings.debugEnabled, debugTuning: settings.debugTuning }),

@@ -55,6 +55,7 @@ export const Config: Schema<Config> = Schema.object({
  */
 export const StreamSettingsSchema: Schema<StreamSettings> = Schema.object({
   enabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.enabled),
+  controlScroll: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.controlScroll),
   motionPreference: Schema.union([
     Schema.const('auto'),
     Schema.const('force-smooth'),
@@ -120,6 +121,7 @@ export function apply(ctx: Context, config: Config): void {
           installation: installation.kind,
           writable: connectionCtx.settings.writable,
           enabled: settings.enabled,
+          controlScroll: settings.controlScroll,
           motionPreference: settings.motionPreference,          thinkAutoExpand: settings.thinkAutoExpand,
           canUpgrade: installation.kind === 'npm',
         }
@@ -186,7 +188,9 @@ export function apply(ctx: Context, config: Config): void {
           try {
             const next = payload as {
               enabled: boolean
-              motionPreference?: unknown              thinkAutoExpand: boolean
+              controlScroll: boolean
+              motionPreference?: unknown
+              thinkAutoExpand: boolean
               debugEnabled?: unknown
               debugTuning?: unknown
             }
@@ -220,7 +224,6 @@ export function apply(ctx: Context, config: Config): void {
               enabled: next.enabled,
               controlScroll: next.controlScroll,
               thinkAutoExpand: next.thinkAutoExpand,
-              autoCollapse: next.autoCollapse,
               ...(next.motionPreference === undefined ? {} : { motionPreference: next.motionPreference }),
               ...(hasDebug ? { debugEnabled: next.debugEnabled, debugTuning: next.debugTuning } : {}),
             })

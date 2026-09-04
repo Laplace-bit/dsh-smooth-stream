@@ -30,9 +30,10 @@ const developmentView: StreamSettingsView = {
   installation: 'development',
   writable: true,
   enabled: true,
+  controlScroll: true,
   motionPreference: 'auto',
   thinkAutoExpand: true,
-  autoCollapse: true,  canUpgrade: false,
+  canUpgrade: false,
 }
 
 const developmentDebugView: StreamDebugSettingsView = {
@@ -274,9 +275,9 @@ describe('smooth-stream settings card', () => {
     })
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
       enabled: true,
+      controlScroll: true,
       motionPreference: 'auto',
       thinkAutoExpand: false,
-      autoCollapse: true,
     })
   })
 
@@ -287,20 +288,20 @@ describe('smooth-stream settings card', () => {
     const face = cardFace(slots)
     await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
 
-    face.edit({ autoCollapse: false })
-    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ dirty: true, autoCollapse: false })
+    face.edit({ thinkAutoExpand: false })
     face.save()
     await vi.waitFor(() => {
       expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
         dirty: false,
-        autoCollapse: false,
+        thinkAutoExpand: false,
       })
     })
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
       enabled: true,
+      controlScroll: true,
       motionPreference: 'auto',
-      thinkAutoExpand: true,
-      autoCollapse: false,    })
+      thinkAutoExpand: false,
+    })
   })
 
   it('stages and persists the diagnostics switch through its compatible endpoint', async () => {
@@ -348,7 +349,9 @@ describe('smooth-stream settings card', () => {
 
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
       enabled: false,
-      motionPreference: 'auto',      thinkAutoExpand: true,
+      controlScroll: true,
+      motionPreference: 'auto',
+      thinkAutoExpand: true,
       debugEnabled: true,
       debugTuning: tuning,
     })

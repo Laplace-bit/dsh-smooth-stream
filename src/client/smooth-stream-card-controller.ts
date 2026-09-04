@@ -23,7 +23,8 @@ export interface SmoothStreamCardState {
   saving: boolean
   failed: boolean
   enabled: boolean
-  motionPreference: StreamMotionPreference  thinkAutoExpand: boolean
+  motionPreference: StreamMotionPreference
+  thinkAutoExpand: boolean
   debugEnabled: boolean
   debugTuning: StreamDebugTuning
   debugAvailable: boolean
@@ -52,7 +53,8 @@ export class SmoothStreamCardController {
   private readonly store = createSnapshotStore<SmoothStreamCardState>(this.projection())
   private loaded: StreamSettingsView | undefined
   private loadedDebug: StreamDebugSettingsView | undefined
-  private stagedBase: Pick<StreamSettings, 'enabled' | 'motionPreference' | 'thinkAutoExpand' | 'autoCollapse'> | undefined  private stagedDebug: Pick<StreamSettings, 'debugEnabled' | 'debugTuning'> | undefined
+  private stagedBase: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'motionPreference' | 'thinkAutoExpand'> | undefined
+  private stagedDebug: Pick<StreamSettings, 'debugEnabled' | 'debugTuning'> | undefined
   private saving = false
   private failed = false
   private upgrading = false
@@ -89,11 +91,12 @@ export class SmoothStreamCardController {
       hooks: { smoothStreamCard: this.store },
       edit: (patch) => {
         if (this.saving) return
-        if (patch.enabled !== undefined || patch.motionPreference !== undefined || patch.thinkAutoExpand !== undefined || patch.autoCollapse !== undefined) {
+        if (patch.enabled !== undefined || patch.motionPreference !== undefined || patch.thinkAutoExpand !== undefined ) {
           this.stagedBase = {
             ...this.baseValues(),
             ...(patch.enabled === undefined ? {} : { enabled: patch.enabled }),
-            ...(patch.motionPreference === undefined ? {} : { motionPreference: patch.motionPreference }),            ...(patch.thinkAutoExpand === undefined ? {} : { thinkAutoExpand: patch.thinkAutoExpand }),
+            ...(patch.motionPreference === undefined ? {} : { motionPreference: patch.motionPreference }),
+            ...(patch.thinkAutoExpand === undefined ? {} : { thinkAutoExpand: patch.thinkAutoExpand }),
           }
         }
         if (this.loadedDebug !== undefined && (patch.debugEnabled !== undefined || patch.debugTuning !== undefined)) {
@@ -138,10 +141,12 @@ export class SmoothStreamCardController {
     }
   }
 
-  private baseValues(): Pick<StreamSettings, 'enabled' | 'motionPreference' | 'thinkAutoExpand' | 'autoCollapse'> {
+  private baseValues(): Pick<StreamSettings, 'enabled' | 'controlScroll' | 'motionPreference' | 'thinkAutoExpand'> {
     return this.stagedBase ?? {
       enabled: this.loaded?.enabled ?? DEFAULT_STREAM_SETTINGS.enabled,
-      motionPreference: this.loaded?.motionPreference ?? DEFAULT_STREAM_SETTINGS.motionPreference,      thinkAutoExpand: this.loaded?.thinkAutoExpand ?? DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+      controlScroll: this.loaded?.controlScroll ?? DEFAULT_STREAM_SETTINGS.controlScroll,
+      motionPreference: this.loaded?.motionPreference ?? DEFAULT_STREAM_SETTINGS.motionPreference,
+      thinkAutoExpand: this.loaded?.thinkAutoExpand ?? DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
     }
   }
 
@@ -179,6 +184,7 @@ export class SmoothStreamCardController {
       && prev.debugTuning.backpressureMinScale === debug.debugTuning.backpressureMinScale
     const built: StreamSettings = {
       ...base,
+      controlScroll: this.loaded?.controlScroll ?? DEFAULT_STREAM_SETTINGS.controlScroll,
       debugEnabled: debug.debugEnabled,
       debugTuning: tuningStable ? prev.debugTuning : debug.debugTuning,
     }

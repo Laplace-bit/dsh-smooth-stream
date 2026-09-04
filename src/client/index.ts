@@ -1,4 +1,4 @@
-import { createElement, type ComponentType } from 'react'
+import { createElement, useSyncExternalStore, type ComponentType } from 'react'
 import { useSyncExternalStoreWithSelector } from 'use-sync-external-store/shim/with-selector.js'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -163,7 +163,6 @@ class SettingsCell {
       && next.enabled === this.cachedRead.enabled
       && next.motionPreference === this.cachedRead.motionPreference
       && next.thinkAutoExpand === this.cachedRead.thinkAutoExpand
-      && next.autoCollapse === this.cachedRead.autoCollapse
       && next.debugEnabled === this.cachedRead.debugEnabled
       && next.debugTuning === this.cachedRead.debugTuning) return this.cachedRead
     this.cachedRead = next
@@ -188,7 +187,6 @@ class SettingsCell {
       || (next.enabled === this.value.enabled
         && next.motionPreference === this.value.motionPreference
         && next.thinkAutoExpand === this.value.thinkAutoExpand
-        && next.autoCollapse === this.value.autoCollapse
         && next.debugEnabled === this.value.debugEnabled
         && next.debugTuning === this.value.debugTuning)) {
       this.cachedRead = this.value
@@ -202,11 +200,6 @@ class SettingsCell {
   /** False while an available settings service is resolving its authority. */
   takeoverEnabled(): boolean {
     return !this.pending && this.value.enabled
-  }
-
-  /** Whether finished turns should fold behind a summary row right now. */
-  autoCollapseActive(): boolean {
-    return !this.pending && this.value.autoCollapse
   }
 
   readonly getSnapshot = (): StreamSettings => {

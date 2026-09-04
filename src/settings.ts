@@ -66,6 +66,11 @@ export interface StreamSettings {
    */
   enabled: boolean
   /**
+   * Whether this plugin also takes over conversation bottom-follow. Off leaves
+   * scroll ownership to the Harness; text reveal still runs.
+   */
+  controlScroll: boolean
+  /**
    * Whether the typewriter reveal honors the OS reduced-motion preference.
    * `auto` preserves the accessibility-first default; `force-smooth` keeps the
    * smoothing engine on machines where a system-wide reduce-motion switch
@@ -86,6 +91,7 @@ export interface StreamSettings {
 /** Defaults shared by the Host schema and the client-side fallback. */
 export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   enabled: true,
+  controlScroll: true,
   motionPreference: 'auto',  thinkAutoExpand: true,
   debugEnabled: false,
   debugTuning: DEFAULT_STREAM_DEBUG_TUNING,
