@@ -9,6 +9,7 @@ import { FollowHost } from '../src/client/FollowHost.tsx'
 import { useSmoothStreamContent } from '../src/client/useSmoothStreamContent.ts'
 import { useFpsGuard } from '../src/client/useFpsGuard.ts'
 import { notifyFollowCommit } from '../src/client/teleprompterGlide.ts'
+import { FadeDemo } from './FadeDemo.tsx'
 
 /* ---------------- host ChatView scroll contract (verbatim port) ---------- */
 
@@ -264,4 +265,4 @@ function Stats({ listRef }: { listRef: RefObject<HTMLDivElement | null> }): Reac
 
 /* ---------------- mount -------------------------------------------------- */
 
-createRoot(document.getElementById('app')!).render(<HostConversation />)
+createRoot(document.getElementById('app')!).render(new URLSearchParams(location.search).get('demo') === 'fade' ? <FadeDemo /> : <HostConversation />)

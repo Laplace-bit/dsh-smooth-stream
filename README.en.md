@@ -140,6 +140,10 @@ The plugin defaults to `preset: balanced`. You can tune the cadence in your prof
 
 Open **Settings → Plugins → Plugin Configuration** in the Web UI:
 
+**Logarithmic fade** (on by default) adapts the tail from 24 to at most 160 graphemes according to reveal speed, fading answers and expanded thinking from 0% opacity over 240ms with a reversed logarithmic curve that stays translucent longer. Text settles even during network pauses. Turning it off preserves text pacing and scrolling. It follows the motion preference and skips code, formulas and thinking summaries. Browsers without text-range highlighting support retain the existing reveal behavior.
+
+For a local preview, run `pnpm build:repro`, serve the repository with `python3 -m http.server 8765 --bind 127.0.0.1`, and open `http://127.0.0.1:8765/repro/index.html?demo=fade`. This uses the real reveal/fade hooks with synthetic rich-text fixtures. Run `node scripts/verify-logarithmic-fade.mjs` to check and record it (Chrome and `pnpm exec playwright-core install ffmpeg` required; override the Chrome path with `CHROME_BIN`). Reports and recordings go to the ignored `repro/artifacts/logarithmic-fade/` directory.
+
 - **Enable smooth streaming** (default on): Toggles custom stream rendering and follow. Disabling instantly falls back to built-in Harness rendering.
 - **Auto-expand thinking**: Controls whether reasoning opens automatically while streaming.
 - **Collapse finished work** (default on): Folds thoughts and tool steps into a summary line once the turn settles.
@@ -150,4 +154,3 @@ Open **Settings → Plugins → Plugin Configuration** in the Web UI:
 ## License
 
 [MIT](LICENSE)
-

@@ -62,6 +62,7 @@ export const StreamSettingsSchema: Schema<StreamSettings> = Schema.object({
     Schema.const('force-reduced'),
   ] as const).default(DEFAULT_STREAM_SETTINGS.motionPreference),
   thinkAutoExpand: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand),
+  logarithmicFade: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.logarithmicFade),
   debugEnabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.debugEnabled),
   debugTuning: Schema.object({
     revealScale: Schema.number().min(0.25).max(2).default(DEFAULT_STREAM_SETTINGS.debugTuning.revealScale),
@@ -125,6 +126,7 @@ export function apply(ctx: Context, config: Config): void {
           controlScroll: settings.controlScroll,
           motionPreference: settings.motionPreference,
           thinkAutoExpand: settings.thinkAutoExpand,
+          logarithmicFade: settings.logarithmicFade,
           canUpgrade: installation.kind === 'npm',
         }
       }
@@ -193,6 +195,7 @@ export function apply(ctx: Context, config: Config): void {
               controlScroll: boolean
               motionPreference?: unknown
               thinkAutoExpand: boolean
+              logarithmicFade?: unknown
               debugEnabled?: unknown
               debugTuning?: unknown
             }
@@ -207,6 +210,16 @@ export function apply(ctx: Context, config: Config): void {
                 error: {
                   code: 'settings-rejected',
                   message: 'motionPreference must be one of auto | force-smooth | force-reduced',
+                  details: { ns: STREAM_SETTINGS_NS },
+                },
+              }
+            }
+            if (next.logarithmicFade !== undefined && typeof next.logarithmicFade !== 'boolean') {
+              return {
+                ok: false,
+                error: {
+                  code: 'settings-rejected',
+                  message: 'logarithmicFade must be a boolean',
                   details: { ns: STREAM_SETTINGS_NS },
                 },
               }
@@ -227,6 +240,7 @@ export function apply(ctx: Context, config: Config): void {
               controlScroll: next.controlScroll,
               ...(next.motionPreference === undefined ? {} : { motionPreference: next.motionPreference }),
               thinkAutoExpand: next.thinkAutoExpand,
+              ...(next.logarithmicFade === undefined ? {} : { logarithmicFade: next.logarithmicFade }),
               ...(hasDebug ? { debugEnabled: next.debugEnabled, debugTuning: next.debugTuning } : {}),
             })
           } catch {

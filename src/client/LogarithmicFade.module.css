@@ -1,0 +1,160 @@
+/* Shared buckets change paint only; original DOM, layout and colors survive. */
+.scope::highlight(dsh-smooth-stream-log-fade-0),
+.scope *::highlight(dsh-smooth-stream-log-fade-0) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 0.00000%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-1),
+.scope *::highlight(dsh-smooth-stream-log-fade-1) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 3.22581%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-2),
+.scope *::highlight(dsh-smooth-stream-log-fade-2) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 6.45161%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-3),
+.scope *::highlight(dsh-smooth-stream-log-fade-3) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 9.67742%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-4),
+.scope *::highlight(dsh-smooth-stream-log-fade-4) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 12.90323%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-5),
+.scope *::highlight(dsh-smooth-stream-log-fade-5) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 16.12903%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-6),
+.scope *::highlight(dsh-smooth-stream-log-fade-6) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 19.35484%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-7),
+.scope *::highlight(dsh-smooth-stream-log-fade-7) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 22.58065%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-8),
+.scope *::highlight(dsh-smooth-stream-log-fade-8) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 25.80645%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-9),
+.scope *::highlight(dsh-smooth-stream-log-fade-9) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 29.03226%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-10),
+.scope *::highlight(dsh-smooth-stream-log-fade-10) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 32.25806%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-11),
+.scope *::highlight(dsh-smooth-stream-log-fade-11) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 35.48387%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-12),
+.scope *::highlight(dsh-smooth-stream-log-fade-12) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 38.70968%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-13),
+.scope *::highlight(dsh-smooth-stream-log-fade-13) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 41.93548%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-14),
+.scope *::highlight(dsh-smooth-stream-log-fade-14) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 45.16129%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-15),
+.scope *::highlight(dsh-smooth-stream-log-fade-15) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 48.38710%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-16),
+.scope *::highlight(dsh-smooth-stream-log-fade-16) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 51.61290%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-17),
+.scope *::highlight(dsh-smooth-stream-log-fade-17) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 54.83871%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-18),
+.scope *::highlight(dsh-smooth-stream-log-fade-18) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 58.06452%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-19),
+.scope *::highlight(dsh-smooth-stream-log-fade-19) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 61.29032%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-20),
+.scope *::highlight(dsh-smooth-stream-log-fade-20) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 64.51613%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-21),
+.scope *::highlight(dsh-smooth-stream-log-fade-21) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 67.74194%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-22),
+.scope *::highlight(dsh-smooth-stream-log-fade-22) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 70.96774%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-23),
+.scope *::highlight(dsh-smooth-stream-log-fade-23) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 74.19355%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-24),
+.scope *::highlight(dsh-smooth-stream-log-fade-24) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 77.41935%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-25),
+.scope *::highlight(dsh-smooth-stream-log-fade-25) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 80.64516%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-26),
+.scope *::highlight(dsh-smooth-stream-log-fade-26) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 83.87097%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-27),
+.scope *::highlight(dsh-smooth-stream-log-fade-27) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 87.09677%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-28),
+.scope *::highlight(dsh-smooth-stream-log-fade-28) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 90.32258%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-29),
+.scope *::highlight(dsh-smooth-stream-log-fade-29) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 93.54839%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-30),
+.scope *::highlight(dsh-smooth-stream-log-fade-30) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 96.77419%, transparent);
+}
+
+.scope::highlight(dsh-smooth-stream-log-fade-31),
+.scope *::highlight(dsh-smooth-stream-log-fade-31) {
+  color: color-mix(in srgb, var(--dsh-smooth-stream-fade-color, currentColor) 100.00000%, transparent);
+}

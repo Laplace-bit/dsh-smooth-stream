@@ -1,0 +1,24 @@
+.page { position: fixed; inset: 0; overflow: auto; padding: 40px max(24px, calc((100vw - 1100px) / 2)); box-sizing: border-box; background: #f7f7f4; color: #242620; font: 15px/1.6 system-ui, sans-serif; color-scheme: light; }
+.page[data-dark] { background: #171a19; color: #ebeee8; color-scheme: dark; }
+.header h1 { font-size: 34px; font-weight: 600; letter-spacing: -.04em; margin: 8px 0; }
+.eyebrow { font-size: 11px; letter-spacing: .16em; opacity: .65; }
+.controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 0; }
+.controls button, .controls select { font: inherit; padding: 6px 10px; border: 1px solid #8886; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.controls button:disabled { opacity: .4; }
+.controls label { display: flex; align-items: center; gap: 4px; }
+.controls .speed { flex-direction: column; align-items: stretch; gap: 6px; flex: 1 1 260px; max-width: 360px; }
+.speed span { display: flex; justify-content: space-between; gap: 16px; }
+.speed output { font-variant-numeric: tabular-nums; }
+.speed input { width: 100%; margin: 0; accent-color: #65906c; cursor: pointer; }
+.speedHint { font-size: 12px; opacity: .65; }
+.metrics { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 24px; padding: 12px 0; border-block: 1px solid #8883; font-size: 14px; font-variant-numeric: tabular-nums; }
+.metrics strong { display: inline-block; min-width: 3ch; text-align: right; font-size: 22px; font-weight: 600; }
+.metricHint { font-size: 12px; opacity: .6; }
+.columns { display: grid; grid-template-columns: 1fr 1.25fr; gap: 40px; border-top: 1px solid #8884; padding-top: 20px; }
+.columns h2 { font-size: 13px; font-weight: 500; opacity: .65; }
+.answer, .thinking { font-size: 19px; line-height: 1.9; overflow-wrap: anywhere; min-height: 180px; }
+.thinking { color: #72786b; }
+.page[data-dark] .thinking { color: #a4b09b; }
+.columns pre { white-space: pre-wrap; font-size: 15px; }
+.page footer { opacity: .6; font-size: 12px; margin-top: 32px; }
+@media (max-width: 650px) { .columns { grid-template-columns: 1fr; gap: 16px; } .page { padding: 24px; } .header h1 { font-size: 28px; } }

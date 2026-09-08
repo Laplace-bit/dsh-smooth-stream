@@ -13,6 +13,7 @@ export type SmoothStreamLocaleKey =
   | 'motionForceSmooth' | 'motionForceSmoothHint'
   | 'motionForceReduced' | 'motionForceReducedHint'
   | 'thinkAutoExpand' | 'thinkAutoExpandHint'
+  | 'logarithmicFade' | 'logarithmicFadeHint'
   | 'debugEnabled' | 'debugEnabledHint' | 'debugUnavailable'
   | 'debugPanelTitle' | 'debugPanelToggle' | 'debugPanelClose' | 'debugGuide'
   | 'debugLive' | 'debugIdle' | 'debugUnsaved'
@@ -50,6 +51,8 @@ export const en: Record<SmoothStreamLocaleKey, string> = {
   motionForceReduced: 'Always raw',
   motionForceReducedHint: 'Render raw text even when the system allows motion.',
   thinkAutoExpand: 'Auto-expand thinking',
+  logarithmicFade: 'Logarithmic fade',
+  logarithmicFadeHint: 'Fade new answer and expanded thinking text into view. Follows the motion preference.',
   thinkAutoExpandHint: 'Open the thinking block while it streams. Turn off to keep it collapsed.',
   debugEnabled: 'Show render diagnostics',
   debugEnabledHint: 'Show live streaming and scroll metrics on the right side of the chat. Tune values there, then save them here.',
@@ -138,6 +141,8 @@ export const zh: Record<SmoothStreamLocaleKey, string> = {
   motionForceReduced: '始终原始',
   motionForceReducedHint: '即使系统允许动效，也直接呈现原始文本。',
   thinkAutoExpand: '自动展开思考',
+  logarithmicFade: '对数淡入',
+  logarithmicFadeHint: '让回答正文和展开的思考文字由淡变实，遵循动效偏好。',
   thinkAutoExpandHint: '思考块在流式时自动展开；关闭后保持折叠，可手动展开。',
   debugEnabled: '显示渲染调试面板',
   debugEnabledHint: '在聊天右侧显示流式渲染和滚动的实时参数，可在面板中调节并在这里保存。',

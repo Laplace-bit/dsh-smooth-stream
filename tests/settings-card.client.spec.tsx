@@ -33,6 +33,7 @@ const developmentView: StreamSettingsView = {
     controlScroll: true,
     motionPreference: 'auto',
     thinkAutoExpand: true,
+    logarithmicFade: true,
   canUpgrade: false,
 }
 
@@ -93,6 +94,7 @@ async function bench(options: BenchOptions = {}): Promise<{
       const settings = payload as {
         enabled?: unknown
         thinkAutoExpand?: unknown
+        logarithmicFade?: boolean
         debugEnabled?: unknown
         debugTuning?: unknown
       }
@@ -107,6 +109,7 @@ async function bench(options: BenchOptions = {}): Promise<{
         ...view,
         enabled: settings.enabled,
         thinkAutoExpand: settings.thinkAutoExpand,
+        logarithmicFade: settings.logarithmicFade ?? view.logarithmicFade,
       }
       if (typeof settings.debugEnabled === 'boolean' && typeof settings.debugTuning === 'object' && settings.debugTuning !== null) {
         debugView = { debugEnabled: settings.debugEnabled, tuning: settings.debugTuning as StreamDebugSettingsView['tuning'] }
@@ -176,6 +179,30 @@ function cardProps(face: SmoothStreamCardFace): SmoothStreamCardProps {
 }
 
 describe('smooth-stream settings card', () => {
+  it('defaults old responses to fade enabled and saves the independent switch', async () => {
+    const { logarithmicFade: _fade, ...oldView } = developmentView
+    const { ctx, slots, call } = await bench({ readValue: oldView })
+    declareCardSlot(slots)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const face = cardFace(slots)
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
+    expect(face.hooks.smoothStreamCard.getSnapshot().logarithmicFade).toBe(true)
+    render(<SmoothStreamCard {...cardProps(face)} />)
+    fireEvent.click(screen.getByRole('button', { name: /smooth stream/i }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /logarithmic fade/i }))
+    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ logarithmicFade: false, dirty: true })
+    face.save()
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ logarithmicFade: false, dirty: false }))
+    expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, expect.objectContaining({ logarithmicFade: false }))
+  })
+
+  it('rejects a non-boolean fade response', async () => {
+    const { ctx, slots } = await bench({ readValue: { ...developmentView, logarithmicFade: 'false' } })
+    declareCardSlot(slots)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const face = cardFace(slots)
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('unavailable'))
+  })
   it('uses the standard theme-aware card surface tokens', () => {
     const styles = readFileSync(join(process.cwd(), 'src/client/SmoothStreamCard.module.css'), 'utf8')
 
@@ -278,6 +305,7 @@ describe('smooth-stream settings card', () => {
       controlScroll: true,
       motionPreference: 'auto',
       thinkAutoExpand: false,
+      logarithmicFade: true,
     })
   })
 
@@ -354,6 +382,7 @@ describe('smooth-stream settings card', () => {
       controlScroll: true,
       motionPreference: 'auto',
       thinkAutoExpand: true,
+      logarithmicFade: true,
       debugEnabled: true,
       debugTuning: tuning,
     })

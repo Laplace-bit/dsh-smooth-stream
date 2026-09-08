@@ -83,6 +83,19 @@ function signal(): AbortSignal {
 }
 
 describe('smooth-stream host settings', () => {
+  it('persists fade, preserves it for old writers and rejects invalid values', async () => {
+    const { ctx, fiber, registration } = await mountHost(profileBaseUrl(`link:${process.cwd()}`))
+    const base = { enabled: true, controlScroll: true, thinkAutoExpand: true }
+    expect(await registration.handler(STREAM_SETTINGS_RPC.write, { ...base, logarithmicFade: false }, signal()))
+      .toMatchObject({ ok: true, value: { logarithmicFade: false } })
+    expect(await registration.handler(STREAM_SETTINGS_RPC.write, base, signal()))
+      .toMatchObject({ ok: true, value: { logarithmicFade: false } })
+    for (const logarithmicFade of ['false', null, 0]) {
+      expect(await registration.handler(STREAM_SETTINGS_RPC.write, { ...base, logarithmicFade }, signal())).toMatchObject({ ok: false })
+    }
+    expect(ctx.settings.get(toNs(STREAM_SETTINGS_NS))).toMatchObject({ logarithmicFade: false })
+    await fiber.dispose()
+  })
   it('reads the running package version from its manifest', () => {
     const manifest = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as { name: string; version: string }
     expect(STREAM_PACKAGE_NAME).toBe(manifest.name)
@@ -127,6 +140,7 @@ describe('smooth-stream host settings', () => {
         controlScroll: DEFAULT_STREAM_SETTINGS.controlScroll,
         motionPreference: DEFAULT_STREAM_SETTINGS.motionPreference,
         thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+        logarithmicFade: DEFAULT_STREAM_SETTINGS.logarithmicFade,
         canUpgrade: false,
       },
     })
