@@ -780,8 +780,9 @@ function measureReadingAnchor(port: HTMLElement): { anchor: HTMLElement; index: 
     return null
   }
   // Host-caused motion only: the engine's own shift glide and floor changes
-  // cancel out (renderedΔ = topΔ − shiftΔ + floorΔ).
-  const delta = (top - stored.top) - (shift - stored.shift) + (pad - stored.pad)
+  // cancel out (renderedΔ = topΔ + scrollΔ − shiftΔ + padΔ).
+  const scrollDelta = scrollTop - stored.scrollTop
+  const delta = (top - stored.top) + scrollDelta - (shift - stored.shift) + (pad - stored.pad)
   if (stored.element === anchor) {
     // Refresh the baseline to the current rendered position on every
     // measurement: between guard passes the viewport legitimately moves
@@ -2492,25 +2493,14 @@ export function useConversationFollow(
       // measure the extent against it):
       let settleQuietMs = 0
       let settleSig = ''
-      const lagBeforeCompletionPaint = Math.max(
-        0,
-        host.scrollHeight - animatedH - runwayOffsetOf(host),
-      )
-      const currentRunway = runwayOffsetOf(host)
-      const currentShift = Math.abs(currentShiftOf(shiftSurfacesOf(host).at(-1) ?? host))
-      if (
-        !activeRef.current
-        && lagBeforeCompletionPaint <= FOLLOW_SLACK_PX
-        && currentRunway <= FOLLOW_SETTLE_EPSILON_PX
-        && currentShift <= FOLLOW_SETTLE_EPSILON_PX
-        // A live completion pad must retire through the settle's glide first;
-        // fast-finishing here would freeze it in place as visible bottom gap.
-        && flowPadOf(host) <= FOLLOW_SETTLE_EPSILON_PX
-      ) {
+      if (!activeRef.current) {
         followTraceUntilMs = Math.max(followTraceUntilMs, performance.now() + 10000)
         followTrace('fast-gate', { sh: host.scrollHeight, st: Math.round(host.scrollTop), pad: Math.round(flowPadOf(host)) })
-        finishAtNaturalFloor(host, !startedAsEntrance)
+        restoreRunway(host)
+        setFlowPad(host, 0)
+        finishAtNaturalFloor(host, !startedAsEntrance, true)
         followLeaders.delete(host)
+        followCompletionSettle.delete(host)
         releaseRevealScale()
         debugRuntime.reportFollow(host, null)
         return
