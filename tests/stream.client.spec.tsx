@@ -63,6 +63,7 @@ const LONG_STREAM_TEXT = Array.from({ length: 60 }, (_, i) => `word${i}`).join('
 function assistantProps(
   status: 'running' | 'settled',
   blocks: unknown[],
+  localeThinkTitle = 'Think',
 ): Parameters<typeof TypewriterAssistantNodeView>[0] {
   return {
     node: {
@@ -73,7 +74,7 @@ function assistantProps(
     useTurnData: () => undefined,
     openFile: () => {},
     fileMentions: () => undefined,
-    t: (key: string) => key,
+    t: (key: string) => (key === 'message.think' ? localeThinkTitle : key),
   } as unknown as Parameters<typeof TypewriterAssistantNodeView>[0]
 }
 
@@ -942,6 +943,15 @@ describe('assistant renderer', () => {
     expect(view.container.querySelector('[data-variant="think"]')).not.toBeNull()
     expect(view.getByText('Think')).toBeTruthy()
     expect(view.container.querySelector('details')).toBeNull()
+  })
+
+  it('renders localized title for the Think disclosure in Chinese locale', () => {
+    const block = { kind: 'reasoning', text: 'first line\nlatest tokens' }
+    const view = render(<TypewriterAssistantNodeView {...assistantProps('running', [block], '思考')} />)
+    const row = view.container.querySelector('[data-disclosure-row]')
+    expect(row).not.toBeNull()
+    expect(row?.getAttribute('aria-expanded')).toBe('true')
+    expect(view.getByText('思考')).toBeTruthy()
   })
 
   it('collapses the Think disclosure when the assistant node settles', () => {
@@ -3130,6 +3140,55 @@ describe('client plugin lifecycle', () => {
       .find(item => item.options.key === 'user')
     expect(contextEntry?.component).not.toBe(ContextRow)
     expect(userEntry?.component).toBe(UserRow)
+
+    await fiber.dispose()
+    expect(contextEntry?.component).toBe(ContextRow)
+  })
+
+  it('never wraps Host chrome rows (turn-process / turn-tail)', async () => {
+    function ProcessRow() {
+      return <div>process</div>
+    }
+    function TailRow() {
+      return <div>tail</div>
+    }
+    function ContextRow() {
+      return <div>context</div>
+    }
+    const ctx = new Context()
+    await ctx.plugin(SlotRegistry).await()
+    ctx.slots.register({
+      name: 'root',
+      children: { 'conversation.chat.node': { kind: 'keyed', scope: 'session' } },
+    } as never, (() => null) as never)
+    ctx.slots.register({
+      name: 'conversation.chat.node',
+      key: 'turn-process',
+    } as never, ProcessRow as never)
+    ctx.slots.register({
+      name: 'conversation.chat.node',
+      key: 'turn-tail',
+    } as never, TailRow as never)
+    ctx.slots.register({
+      name: 'conversation.chat.node',
+      key: 'context',
+    } as never, ContextRow as never)
+
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+
+    const entries = ctx.slots.entries('conversation.chat.node')
+    const processEntry = entries.find(item => item.options.key === 'turn-process')
+    const tailEntry = entries.find(item => item.options.key === 'turn-tail')
+    const contextEntry = entries.find(item => item.options.key === 'context')
+
+    // Host chrome keeps its bare renderer: the wrapper element would defeat
+    // ChatView's `.flowItem:empty { display: none }` erasure of a null-rendered
+    // summary row, and would push the summary label through the streamed-text
+    // reveal engine. Agent output still rides the follow boundary.
+    expect(processEntry?.component).toBe(ProcessRow)
+    expect(tailEntry?.component).toBe(TailRow)
+    expect(contextEntry?.component).not.toBe(ContextRow)
 
     await fiber.dispose()
     expect(contextEntry?.component).toBe(ContextRow)

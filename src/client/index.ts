@@ -37,8 +37,33 @@ const STREAM_PRESETS: readonly string[] = ['realtime', 'balanced', 'silky']
  * generic follow boundary. This is deliberately keyed by the owner that
  * provides the renderer, not by individual tool names, so new Context,
  * Command, and Tool rows are covered automatically.
+ *
+ * Host chrome and controllers are excluded on a different rule: `turn-process`
+ * (the completed-turn process summary control) and `turn-tail` (the turn usage
+ * footer) are not Agent output. The Host renders them as bare controls and
+ * flips their visibility itself, so wrapping them has three measured costs and
+ * no benefit:
+ *
+ * 1. The wrapper element defeats ChatView's `.flowItem:empty { display: none }`
+ *    rule. A `turn-process` renderer returns null whenever the Host's fold is
+ *    unavailable (e.g. `processWindowReady === false`), and that null render is
+ *    exactly what the `:empty` rule exists to erase; with a wrapper the row
+ *    stays in flow and still consumes the 16px column gap, painting an empty
+ *    band where the fold control should be.
+ * 2. The summary label (`N tool calls · M messages`) is not streamed model
+ *    text, so pushing it through the character-reveal engine is wrong by
+ *    construction.
+ * 3. The row would inherit the generic entrance animation (opacity + clip-path)
+ *    on a row the Host may mount and hide inside a single commit.
  */
-const SKIP_WRAP = new Set(['assistant-step', 'user', 'steering', 'command-input'])
+const SKIP_WRAP = new Set([
+  'assistant-step',
+  'user',
+  'steering',
+  'command-input',
+  'turn-process',
+  'turn-tail',
+])
 
 /** React function/class or an exotic component such as memo/forwardRef/lazy. */
 function isWrappableComponent(value: unknown): value is ComponentType<FollowWrapProps> {
@@ -291,7 +316,7 @@ export function apply(ctx: ClientContext): void {
         name: 'conversation.chat.node',
         key: 'assistant-step',
         priority: -100,
-        locale: 'conversation',
+        locale: 'chat' as never,
         registrant: 'dsh-smooth-stream',
       }, configured)
       releaseTakeover = () => {

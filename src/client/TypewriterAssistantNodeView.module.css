@@ -3,8 +3,8 @@
   flex-direction: column;
   min-width: 0;
   color: var(--dsw-alias-label-primary);
-  font-size: 16px;
-  line-height: 28px;
+  font-size: var(--dsh-content-font-size, 14px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
 }
 
 .body {
@@ -12,6 +12,10 @@
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+}
+
+.body > [data-turn-process-inline][hidden] {
+  margin-bottom: -16px;
 }
 
 .think {
@@ -165,6 +169,7 @@
   display: grid;
   grid-template-rows: 1fr;
   visibility: visible;
+  overflow: hidden;
   transition:
     grid-template-rows var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, cubic-bezier(0.4, 0, 0.2, 1)),
     visibility 0s;
@@ -176,6 +181,11 @@
   transition:
     grid-template-rows var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, cubic-bezier(0.4, 0, 0.2, 1)),
     visibility 0s var(--ds-transition-duration, 0.2s);
+}
+
+.disclosureContent[data-collapsed] > * {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
 }
 
 /* Auto-close at stream end snaps instead of animating: the follower's settle

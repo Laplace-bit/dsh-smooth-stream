@@ -380,6 +380,8 @@ function AnimatedMarkdownText({
     if (streaming) setTyping(true)
   }, [streaming])
 
+  if (!streaming && !live && text.trim() === '') return null
+
   return (
     <FollowHost
       active={live && ownFollow}
@@ -483,6 +485,16 @@ function latestLine(text: string): string {
   return newline === -1 ? visible : visible.slice(newline + 1)
 }
 
+/** Resolve the display label for the reasoning block according to the locale. */
+function resolveThinkTitle(t: AssistantProps['t']): string {
+  const label = (t as (key: string) => string)('message.think')
+  if (label && label !== 'message.think') return label
+  if (typeof document !== 'undefined' && document.documentElement.lang?.startsWith('zh')) {
+    return '思考'
+  }
+  return 'Think'
+}
+
 /**
  * Built-in Think disclosure with a smoothed `text` feed. Chevron and row
  * click stay on the disclosure chrome, which the plugin's AnimatedDisclosure
@@ -568,7 +580,7 @@ function AnimatedReasoning({
           titleClassName={css.thinkTitle}
           chevronClassName={css.thinkChevron}
           icon={<IconThinkOutline14 size={14} />}
-          title="Think"
+          title={resolveThinkTitle(t)}
           open={expanded}
           onToggle={() => {
             setAutoClosed(false)
@@ -709,6 +721,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
     if (block === undefined) continue
     switch (block.kind) {
       case 'text':
+        if (!streaming && block.text.trim() === '') break
         rendered.push(
           <AnimatedMarkdownText
             key={index}
