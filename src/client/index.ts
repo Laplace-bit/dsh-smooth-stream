@@ -249,6 +249,32 @@ export function apply(ctx: ClientContext): void {
    */
   let assistantT: AssistantProps['t'] | undefined
 
+  // Locale routing belongs to the renderer lifecycle, not to the optional
+  // Connection-backed settings card. Keeping this injection independent means
+  // a deployment can stream localized replies without Connection, and a
+  // transient disconnect cannot dispose the renderer's fallback dictionary.
+  ctx.inject(['locale'], (localeCtx) => {
+    localeCtx.effect(
+      () => localeCtx.locale.register(CHAT_NS, { zh: chatZh, en: chatEn }),
+      'dsh-smooth-stream: conversation fallback dictionary',
+    )
+    const conversationT = localeCtx.locale.bind('conversation')
+    const chatT = localeCtx.locale.bind('chat') as (key: string, params?: Record<string, unknown>) => string
+    const fallbackT = localeCtx.locale.bind(CHAT_NS) as (key: string, params?: Record<string, unknown>) => string
+    const merged = (key: string, params?: Record<string, unknown>): string => {
+      const primary = (conversationT as (k: string, p?: unknown) => string)(key, params)
+      if (primary !== key) return primary
+      const secondary = chatT(key, params)
+      if (secondary !== key) return secondary
+      return fallbackT(key, params)
+    }
+    const bound = merged as unknown as AssistantProps['t']
+    assistantT = bound
+    return () => {
+      if (assistantT === bound) assistantT = undefined
+    }
+  })
+
   // The card talks to the plugin-owned loopback RPC, so the core settings
   // namespace allowlist cannot make it disappear. The stream still applies
   // with defaults when the optional Settings UI or Connection is absent.
@@ -280,20 +306,6 @@ export function apply(ctx: ClientContext): void {
     syncDebug()
     card.start()
     settingsCtx.effect(() => settingsCtx.locale.register(SETTINGS_NS, { zh, en }), 'dsh-smooth-stream: settings dictionaries')
-    settingsCtx.effect(() => settingsCtx.locale.register(CHAT_NS, { zh: chatZh, en: chatEn }), 'dsh-smooth-stream: conversation fallback dictionary')
-    {
-      const conversationT = settingsCtx.locale.bind('conversation')
-      const chatT = settingsCtx.locale.bind('chat') as (key: string, params?: Record<string, unknown>) => string
-      const fallbackT = settingsCtx.locale.bind(CHAT_NS) as (key: string, params?: Record<string, unknown>) => string
-      const merged = (key: string, params?: Record<string, unknown>): string => {
-        const primary = (conversationT as (k: string, p?: unknown) => string)(key, params)
-        if (primary !== key) return primary
-        const secondary = chatT(key, params)
-        if (secondary !== key) return secondary
-        return fallbackT(key, params)
-      }
-      assistantT = merged as unknown as AssistantProps['t']
-    }
     settingsCtx.slots.inject('settings.plugin.item', () => settingsCtx.slots.register({
       name: 'settings.plugin.item',
       id: 'smooth-stream',

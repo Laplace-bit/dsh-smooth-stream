@@ -1015,6 +1015,23 @@ describe('assistant renderer', () => {
       expect(rule![1]).toContain('margin-bottom: -16px')
     })
 
+    it('keeps the disclosure chrome on the Host font tiers', () => {
+      const title = /\.disclosureTitle\s*\{([^}]*)\}/.exec(styles)
+      expect(title).not.toBeNull()
+      expect(title![1]).toContain('font-size: var(--dsh-content-font-size-secondary, 13px)')
+      expect(title![1]).toContain('line-height: calc(24px + var(--dsh-content-font-delta, 0px))')
+
+      const leading = /\.disclosureLeading\s*\{([^}]*)\}/.exec(styles)
+      expect(leading).not.toBeNull()
+      expect(leading![1]).toContain('width: calc(16px + var(--dsh-content-font-delta, 0px))')
+      expect(leading![1]).toContain('height: calc(16px + var(--dsh-content-font-delta, 0px))')
+
+      const glyph = /\.disclosureLeading\s+svg:not\(\[data-state\]\)\s*\{([^}]*)\}/.exec(styles)
+      expect(glyph).not.toBeNull()
+      expect(glyph![1]).toContain('width: calc(14px + var(--dsh-content-font-delta, 0px))')
+      expect(glyph![1]).toContain('height: calc(14px + var(--dsh-content-font-delta, 0px))')
+    })
+
     it('omits the inner follow host for settled text that is only whitespace', () => {
       // The row keeps its OWN follow boundary (the outer host at the component
       // root is unconditional) - what must not mount is the per-text-block
