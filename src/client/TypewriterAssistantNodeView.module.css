@@ -1,10 +1,28 @@
+/*
+ * Font size and line height follow the Host's content-font axis, with
+ * fallbacks chosen so that EACH supported Harness version renders exactly what
+ * its own assistant root renders.
+ *
+ * The axis is published on `document.body` by the Harness layout plugin
+ * (`--dsh-content-font-size`) and derived by its theme stylesheet
+ * (`--dsh-content-font-delta: calc(size - 14px)`,
+ * `--dsh-content-font-size-secondary`, `--dsh-content-font-delta-secondary`).
+ * No package in the pinned 0.1.0-rc.6 dependency tree assigns any of them -
+ * rc.6 has neither the layout nor the theme plugin - and rc.6's own assistant
+ * root is a hard `16px/28px`.
+ *
+ * So the fallback has to be rc.6's value, not 14px: `var(size, 16px)` with
+ * `calc(24px + var(delta, 4px))` yields 16px/28px on rc.6 (matching its root)
+ * and the Host's live value on 0.1.5+ (where the same expression is what the
+ * Harness itself writes).
+ */
 .root {
   display: flex;
   flex-direction: column;
   min-width: 0;
   color: var(--dsw-alias-label-primary);
-  font-size: var(--dsh-content-font-size, 14px);
-  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  font-size: var(--dsh-content-font-size, 16px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 4px));
 }
 
 .body {
@@ -70,13 +88,19 @@
   background: var(--dsw-alias-label-caption);
 }
 
+/*
+ * Think text reads the secondary tier, mirroring the Harness's own reasoning
+ * row (`ui-chat/src/client/chat/ReasoningRow.module.css`): one step under the
+ * body size, with `secondary` fallbacks that reproduce rc.6's hard `14px/24px`
+ * when no Host axis is published.
+ */
 .thinkSummary {
   min-width: 0;
   overflow: hidden;
   flex: 1 1 auto;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 14px;
-  line-height: 24px;
+  font-size: var(--dsh-content-font-size-secondary, 14px);
+  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 4px));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -86,10 +110,11 @@
 }
 
 .thinkBody {
-  padding: 4px 0 4px 22px;
+  /* Indent under the title, which starts at leading (16 + delta) + gap 6. */
+  padding: 4px 0 4px calc(22px + var(--dsh-content-font-delta, 0px));
   color: var(--dsw-alias-label-tertiary);
-  font-size: 14px;
-  line-height: 24px;
+  font-size: var(--dsh-content-font-size-secondary, 14px);
+  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 4px));
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -110,7 +135,9 @@
   overflow: hidden;
   display: flex;
   align-items: center;
-  height: 24px;
+  /* The Harness DisclosureRow reserves this row with the same expression, so
+   * the disclosure grows with the reading font instead of clipping it. */
+  height: calc(24px + var(--dsh-content-font-delta, 0px));
   min-width: 0;
   cursor: pointer;
 }
@@ -151,8 +178,8 @@
 
 .disclosureTitle {
   flex: none;
-  font-size: 14px;
-  line-height: 24px;
+  font-size: var(--dsh-content-font-size, 16px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 4px));
   color: var(--dsw-alias-label-secondary);
 }
 
