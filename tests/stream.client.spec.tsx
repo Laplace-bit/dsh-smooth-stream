@@ -47,6 +47,7 @@ import { Config } from '../src/plugin.ts'
 import { useProgressiveDomText } from '../src/client/useProgressiveDomText.ts'
 import css from '../src/client/TypewriterAssistantNodeView.module.css'
 import entranceCss from '../src/client/AgentRowEntrance.module.css'
+import { chatZh } from '../src/client/locales.ts'
 
 const FAKE = ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame', 'performance'] as const
 
@@ -60,10 +61,19 @@ afterEach(() => {
 /** Long enough that 400ms of reveal cannot drain it. */
 const LONG_STREAM_TEXT = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ')
 
+/**
+ * Stand-in for the layered `t` the seat injects.
+ *
+ * It reads the plugin's REAL `message.think` dictionary rather than returning a
+ * literal, so a missing or renamed key surfaces here as the raw key instead of
+ * passing silently. What it deliberately does NOT model is the namespace
+ * layering itself (`conversation` -> `chat` -> plugin fallback); that contract
+ * has its own suite in `locale-routing.client.spec.tsx`, which runs against
+ * real `LocaleRuntime` instances and the real Harness dictionaries.
+ */
 function assistantProps(
   status: 'running' | 'settled',
   blocks: unknown[],
-  localeThinkTitle = 'Think',
 ): Parameters<typeof TypewriterAssistantNodeView>[0] {
   return {
     node: {
@@ -74,7 +84,7 @@ function assistantProps(
     useTurnData: () => undefined,
     openFile: () => {},
     fileMentions: () => undefined,
-    t: (key: string) => (key === 'message.think' ? localeThinkTitle : key),
+    t: (key: string) => (key === 'message.think' ? chatZh['message.think'] : key),
   } as unknown as Parameters<typeof TypewriterAssistantNodeView>[0]
 }
 
@@ -941,17 +951,19 @@ describe('assistant renderer', () => {
     expect(row).not.toBeNull()
     expect(row?.getAttribute('aria-expanded')).toBe('true')
     expect(view.container.querySelector('[data-variant="think"]')).not.toBeNull()
-    expect(view.getByText('Think')).toBeTruthy()
+    expect(view.getByText(chatZh['message.think'])).toBeTruthy()
     expect(view.container.querySelector('details')).toBeNull()
   })
 
-  it('renders localized title for the Think disclosure in Chinese locale', () => {
+  it('renders the dictionary-supplied title for the Think disclosure', () => {
     const block = { kind: 'reasoning', text: 'first line\nlatest tokens' }
-    const view = render(<TypewriterAssistantNodeView {...assistantProps('running', [block], '思考')} />)
+    const view = render(<TypewriterAssistantNodeView {...assistantProps('running', [block])} />)
     const row = view.container.querySelector('[data-disclosure-row]')
     expect(row).not.toBeNull()
     expect(row?.getAttribute('aria-expanded')).toBe('true')
-    expect(view.getByText('思考')).toBeTruthy()
+    // The label comes from the dictionary, and it is NOT the raw key.
+    expect(view.getByText(chatZh['message.think'])).toBeTruthy()
+    expect(view.container.textContent).not.toContain('message.think')
   })
 
   it('collapses the Think disclosure when the assistant node settles', () => {

@@ -13,7 +13,7 @@ import { SmoothStreamCardController } from './smooth-stream-card-controller.ts'
 import { createSmoothStreamSettingsApi } from './smooth-stream-settings-api.ts'
 import { DebugPanel } from './DebugPanel.tsx'
 import { debugRuntime } from './debugRuntime.ts'
-import { NS as SETTINGS_NS, en, zh } from './locales.ts'
+import { NS as SETTINGS_NS, CHAT_NS, en, zh, chatEn, chatZh } from './locales.ts'
 import { DEFAULT_STREAM_CONFIG, STREAM_BOOT_GLOBAL, type StreamConfig } from '../config.ts'
 import { DEFAULT_STREAM_SETTINGS, STREAM_SETTINGS_NS, type StreamSettings } from '../settings.ts'
 
@@ -226,6 +226,29 @@ export function apply(ctx: ClientContext): void {
     () => settings.getSnapshot().controlScroll,
   )
 
+  /**
+   * Layered `t` for the assistant renderer.
+   *
+   * The renderer's keys have no single owner: `conversation` owns the
+   * `image.*` family in every Harness version, `chat` (0.1.5+) owns
+   * `message.think`, and three `message.*` keys MOVED from `conversation` to
+   * `chat` between the version this package pins and the current one. Binding
+   * the slot to either namespace alone degrades a real slice of the UI to raw
+   * keys, which is the defect this replaces.
+   *
+   * The order is deliberate: `conversation` first, so the pinned Harness keeps
+   * resolving the keys it still owns there; then `chat` for what moved or is
+   * new; then this plugin's own namespace for keys no Harness version
+   * provides. A namespace that is not registered returns its key unchanged
+   * (`LocaleRuntime.bind` does not throw), so an older Harness without `chat`
+   * falls straight through.
+   *
+   * The reference is built once and held stable: the seat feeds a memoized
+   * renderer, and a fresh identity per render would defeat that memoization.
+   * Until the locale service arrives the seat's own binding stays in use.
+   */
+  let assistantT: AssistantProps['t'] | undefined
+
   // The card talks to the plugin-owned loopback RPC, so the core settings
   // namespace allowlist cannot make it disappear. The stream still applies
   // with defaults when the optional Settings UI or Connection is absent.
@@ -257,6 +280,20 @@ export function apply(ctx: ClientContext): void {
     syncDebug()
     card.start()
     settingsCtx.effect(() => settingsCtx.locale.register(SETTINGS_NS, { zh, en }), 'dsh-smooth-stream: settings dictionaries')
+    settingsCtx.effect(() => settingsCtx.locale.register(CHAT_NS, { zh: chatZh, en: chatEn }), 'dsh-smooth-stream: conversation fallback dictionary')
+    {
+      const conversationT = settingsCtx.locale.bind('conversation')
+      const chatT = settingsCtx.locale.bind('chat') as (key: string, params?: Record<string, unknown>) => string
+      const fallbackT = settingsCtx.locale.bind(CHAT_NS) as (key: string, params?: Record<string, unknown>) => string
+      const merged = (key: string, params?: Record<string, unknown>): string => {
+        const primary = (conversationT as (k: string, p?: unknown) => string)(key, params)
+        if (primary !== key) return primary
+        const secondary = chatT(key, params)
+        if (secondary !== key) return secondary
+        return fallbackT(key, params)
+      }
+      assistantT = merged as unknown as AssistantProps['t']
+    }
     settingsCtx.slots.inject('settings.plugin.item', () => settingsCtx.slots.register({
       name: 'settings.plugin.item',
       id: 'smooth-stream',
@@ -290,6 +327,11 @@ export function apply(ctx: ClientContext): void {
     )
     return createElement(TypewriterAssistantNodeView, {
       ...props,
+      // Override the seat's single-namespace binding with the layered lookup
+      // described above. Falls back to the seat's own binding only if the
+      // locale service never arrived (renderer then receives the prop it
+      // already had).
+      ...(assistantT === undefined ? {} : { t: assistantT }),
       mode: config.mode,
       preset: config.preset,
       revealCharsPerSec: config.revealCharsPerSec,
@@ -316,7 +358,12 @@ export function apply(ctx: ClientContext): void {
         name: 'conversation.chat.node',
         key: 'assistant-step',
         priority: -100,
-        locale: 'chat' as never,
+        // `conversation` (not `chat`): it is the namespace the pinned Harness
+        // actually registers, so it is the one whose keys must keep resolving.
+        // The layered `t` handed to the renderer covers what this namespace
+        // does not own. A namespace the composition does not declare would
+        // degrade every `t()` call to its raw key.
+        locale: 'conversation',
         registrant: 'dsh-smooth-stream',
       }, configured)
       releaseTakeover = () => {

@@ -3,6 +3,50 @@
 /** Dictionary namespace owned by this plugin's settings card. */
 export const NS = 'settings.smoothStream'
 
+/**
+ * Namespace owning the conversation keys THIS PLUGIN must be able to render
+ * but the Harness does not always provide.
+ *
+ * The plugin consumes keys from two Harness namespaces, and which one owns a
+ * given key is not stable across Harness versions:
+ *
+ * - `conversation` (`dsh-client-ui-conversation`) owns the `image.*` family in
+ *   every version, and also owned `message.stopped`, `message.unknownBlock`
+ *   and `json.truncated` before those moved to `chat`.
+ * - `chat` (`dsh-client-ui-chat`, present from 0.1.5 on) owns `message.think`
+ *   and now owns the three keys above. It does not exist at all in rc.6, the
+ *   version this package still pins in devDependencies.
+ *
+ * Neither namespace alone can serve every key this plugin renders, so
+ * `index.ts` layers them. This plugin-owned namespace is the final layer; it
+ * exists because a plugin may NOT register into `chat` or `conversation` —
+ * `LocaleRuntime.register` throws when the (namespace, locale) pair already
+ * has an owner, and the Harness owns both.
+ */
+export const CHAT_NS = 'smoothStream.chat'
+
+/**
+ * Keys the plugin resolves through {@link CHAT_NS}. Only keys with no
+ * dependable Harness owner belong here; anything the Harness already provides
+ * must keep coming from the Harness so a language pack can override it.
+ */
+export type SmoothStreamChatKey = 'message.think' | 'image.serviceUnavailable'
+
+/** English fallback for {@link SmoothStreamChatKey}. */
+export const chatEn: Record<SmoothStreamChatKey, string> = {
+  'message.think': 'Think',
+  // Removed from the Harness dictionaries in 0.1.5 (rc.6 had it under
+  // `conversation`), and the plugin interpolates it into a thrown Error, so
+  // the raw key must never reach a reader.
+  'image.serviceUnavailable': 'Image service unavailable',
+}
+
+/** Simplified Chinese fallback for {@link SmoothStreamChatKey}. */
+export const chatZh: Record<SmoothStreamChatKey, string> = {
+  'message.think': '思考',
+  'image.serviceUnavailable': '图片服务不可用',
+}
+
 /** Locale keys the card renders. */
 export type SmoothStreamLocaleKey =
   | 'title' | 'description'
@@ -217,5 +261,6 @@ export const zh: Record<SmoothStreamLocaleKey, string> = {
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     'settings.smoothStream': SmoothStreamLocaleKey
+    'smoothStream.chat': SmoothStreamChatKey
   }
 }

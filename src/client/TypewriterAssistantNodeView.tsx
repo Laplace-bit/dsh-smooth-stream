@@ -485,16 +485,6 @@ function latestLine(text: string): string {
   return newline === -1 ? visible : visible.slice(newline + 1)
 }
 
-/** Resolve the display label for the reasoning block according to the locale. */
-function resolveThinkTitle(t: AssistantProps['t']): string {
-  const label = (t as (key: string) => string)('message.think')
-  if (label && label !== 'message.think') return label
-  if (typeof document !== 'undefined' && document.documentElement.lang?.startsWith('zh')) {
-    return '思考'
-  }
-  return 'Think'
-}
-
 /**
  * Built-in Think disclosure with a smoothed `text` feed. Chevron and row
  * click stay on the disclosure chrome, which the plugin's AnimatedDisclosure
@@ -580,7 +570,15 @@ function AnimatedReasoning({
           titleClassName={css.thinkTitle}
           chevronClassName={css.thinkChevron}
           icon={<IconThinkOutline14 size={14} />}
-          title={resolveThinkTitle(t)}
+          // `message.think` is not in the `conversation` key union this prop is
+          // typed with: no Harness version owns it there. On 0.1.5+ it lives in
+          // the `chat` namespace, and on older builds only this plugin's own
+          // fallback dictionary has it. The layered lookup installed in
+          // index.ts resolves it either way, so the cast widens the key domain
+          // rather than skipping a lookup. No hardcoded label and no
+          // `<html lang>` sniffing: a key that resolves nowhere shows the key,
+          // which the locale routing test catches.
+          title={(t as unknown as (key: string) => string)('message.think')}
           open={expanded}
           onToggle={() => {
             setAutoClosed(false)
