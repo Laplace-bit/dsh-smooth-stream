@@ -48,6 +48,8 @@ import { useProgressiveDomText } from '../src/client/useProgressiveDomText.ts'
 import css from '../src/client/TypewriterAssistantNodeView.module.css'
 import entranceCss from '../src/client/AgentRowEntrance.module.css'
 import { chatZh } from '../src/client/locales.ts'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 const FAKE = ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame', 'performance'] as const
 
@@ -976,6 +978,59 @@ describe('assistant renderer', () => {
     // The animated body stays mounted while collapsed (hidden by the 0fr
     // track), so collapse is an assertion on the wrapper state, not absence.
     expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-collapsed')).toBe(true)
+  })
+
+  /*
+   * Layout-gap regressions. These assert the CSS contract rather than rendered
+   * geometry: jsdom does not lay out, so the observable face of each fix is the
+   * rule that neutralizes the gap. Same readFileSync approach as the settings
+   * card's surface-token assertions.
+   */
+  describe('disclosure and flow-gap regressions', () => {
+    const styles = readFileSync(join(process.cwd(), 'src/client/TypewriterAssistantNodeView.module.css'), 'utf8')
+
+    it('clips the animated disclosure track so a collapsed body adds no height', () => {
+      // Without `overflow: hidden` the direct child of the 0fr grid track still
+      // paints its intrinsic box, leaving a residual band under the summary.
+      const rule = /\.disclosureContent\s*\{([^}]*)\}/.exec(styles)
+      expect(rule).not.toBeNull()
+      expect(rule![1]).toContain('overflow: hidden')
+    })
+
+    it('resets collapsed-child padding so the closed disclosure has no slack', () => {
+      const rule = /\.disclosureContent\[data-collapsed\]\s*>\s*\*\s*\{([^}]*)\}/.exec(styles)
+      expect(rule).not.toBeNull()
+      expect(rule![1]).toContain('padding-top: 0 !important')
+      expect(rule![1]).toContain('padding-bottom: 0 !important')
+    })
+
+    it('pulls the fold gap back when the Host hides inline reasoning', () => {
+      // -16px is not arbitrary: it cancels the flow's 16px column gap, and it
+      // mirrors the Harness's own rule for the same attribute
+      // (`ui-chat/src/client/chat/AssistantMarkdown.module.css`:
+      // `.body > [data-turn-process-inline][hidden] { margin-bottom: -16px }`),
+      // so a folded turn collapses to the same height the Harness produces.
+      const rule = /\.body\s*>\s*\[data-turn-process-inline\]\[hidden\]\s*\{([^}]*)\}/.exec(styles)
+      expect(rule).not.toBeNull()
+      expect(rule![1]).toContain('margin-bottom: -16px')
+    })
+
+    it('omits the inner follow host for settled text that is only whitespace', () => {
+      // The row keeps its OWN follow boundary (the outer host at the component
+      // root is unconditional) - what must not mount is the per-text-block
+      // host, which would consume a flow gap for a block that renders nothing.
+      // `running` must still mount it: the reveal engine needs the host before
+      // any text has arrived.
+      const innerHosts = (root: HTMLElement): number =>
+        root.querySelectorAll(`.${css.body} > .${css.follow}`).length
+      const blank = { kind: 'text', text: '   \n  ' }
+      const settled = render(<TypewriterAssistantNodeView {...assistantProps('settled', [blank])} />)
+      expect(innerHosts(settled.container)).toBe(0)
+      const running = render(<TypewriterAssistantNodeView {...assistantProps('running', [blank])} />)
+      expect(innerHosts(running.container)).toBe(1)
+      const real = render(<TypewriterAssistantNodeView {...assistantProps('settled', [{ kind: 'text', text: 'kept' }])} />)
+      expect(innerHosts(real.container)).toBe(1)
+    })
   })
 
   it('snaps only the auto-close body, gliding manual toggles while streaming', () => {
