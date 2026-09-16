@@ -140,7 +140,26 @@ function pendingTextCanGrow(
   if (root === null) return pendingChars.length >= PREDICTIVE_WRAP_FALLBACK_CHARS
 
   let geometry = geometryRef.current
-  if (geometry?.root !== root || geometry.visibleText !== visibleText) {
+  if (geometry?.root !== root) {
+    geometry = measurePendingTextGeometry(root, visibleText)
+    geometryRef.current = geometry
+  } else if (geometry.wrapThresholdWidth !== null && visibleText.startsWith(geometry.visibleText)) {
+    const appended = visibleText.slice(geometry.visibleText.length)
+    if (!/[\r\n]/u.test(appended)) {
+      const addedWidth = approximateInlineWidth(appended, geometry.fontSize)
+      const remainingWidth = geometry.wrapThresholdWidth - addedWidth
+      if (remainingWidth > 0) {
+        geometryRef.current = {
+          ...geometry,
+          visibleText,
+          wrapThresholdWidth: remainingWidth,
+        }
+        return approximateInlineWidth(pending, geometry.fontSize) >= remainingWidth
+      }
+    }
+    geometry = measurePendingTextGeometry(root, visibleText)
+    geometryRef.current = geometry
+  } else if (geometry.visibleText !== visibleText) {
     geometry = measurePendingTextGeometry(root, visibleText)
     geometryRef.current = geometry
   }
@@ -337,6 +356,7 @@ function AnimatedMarkdownText({
     revealedCharsRef: followRevealedCharsRef,
     revealScaleRef: followRevealScaleRef,
     onRevealCommit: () => { notifyFollowCommit(followRootRef.current) },
+    commitIntervalMs: 32,
   })
   const shown = reduced ? text : displayed
   const live = typing && !reduced

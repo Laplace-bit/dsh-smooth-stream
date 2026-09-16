@@ -283,6 +283,12 @@ export interface UseSmoothStreamContentOptions {
   onRevealCommit?: (() => void) | undefined
   /** Live multiplier from the follow spring when safe visual lag is filling. */
   revealScaleRef?: { current: number } | undefined
+  /**
+   * Minimum interval in milliseconds between React DOM commits (batching).
+   * Decouples the smooth 60/120Hz physics/monitoring loop from heavy Markdown
+   * AST/Shiki/DOM reconciliations.
+   */
+  commitIntervalMs?: number | undefined
 }
 
 /**
@@ -305,6 +311,7 @@ export function useSmoothStreamContent(
     revealedCharsRef,
     revealScaleRef,
     onRevealCommit,
+    commitIntervalMs,
   }: UseSmoothStreamContentOptions = {},
 ): string {
   const config = PRESET_CONFIG[preset]
@@ -329,6 +336,7 @@ export function useSmoothStreamContent(
 
   const rafRef = useRef<number | null>(null)
   const lastFrameTsRef = useRef<number | null>(null)
+  const lastCommitTsRef = useRef(0)
   const queueDebtRef = useRef(0)
   const settleCpsRef = useRef<number | null>(null)
   const lastDrainCpsRef = useRef(0)
@@ -355,6 +363,7 @@ export function useSmoothStreamContent(
       rafRef.current = null
     }
     lastFrameTsRef.current = null
+    lastCommitTsRef.current = 0
   }, [])
 
   const startFrameLoopRef = useRef<() => void>(() => {})
@@ -372,6 +381,7 @@ export function useSmoothStreamContent(
       queueDebtRef.current = 0
       settleCpsRef.current = null
       lastDrainCpsRef.current = 0
+      lastCommitTsRef.current = 0
       const speedOut = speedOutRef.current
       if (speedOut !== undefined) speedOut.current = seedCps
       setDisplayedContent(nextContent)
@@ -415,6 +425,7 @@ export function useSmoothStreamContent(
 
       if (lastFrameTsRef.current === null) {
         lastFrameTsRef.current = now
+        lastCommitTsRef.current = now
         rafRef.current = requestAnimationFrame(tick)
         return
       }
@@ -506,15 +517,41 @@ export function useSmoothStreamContent(
         return
       }
 
+      if (revealChars <= 0) {
+        queueDebtRef.current = nextQueueDebt
+        const speedOut = speedOutRef.current
+        if (speedOut !== undefined) speedOut.current = revealSpeedCps
+        rafRef.current = requestAnimationFrame(tick)
+        return
+      }
+
+      const minInterval = commitIntervalMs ?? 0
+      const isTailFlush = producerComplete && revealChars >= backlog
+      const timeSinceLastCommit = lastCommitTsRef.current === 0 ? Infinity : now - lastCommitTsRef.current
+      // Commit immediately if:
+      // 1. minInterval is disabled (<= 0, e.g. tests), OR
+      // 2. This is the final tail flush of a completed producer, OR
+      // 3. Backlog is very small (low-rate keystrokes, <= 3 chars), OR
+      // 4. Sufficient time (>= minInterval) has elapsed since the last React DOM commit.
+      const shouldCommit = minInterval <= 0
+        || isTailFlush
+        || backlog <= 3
+        || timeSinceLastCommit >= minInterval
+
+      if (!shouldCommit) {
+        // Retain uncommitted characters in debt for the next frame
+        queueDebtRef.current = nextQueueDebt + revealChars
+        const speedOut = speedOutRef.current
+        if (speedOut !== undefined) speedOut.current = revealSpeedCps
+        rafRef.current = requestAnimationFrame(tick)
+        return
+      }
+
+      lastCommitTsRef.current = now
       queueDebtRef.current = nextQueueDebt
 
       const speedOut = speedOutRef.current
       if (speedOut !== undefined) speedOut.current = revealSpeedCps
-
-      if (revealChars <= 0) {
-        rafRef.current = requestAnimationFrame(tick)
-        return
-      }
 
       const nextCount = displayedCount + revealChars
       const segment = targetCharsRef.current.slice(displayedCount, nextCount).join('')
@@ -533,7 +570,7 @@ export function useSmoothStreamContent(
     }
 
     rafRef.current = requestAnimationFrame(tick)
-  }, [config, seedCps, stopFrameLoop, steadyCps])
+  }, [config, seedCps, stopFrameLoop, steadyCps, commitIntervalMs])
 
   // Run AFTER the commit's DOM mutations, before paint: the follower's
   // same-task correction hook.

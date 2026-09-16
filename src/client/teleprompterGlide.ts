@@ -1837,7 +1837,7 @@ export function useConversationFollow(
       return measured.delta
     }
     /** Pre-paint correction (observers, commit subscription). */
-    const restoreBeforePaint = (): void => {
+    const restoreBeforePaint = (fromCommit = false): void => {
       if (!following || port === null) return
       if (hostOwnsScroll || followHostScrollPorts.has(port)) {
         hostOwnsScroll = true
@@ -1884,7 +1884,7 @@ export function useConversationFollow(
       // anchor hold reads the shared per-port baseline (see
       // followGuardAnchors); it runs for structural commits only and stands
       // down while this settle's retirement glide runs (that motion is ours).
-      if (!settleRetiring) {
+      if (!settleRetiring && (!fromCommit || !activeRef.current)) {
         const measured = measureReadingAnchor(port)
         if (measured !== null && measured.delta > 0.5) {
           if (pruneDeadRunway(port)) reservePx = 0
@@ -1919,9 +1919,9 @@ export function useConversationFollow(
       const predictGrowth = predictiveRef?.current ?? predictive
       const floor = Math.max(0, port.scrollHeight - port.clientHeight)
       // A wrap or other layout growth changes the real floor and may change the
-      // natural tail clearance. Re-measure that boundary; same-floor glyph
-      // commits can continue using the cached chrome geometry.
-      if (followFloorHistory.get(port) !== floor) invalidatePaintLimit(port)
+      // natural tail clearance. Ordinary glyph commits reuse the cached chrome geometry
+      // within TTL instead of forcing synchronous getBoundingClientRect calls.
+      if (!fromCommit && followFloorHistory.get(port) !== floor) invalidatePaintLimit(port)
       const isReasoningSurface = rootRef.current?.querySelector('[data-variant="think"]') !== null
       const trajectoryShift = predictive
         && !isReasoningSurface
@@ -1975,12 +1975,12 @@ export function useConversationFollow(
       unsubscribeCommit?.()
       port = next
       invalidatePaintLimit(port)
-      unsubscribeCommit = subscribeFollowCommit(port, () => { restoreBeforePaint() })
+      unsubscribeCommit = subscribeFollowCommit(port, () => { restoreBeforePaint(true) })
       for (const name of GESTURE_EVENTS) {
         port.addEventListener(name, markGesture, { passive: true })
       }
       if (typeof ResizeObserver !== 'undefined') {
-        resize = new ResizeObserver(() => restoreBeforePaint())
+        resize = new ResizeObserver(() => restoreBeforePaint(false))
         resize.observe(port)
         const proxy = resizeProxyOf(port)
         if (proxy !== null) resize.observe(proxy)
@@ -1993,7 +1993,7 @@ export function useConversationFollow(
       if (typeof MutationObserver !== 'undefined') {
         const flow = flowElementOf(port)
         if (flow !== null) {
-          mutations = new MutationObserver(() => { restoreBeforePaint() })
+          mutations = new MutationObserver(() => { restoreBeforePaint(false) })
           mutations.observe(flow, { childList: true, subtree: true })
         }
       }
@@ -2603,7 +2603,7 @@ export function useConversationFollow(
       // active effect's observers were disconnected above, but status/tail
       // commits continue while the detached settle loop owns the port.
       if (typeof ResizeObserver !== 'undefined') {
-        resize = new ResizeObserver(() => restoreBeforePaint())
+        resize = new ResizeObserver(() => restoreBeforePaint(false))
         resize.observe(host)
         const proxy = resizeProxyOf(host)
         if (proxy !== null) resize.observe(proxy)
@@ -2611,7 +2611,7 @@ export function useConversationFollow(
       if (typeof MutationObserver !== 'undefined') {
         const flow = flowElementOf(host)
         if (flow !== null) {
-          mutations = new MutationObserver(() => { restoreBeforePaint() })
+          mutations = new MutationObserver(() => { restoreBeforePaint(false) })
           mutations.observe(flow, { childList: true, subtree: true })
         }
       }
