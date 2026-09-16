@@ -3163,7 +3163,7 @@ describe('client plugin lifecycle', () => {
     expect(leftover[0]?.options.key).toBe('tool-call')
   })
 
-  it('wraps a prior tool-call that already declared children without re-registering', async () => {
+  it('wraps a prior agent row that already declared children without re-registering', async () => {
     function DummyTool({ node }: { node: { data: { root: object } } }) {
       return <div>tool:{'kind' in node.data.root ? 'settled' : 'running'}</div>
     }
@@ -3175,13 +3175,13 @@ describe('client plugin lifecycle', () => {
     } as never, (() => null) as never)
     ctx.slots.register({
       name: 'conversation.chat.node',
-      key: 'tool-call',
+      key: 'custom-tool',
       children: { 'tool.call.toolview': { kind: 'keyed', scope: 'session' } },
     } as never, DummyTool as never)
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
 
-    const entry = ctx.slots.entries('conversation.chat.node').find(item => item.options.key === 'tool-call')
+    const entry = ctx.slots.entries('conversation.chat.node').find(item => item.options.key === 'custom-tool')
     expect(entry?.component).not.toBe(DummyTool)
     const view = render(createElement(entry?.component as FunctionComponent<{ node: { data: { root: object } } }>, {
       node: { data: { root: { callId: '1', name: 'bash' } } },
@@ -3190,7 +3190,7 @@ describe('client plugin lifecycle', () => {
     expect(view.container.querySelector(`.${css.follow} > div`)).not.toBeNull()
 
     await fiber.dispose()
-    expect(ctx.slots.entries('conversation.chat.node').find(item => item.options.key === 'tool-call')?.component).toBe(DummyTool)
+    expect(ctx.slots.entries('conversation.chat.node').find(item => item.options.key === 'custom-tool')?.component).toBe(DummyTool)
   })
 
   it('wraps memoized Agent rows while preserving memoized human rows', async () => {
@@ -3229,12 +3229,15 @@ describe('client plugin lifecycle', () => {
     expect(contextEntry?.component).toBe(ContextRow)
   })
 
-  it('never wraps Host chrome rows (turn-process / turn-tail)', async () => {
+  it('never wraps Host chrome or tool-call rows (turn-process / turn-tail / tool-call)', async () => {
     function ProcessRow() {
       return <div>process</div>
     }
     function TailRow() {
       return <div>tail</div>
+    }
+    function ToolCallRow() {
+      return <div>tool-call</div>
     }
     function ContextRow() {
       return <div>context</div>
@@ -3255,6 +3258,10 @@ describe('client plugin lifecycle', () => {
     } as never, TailRow as never)
     ctx.slots.register({
       name: 'conversation.chat.node',
+      key: 'tool-call',
+    } as never, ToolCallRow as never)
+    ctx.slots.register({
+      name: 'conversation.chat.node',
       key: 'context',
     } as never, ContextRow as never)
 
@@ -3264,22 +3271,24 @@ describe('client plugin lifecycle', () => {
     const entries = ctx.slots.entries('conversation.chat.node')
     const processEntry = entries.find(item => item.options.key === 'turn-process')
     const tailEntry = entries.find(item => item.options.key === 'turn-tail')
+    const toolCallEntry = entries.find(item => item.options.key === 'tool-call')
     const contextEntry = entries.find(item => item.options.key === 'context')
 
-    // Host chrome keeps its bare renderer: the wrapper element would defeat
+    // Host chrome and tool-call keep their bare renderer: the wrapper element would defeat
     // ChatView's `.flowItem:empty { display: none }` erasure of a null-rendered
-    // summary row, and would push the summary label through the streamed-text
-    // reveal engine. Agent output still rides the follow boundary.
+    // summary row, and would push non-streamed badges through the character-reveal
+    // typewriter engine causing layout jitter. Agent output still rides the follow boundary.
     expect(processEntry?.component).toBe(ProcessRow)
     expect(tailEntry?.component).toBe(TailRow)
+    expect(toolCallEntry?.component).toBe(ToolCallRow)
     expect(contextEntry?.component).not.toBe(ContextRow)
 
     await fiber.dispose()
     expect(contextEntry?.component).toBe(ContextRow)
   })
 
-  it('wraps a tool-call registered after the overlay mounts', async () => {
-    function LateTool() {
+  it('wraps an agent row registered after the overlay mounts', async () => {
+    function LateAgentRow() {
       return <div>late</div>
     }
     const ctx = new Context()
@@ -3292,10 +3301,10 @@ describe('client plugin lifecycle', () => {
     await fiber.await()
     ctx.slots.register({
       name: 'conversation.chat.node',
-      key: 'tool-call',
-    } as never, LateTool as never)
-    const entry = ctx.slots.entries('conversation.chat.node').find(item => item.options.key === 'tool-call')
-    expect(entry?.component).not.toBe(LateTool)
+      key: 'custom-command',
+    } as never, LateAgentRow as never)
+    const entry = ctx.slots.entries('conversation.chat.node').find(item => item.options.key === 'custom-command')
+    expect(entry?.component).not.toBe(LateAgentRow)
     const view = render(createElement(entry?.component as FunctionComponent<{ node: { data: { root: object } } }>, {
       node: { data: { root: { callId: '2', name: 'read' } } },
     }))

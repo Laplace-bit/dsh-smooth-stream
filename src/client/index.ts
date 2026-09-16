@@ -63,6 +63,7 @@ const SKIP_WRAP = new Set([
   'command-input',
   'turn-process',
   'turn-tail',
+  'tool-call',
 ])
 
 /** React function/class or an exotic component such as memo/forwardRef/lazy. */

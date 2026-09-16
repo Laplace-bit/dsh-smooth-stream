@@ -512,7 +512,7 @@ describe('smooth-stream settings card', () => {
       },
     } as never, () => null)
     slots.register({ name: 'conversation.chat.node', key: 'assistant-step' } as never, BuiltInAssistant as never)
-    slots.register({ name: 'conversation.chat.node', key: 'tool-call' } as never, BuiltInTool as never)
+    slots.register({ name: 'conversation.chat.node', key: 'context' } as never, BuiltInTool as never)
     await ctx.plugin({ inject: [...inject], apply }).await()
     const face = cardFace(slots)
     await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
@@ -522,19 +522,19 @@ describe('smooth-stream settings card', () => {
 
     expect(slots.entries('conversation.chat.node').filter(entry => entry.options.priority === -100))
       .toHaveLength(0)
-    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'tool-call')?.component)
+    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'context')?.component)
       .toBe(BuiltInTool)
 
     face.edit({ enabled: true })
     expect(slots.entries('conversation.chat.node').some(entry => entry.options.priority === -100))
       .toBe(true)
-    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'tool-call')?.component)
+    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'context')?.component)
       .not.toBe(BuiltInTool)
 
     face.discard()
     expect(slots.entries('conversation.chat.node').filter(entry => entry.options.priority === -100))
       .toHaveLength(0)
-    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'tool-call')?.component)
+    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'context')?.component)
       .toBe(BuiltInTool)
   })
 
