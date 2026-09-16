@@ -27,6 +27,8 @@ export interface StreamSettingsView {
   enabled: boolean
   /** Whether smooth-stream also owns conversation bottom-follow. */
   controlScroll: boolean
+  /** Smoothing preset for the reveal cadence and follow physics. */
+  preset: import('./settings.ts').StreamSmoothingPreset
   /** How the reveal honors the OS reduced-motion preference. */
   motionPreference: import('./settings.ts').StreamMotionPreference
   /** Current resolved preference. */

@@ -31,6 +31,7 @@ const developmentView: StreamSettingsView = {
     writable: true,
     enabled: true,
     controlScroll: true,
+    preset: 'silky',
     motionPreference: 'auto',
     thinkAutoExpand: true,
     logarithmicFade: true,

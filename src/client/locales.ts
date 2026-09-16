@@ -52,6 +52,10 @@ export type SmoothStreamLocaleKey =
   | 'title' | 'description'
   | 'enabled' | 'enabledHint'
   | 'controlScroll' | 'controlScrollHint'
+  | 'preset' | 'presetHint'
+  | 'presetRealtime' | 'presetRealtimeHint'
+  | 'presetBalanced' | 'presetBalancedHint'
+  | 'presetSilky' | 'presetSilkyHint'
   | 'motionPreference' | 'motionPreferenceHint'
   | 'motionAuto' | 'motionAutoHint'
   | 'motionForceSmooth' | 'motionForceSmoothHint'
@@ -86,6 +90,14 @@ export const en: Record<SmoothStreamLocaleKey, string> = {
   enabledHint: 'Let this plugin render and follow streaming replies. Turn off to use the built-in Harness renderer.',
   controlScroll: 'Take over scrolling',
   controlScrollHint: 'On by default; smooth-stream writes the conversation scroll position. Turn off to leave bottom-follow to Harness.',
+  preset: 'Pacing preset',
+  presetHint: 'Smoothing cadence profile for text reveal and glide.',
+  presetRealtime: 'Realtime',
+  presetRealtimeHint: 'Aggressive cadence, low latency, tracks output closely.',
+  presetBalanced: 'Balanced',
+  presetBalancedHint: 'Default balance between pace and visual rhythm.',
+  presetSilky: 'Silky',
+  presetSilkyHint: 'Higher backlog buffer, gentle EMA damping, maximum fluidity.',
   motionPreference: 'Motion',
   motionPreferenceHint: 'How streaming responds to the system reduce-motion setting.',
   motionAuto: 'Follow system',
@@ -176,6 +188,14 @@ export const zh: Record<SmoothStreamLocaleKey, string> = {
   enabledHint: '由本插件渲染并跟随流式回复；关闭后使用 Harness 内置渲染。',
   controlScroll: '接管滚动',
   controlScrollHint: '默认开启，由丝滑流式写入会话滚动位置；关闭后贴底滚动交给 Harness。',
+  preset: '手感预设',
+  presetHint: '文字吐字节奏与视口跟随阻尼风格。',
+  presetRealtime: '激进快速 (realtime)',
+  presetRealtimeHint: '缓冲低、流速快，紧跟模型生成。',
+  presetBalanced: '均衡自然 (balanced)',
+  presetBalancedHint: '官方默认，平衡流速与节奏感。',
+  presetSilky: '极致丝滑 (silky)',
+  presetSilkyHint: '字符积压缓冲加大、阻尼更高、EMA 平滑度更好，视觉呼吸感最强。',
   motionPreference: '动效偏好',
   motionPreferenceHint: '流式渲染如何响应系统的「减少动态效果」设置。',
   motionAuto: '跟随系统',

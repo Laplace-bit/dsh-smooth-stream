@@ -126,6 +126,31 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
                     ))}
                   </span>
                 </div>
+                <div className={state.enabled ? css.field : `${css.field} ${css.fieldDisabled}`}>
+                  <span className={css.fieldHead}>
+                    <span className={css.label}>{t('preset')}</span>
+                  </span>
+                  <span className={css.hint}>{t('presetHint')}</span>
+                  <span className={css.choiceRow} role="radiogroup" aria-label={t('preset')}>
+                    {([
+                      ['realtime', 'presetRealtime', 'presetRealtimeHint'],
+                      ['balanced', 'presetBalanced', 'presetBalancedHint'],
+                      ['silky', 'presetSilky', 'presetSilkyHint'],
+                    ] as const).map(([value, label, hint]) => (
+                      <label key={value} className={css.choice} title={t(hint)}>
+                        <input
+                          type="radio"
+                          className={css.choiceInput}
+                          name="smooth-stream-preset"
+                          checked={state.preset === value}
+                          disabled={!state.writable || state.saving || !state.enabled}
+                          onChange={() => { props.edit({ preset: value }) }}
+                        />
+                        {t(label)}
+                      </label>
+                    ))}
+                  </span>
+                </div>
                 <label className={state.enabled ? css.field : `${css.field} ${css.fieldDisabled}`}>
                   <span className={css.fieldHead}>
                     <span className={css.label}>{t('thinkAutoExpand')}</span>

@@ -33,7 +33,7 @@ export interface StreamConfig {
 /** Defaults shared by the Host schema and the client-side fallback. */
 export const DEFAULT_STREAM_CONFIG: StreamConfig = {
   mode: 'typewriter',
-  preset: 'balanced',
+  preset: 'silky',
   revealCharsPerSec: 80,
   scrollSpeedPxPerSec: 48,
   maxScrollSpeedPxPerSec: 1000,

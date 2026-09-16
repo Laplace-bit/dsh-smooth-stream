@@ -182,6 +182,7 @@ class SettingsCell {
       pending === this.pending
       && next.enabled === this.value.enabled
       && next.controlScroll === this.value.controlScroll
+      && next.preset === this.value.preset
       && next.motionPreference === this.value.motionPreference
       && next.thinkAutoExpand === this.value.thinkAutoExpand
       && next.logarithmicFade === this.value.logarithmicFade
@@ -345,7 +346,7 @@ export function apply(ctx: ClientContext): void {
       // already had).
       ...(assistantT === undefined ? {} : { t: assistantT }),
       mode: config.mode,
-      preset: config.preset,
+      preset: preferences.preset ?? config.preset,
       revealCharsPerSec: config.revealCharsPerSec,
       scrollSpeedPxPerSec: config.scrollSpeedPxPerSec,
       maxScrollSpeedPxPerSec: config.maxScrollSpeedPxPerSec,
