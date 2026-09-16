@@ -117,6 +117,28 @@
   line-height: calc(20px + var(--dsh-content-font-delta-secondary, 4px));
   white-space: pre-wrap;
   word-break: break-word;
+  max-height: var(--dsh-thinking-max-height, 300px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dsw-alias-border-l4, rgba(128, 128, 128, 0.4)) transparent;
+}
+
+.thinkBody::-webkit-scrollbar {
+  width: 6px;
+}
+
+.thinkBody::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.thinkBody::-webkit-scrollbar-thumb {
+  background-color: var(--dsw-alias-border-l4, rgba(128, 128, 128, 0.4));
+  border-radius: 3px;
+}
+
+.thinkBody::-webkit-scrollbar-thumb:hover {
+  background-color: var(--dsw-alias-border-l3, rgba(128, 128, 128, 0.6));
 }
 
 /*
@@ -229,6 +251,9 @@
 
 .disclosureContent > * {
   min-height: 0;
+}
+
+.disclosureContent[data-collapsed] > * {
   overflow: hidden;
 }
 

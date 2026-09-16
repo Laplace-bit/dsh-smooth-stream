@@ -522,8 +522,14 @@ function AnimatedReasoning({
   const [autoClosed, setAutoClosed] = useState(false)
   const summaryRef = useRef<HTMLSpanElement>(null)
   const fadeRootRef = useRef<HTMLDivElement>(null)
+  // The custom thinking auto-scroll drives the SAME node as the logarithmic
+  // fade, so it reuses that ref object rather than installing a second one
+  // (a callback ref would re-attach on every render).
+  const thinkBodyRef = fadeRootRef
   const localFadeSpeedRef = useRef(35)
   const fadeSpeedRef = followSpeedCpsRef ?? localFadeSpeedRef
+  const userScrolledRef = useRef(false)
+  const rafIdRef = useRef(0)
   const commitAnchorRef = useRef<HTMLDivElement>(null)
   // The running→false flip is the AUTO-close: it collapses instantly and the
   // follower's settle spring absorbs the height step. A later manual toggle
@@ -547,11 +553,78 @@ function AnimatedReasoning({
       setExpanded(running)
       setAutoClosed(!running)
     }
+    if (running) {
+      userScrolledRef.current = false
+    }
     // A commit that changes this block's height must hand the follower its
     // correction in the SAME task, before the grown-but-uncompensated frame
     // can reach a paint.
     notifyFollowCommit(commitAnchorRef.current)
   }, [running, thinkAutoExpand])
+
+  useEffect(() => {
+    if (!expanded || userScrolledRef.current) return
+    const el = thinkBodyRef.current
+    if (el === null) return
+    if (rafIdRef.current === 0) {
+      rafIdRef.current = requestAnimationFrame(() => {
+        rafIdRef.current = 0
+        if (!userScrolledRef.current && el !== null) {
+          el.scrollTop = el.scrollHeight
+        }
+      })
+    }
+  }, [running, expanded, shown])
+
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== 0) {
+        cancelAnimationFrame(rafIdRef.current)
+        rafIdRef.current = 0
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const el = thinkBodyRef.current
+    if (el === null) return
+    let isPointerDown = false
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) {
+        userScrolledRef.current = true
+      } else if (e.deltaY > 0) {
+        if (el.scrollHeight - el.scrollTop - el.clientHeight <= 30) {
+          userScrolledRef.current = false
+        }
+      }
+    }
+    const onPointerDown = () => {
+      isPointerDown = true
+    }
+    const onPointerUp = () => {
+      isPointerDown = false
+    }
+    const onScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 30
+      if (atBottom) {
+        userScrolledRef.current = false
+      } else if (isPointerDown) {
+        userScrolledRef.current = true
+      }
+    }
+    el.addEventListener('wheel', onWheel, { passive: true })
+    el.addEventListener('pointerdown', onPointerDown, { passive: true })
+    window.addEventListener('pointerup', onPointerUp, { passive: true })
+    window.addEventListener('pointercancel', onPointerUp, { passive: true })
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerUp)
+      el.removeEventListener('scroll', onScroll)
+    }
+  }, [])
 
   useEffect(() => {
     const element = summaryRef.current
