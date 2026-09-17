@@ -11,6 +11,7 @@
 import { useLayoutEffect, type RefObject } from 'react'
 import { computeAdaptiveQueueStep } from './useSmoothStreamContent.ts'
 import { debugRuntime } from './debugRuntime.ts'
+import { FrameCoordinator } from './FrameCoordinator.ts'
 
 interface TextRevealRecord {
   chars: readonly string[]
@@ -113,12 +114,19 @@ export function useProgressiveDomText(
 
     const pending = new Set<Text>()
     const internalWrites = new WeakMap<Text, string>()
-    let rafId = 0
+    let frameTaskId: string | null = null
     let lastFrame: number | null = null
     let debt = 0
     let stopped = false
     let announcedSettled = false
     const streamId = `dom-${Math.random().toString(36).slice(2)}`
+
+    const coordinator = FrameCoordinator.forDocument()
+    const stopFrameTask = (): void => {
+      if (frameTaskId === null) return
+      coordinator.unregisterTask(frameTaskId)
+      frameTaskId = null
+    }
 
     const announceSettled = (): void => {
       lastFrame = null
@@ -173,22 +181,25 @@ export function useProgressiveDomText(
     }
 
     const scheduleFrame = (): void => {
-      if (stopped || pending.size === 0 || rafId !== 0) return
-      rafId = requestAnimationFrame(frame)
+      if (stopped || pending.size === 0 || frameTaskId !== null) return
+      // Ride the shared document clock instead of a private rAF chain, so
+      // tool-output reveal cannot race the assistant reveal or the follower.
+      frameTaskId = coordinator.registerTask({
+        onSimulate: (_dtMs, now) => frame(now),
+      })
     }
 
-    const frame = (now: number): void => {
-      rafId = 0
-      if (stopped) return
+    const frame = (now: number): boolean => {
+      if (stopped) return false
       if (pending.size === 0) {
         announceSettled()
-        return
+        stopFrameTask()
+        return false
       }
       announcedSettled = false
       if (lastFrame === null) {
         lastFrame = now
-        scheduleFrame()
-        return
+        return true
       }
       const elapsed = Math.max(0, now - lastFrame)
       lastFrame = now
@@ -236,9 +247,14 @@ export function useProgressiveDomText(
         targetChars,
         displayedChars,
         active: pending.size > 0,
+        // This path reveals a node at a time and never observes the model
+        // stream's own end, so it cannot claim a terminal drain. Reporting
+        // `false` keeps the follower's terminal phase driven by the smoother
+        // that actually owns the completion signal.
+        producerComplete: false,
       })
       if (pending.size === 0) announceSettled()
-      else scheduleFrame()
+      return pending.size > 0
     }
 
     visit(root, revealInitial)
@@ -269,7 +285,7 @@ export function useProgressiveDomText(
 
     return () => {
       stopped = true
-      cancelAnimationFrame(rafId)
+      stopFrameTask()
       observer?.disconnect()
       for (const [node, record] of records) {
         const controlled = record.chars.slice(0, record.shown).join('')

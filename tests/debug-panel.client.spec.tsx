@@ -37,6 +37,12 @@ function state(overrides: Partial<DebugRuntimeState> = {}): DebugRuntimeState {
       followRevealScale: 0.86,
       followFollowing: true,
       followConstrained: false,
+      followTerminalPhase: 'terminal-drain',
+      followRunwayPx: 72,
+      followTerminalBudgetPx: 48,
+      followBaselineShiftPx: 24,
+      followAnchorDeltaPx: 0,
+      followRemainingRevealChars: 18,
       scrollTop: 840,
       scrollHeight: 1400,
       clientHeight: 560,
@@ -87,6 +93,7 @@ describe('render diagnostics panel', () => {
       targetChars: 120,
       displayedChars: 96,
       active: true,
+      producerComplete: false,
     }
 
     debugRuntime.reportStream('reply', metric)

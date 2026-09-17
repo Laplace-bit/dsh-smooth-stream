@@ -70,6 +70,8 @@ export type SmoothStreamLocaleKey =
   | 'debugFps' | 'debugFrameTime' | 'debugBacklog' | 'debugRevealSpeed' | 'debugProgress'
   | 'debugFollowState' | 'debugFollowing' | 'debugReleased'
   | 'debugLag' | 'debugVelocity' | 'debugReserve' | 'debugCapacity' | 'debugAppliedScale'
+  | 'debugTerminalPhase' | 'debugOwnedRunway' | 'debugTerminalBudget' | 'debugBaselineShift'
+  | 'debugAnchorDelta' | 'debugPhaseLive' | 'debugPhaseDrain' | 'debugPhaseCascade' | 'debugPhaseNatural'
   | 'debugRevealMultiplier' | 'debugQueuePressure' | 'debugMaxReveal'
   | 'debugSpringStiffness' | 'debugSpringDamping' | 'debugSpringMass'
   | 'debugRunway' | 'debugReserveResponse' | 'debugBackpressureMin'
@@ -141,6 +143,15 @@ export const en: Record<SmoothStreamLocaleKey, string> = {
   debugReserve: 'Reserve',
   debugCapacity: 'Capacity',
   debugAppliedScale: 'Applied scale',
+  debugTerminalPhase: 'Terminal phase',
+  debugOwnedRunway: 'Owned runway',
+  debugTerminalBudget: 'Terminal budget',
+  debugBaselineShift: 'Baseline shift',
+  debugAnchorDelta: 'Anchor Δ',
+  debugPhaseLive: 'live',
+  debugPhaseDrain: 'terminal-drain',
+  debugPhaseCascade: 'host-cascade',
+  debugPhaseNatural: 'natural',
   debugRevealMultiplier: 'Reveal multiplier',
   debugQueuePressure: 'Queue pressure',
   debugMaxReveal: 'Maximum reveal',
@@ -239,6 +250,15 @@ export const zh: Record<SmoothStreamLocaleKey, string> = {
   debugReserve: '预留空间',
   debugCapacity: '安全容量',
   debugAppliedScale: '实际倍率',
+  debugTerminalPhase: '收尾阶段',
+  debugOwnedRunway: '实体留白',
+  debugTerminalBudget: '收尾预算',
+  debugBaselineShift: '基线位移',
+  debugAnchorDelta: '锚点位移',
+  debugPhaseLive: '流式中',
+  debugPhaseDrain: '收尾排空',
+  debugPhaseCascade: '宿主交接',
+  debugPhaseNatural: '自然态',
   debugRevealMultiplier: '揭示倍率',
   debugQueuePressure: '队列压力',
   debugMaxReveal: '最大揭示速度',

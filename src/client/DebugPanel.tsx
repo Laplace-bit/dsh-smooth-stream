@@ -12,9 +12,22 @@ import {
   writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { StreamDebugTuning } from '../settings.ts'
-import type { DebugPanelFace, DebugRuntimeState } from './debugRuntime.ts'
+import type { DebugPanelFace, DebugRuntimeState, FollowTerminalPhase } from './debugRuntime.ts'
 import type { NS } from './locales.ts'
 import css from './DebugPanel.module.css'
+
+/**
+ * Locale key per terminal-follow phase. `terminal-drain` and `host-cascade`
+ * are the two that must never be confused: the first is the engine finishing
+ * ordinary text, the second is a hostile host commit that needs temporary
+ * credit.
+ */
+const PHASE_LABEL: Record<FollowTerminalPhase, Parameters<PropsLocale<typeof NS>['t']>[0]> = {
+  'live': 'debugPhaseLive',
+  'terminal-drain': 'debugPhaseDrain',
+  'host-cascade': 'debugPhaseCascade',
+  'natural': 'debugPhaseNatural',
+}
 
 export type DebugPanelProps =
   PropsRuntime<'conversation.session.header.utilities'>
@@ -199,6 +212,19 @@ export function DebugPanel(props: DebugPanelProps) {
             <Metric label={t('debugVelocity')} value={`${fixed(metrics.followVelocityPxPerSec, 0)} px/s`} />
             <Metric label={t('debugReserve')} value={`${fixed(metrics.followReservePx)} px`} />
             <Metric label={t('debugCapacity')} value={`${fixed(metrics.followCapacityPx)} px`} />
+            <Metric
+              label={t('debugTerminalPhase')}
+              value={t(PHASE_LABEL[metrics.followTerminalPhase])}
+              tone={metrics.followTerminalPhase === 'host-cascade' ? 'warn' : undefined}
+            />
+            <Metric label={t('debugOwnedRunway')} value={`${fixed(metrics.followRunwayPx)} px`} />
+            <Metric label={t('debugTerminalBudget')} value={`${fixed(metrics.followTerminalBudgetPx)} px`} />
+            <Metric label={t('debugBaselineShift')} value={`${fixed(metrics.followBaselineShiftPx)} px`} />
+            <Metric
+              label={t('debugAnchorDelta')}
+              value={metrics.followAnchorDeltaPx === null ? '—' : `${fixed(metrics.followAnchorDeltaPx)} px`}
+              tone={(metrics.followAnchorDeltaPx ?? 0) > 0.35 ? 'warn' : undefined}
+            />
             <Metric label={t('debugAppliedScale')} value={`${fixed(metrics.followRevealScale, 2)}x`} />
           </dl>
         </section>
