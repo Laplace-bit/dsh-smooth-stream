@@ -1658,9 +1658,24 @@ function settleAtFloor(port: HTMLElement): void {
  * per-frame `scrollTop` descent while the reply above it is held still by the
  * compensation: measured at 73px of screen travel against a frozen reading
  * anchor, which reads as the card sliding on its own. So the list is re-resolved
- * on every frame that actually moves the port, and any surface still carrying no
- * transform — i.e. one that has never been shifted — is entered at the shift
- * the rest of the content holds before this frame's release is subtracted.
+ * on every frame - not only on the frames that moved the port, because the row
+ * PAINTS on the frame the host appends it, and entering it one frame later lets
+ * it show at its untransformed offset and then snap the whole entry shift onto
+ * it - and any surface still carrying no transform, i.e. one that has never been
+ * shifted, is entered at the shift the rest of the content holds.
+ *
+ * THE TURN STATUS ROW IS A MOVER TOO. `[data-chat-flow] > [role="status"]` (the
+ * host's "深度求索中…" row) lives in the same scrollport but sits outside
+ * `shiftSurfacesOf` on purpose: during the stream its runway MARGIN carries it
+ * and `applyVisual` holds it at shift 0. The handoff moves that margin into the
+ * pad below it — the row itself is lifted inside the cleanup task, where the
+ * caller cancels the lift with a `status-hold` transform — and the release then
+ * walks the scrollport down by the pad it retires. Left out of this loop the row
+ * rides that descent alone while the reply beside it is frozen: measured in the
+ * release rig as 63px of up-jump in one frame at the handoff plus a 61px glide
+ * back down over the 41 release frames (net ~0, i.e. pure visual noise), which
+ * is what reads as the status row "跟着滑动". Entered here it is pinned like
+ * every other row, at the transform the handoff task already gave it.
  */
 function scheduleHandoffPadRetire(port: HTMLElement): void {
   const pad0 = flowPadOf(port)
@@ -1672,6 +1687,15 @@ function scheduleHandoffPadRetire(port: HTMLElement): void {
   for (const surface of surfaces) {
     if (surface.style.transform !== '') shifted.add(surface)
   }
+  const carryingShift = (): number =>
+    currentShiftOf([...surfaces].find(surface => shifted.has(surface)) ?? port)
+  // Resolution of the status mover is kept OUT of the surface sets: it is not a
+  // `shiftSurfacesOf` row, and letting it seed `carryingShift` would enter a
+  // freshly appended row at the runway transform instead of at the content's.
+  // Entering it means "keep the row where it is" — the handoff task has already
+  // written its compensation.
+  let statusMover: HTMLElement | null = turnStatusOf(port)
+  let statusEntered = statusMover !== null
   const stepPx = Math.max(
     FOLLOW_PAINT_GUARD_PX,
     ((debugRuntime.activeTuning().runwayPx || FOLLOW_STATUS_RUNWAY_PX) / FOLLOW_RUNWAY_RETIRE_MS)
@@ -1692,6 +1716,26 @@ function scheduleHandoffPadRetire(port: HTMLElement): void {
     // scrollTop to be clamped onto it: an explicit write keeps the descent a
     // glide of one step, never a reflow-driven snap of the whole pad.
     setFollowScrollTop(port, Math.max(0, port.scrollHeight - port.clientHeight))
+    // Adoption runs on EVERY frame, before any decay: a row the host appended
+    // since the previous frame is absent from the set, and entering it only on
+    // the next descending frame lets it paint untransformed first.
+    const carrying = carryingShift()
+    for (const surface of shiftSurfacesOf(port)) {
+      if (surfaces.has(surface)) continue
+      surfaces.add(surface)
+      if (surface.style.transform === '') setShift(surface, carrying)
+    }
+    const status = turnStatusOf(port)
+    if (status !== statusMover) {
+      // Mounted (or re-keyed) while the release ran: same entry value as any
+      // other new row - the frame the pinned content holds.
+      statusMover = status
+      statusEntered = false
+    }
+    if (statusMover !== null && !statusEntered) {
+      if (statusMover.style.transform === '') setShift(statusMover, carrying)
+      statusEntered = true
+    }
     // CLOSED-LOOP COMPENSATION. Removing `retired` of extent moves a pinned
     // viewport down by exactly that much, so the shift has to give back exactly
     // that much. Measuring the scrollport's REAL delta instead of predicting it
@@ -1701,20 +1745,12 @@ function scheduleHandoffPadRetire(port: HTMLElement): void {
     // whatever actually moved, in this same task, before it can paint.
     const movedBy = fromTop - port.scrollTop
     if (movedBy > 0) {
-      const carryingNow = currentShiftOf(
-        [...surfaces].find(surface => shifted.has(surface)) ?? port,
-      )
-      // Re-resolve on any frame that moved the port: a row appended since the
-      // previous frame is absent from the set, and skipping it is exactly the
-      // relative slide this guard exists to prevent.
-      for (const surface of shiftSurfacesOf(port)) {
-        if (surfaces.has(surface)) continue
-        surfaces.add(surface)
-        if (surface.style.transform === '') setShift(surface, carryingNow)
-      }
       for (const surface of surfaces) {
         shifted.add(surface)
         setShift(surface, Math.max(0, currentShiftOf(surface) - movedBy))
+      }
+      if (statusMover !== null) {
+        setShift(statusMover, Math.max(0, currentShiftOf(statusMover) - movedBy))
       }
     }
     requestAnimationFrame(frame)
@@ -2809,6 +2845,19 @@ export function useConversationFollow(
         // settle's bounded pad retirement (or the next turn's ensureRunway /
         // resetHostScrollOwnershipForNewTurn) glides it away instead of this
         // task erasing it under the pin.
+        // The transfer takes the runway margin off the STATUS ROW and re-lays the
+        // same extent as pad BELOW it, so the row itself is lifted inside this
+        // task while the pinned content above it does not move at all. The
+        // release loop cannot see that lift - it is already history by the time
+        // its first frame runs - so the row's position is sampled before this
+        // task's first write and the whole displacement is cancelled after its
+        // last one, still inside the task and therefore before it can paint.
+        // Sampling the two rects here rather than predicting the lift from the
+        // transfer arithmetic is deliberate: the same task also clamps/writes
+        // `scrollTop` (the extent the transfer does not re-lay), and only the
+        // measured screen delta covers both.
+        const statusHandoff = turnStatusOf(host)
+        const statusTopBefore = statusHandoff === null ? null : statusHandoff.getBoundingClientRect().top
         const transferredPx = transferRunwayToFlowPad(host, ownedRunway)
         if (transferredPx <= 0) restoreRunway(host)
         scheduleHandoffPadRetire(host)
@@ -2821,6 +2870,24 @@ export function useConversationFollow(
         followCompletionSettle.delete(host)
         releaseRevealScale()
         debugRuntime.reportFollow(host, null)
+        // LAST write of the handoff task: give the status row back the screen
+        // position it held before the transfer lifted it. Its own runway margin
+        // is gone for good (it now lives in the pad the release retires), so the
+        // only way to keep it visually still is the same compensation the reply
+        // beside it runs on, and it has to be written here — one task later it
+        // would paint as the jump this guard exists to remove.
+        if (
+          statusHandoff !== null
+          && statusTopBefore !== null
+          && statusHandoff.isConnected
+          && turnStatusOf(host) === statusHandoff
+        ) {
+          const liftPx = statusTopBefore - statusHandoff.getBoundingClientRect().top
+          if (Math.abs(liftPx) > FOLLOW_SETTLE_EPSILON_PX) {
+            followTrace('status-hold', { lift: Math.round(liftPx) })
+            setShift(statusHandoff, Math.max(0, currentShiftOf(statusHandoff) + liftPx))
+          }
+        }
         return
       }
       const completionShift = currentShiftOf(shiftSurfacesOf(host).at(-1) ?? host)

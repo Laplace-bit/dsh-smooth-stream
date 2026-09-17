@@ -491,6 +491,40 @@ for (const sc of SCENARIOS) {
       }
     }
     if (!newRowPassed) allPassed = false
+
+    // TURN-STATUS ROW HOLD. The status row (`[data-chat-flow] > [role="status"]`)
+    // sits outside `shiftSurfacesOf` on purpose: during the stream its runway
+    // MARGIN carries it and `applyVisual` holds it at shift 0. The handoff turns
+    // that margin into pad BELOW it, and the release then walks the scrollport
+    // down by the pad it retires — so with no entry in the retire loop the row is
+    // lifted in the handoff frame and glides the whole release back down (63px up
+    // in one frame, then 61px down over 41 frames, net ~0: pure visual noise)
+    // while the reply beside it is frozen. It is the row the reader watches
+    // ("深度求索中…"), and the window below deliberately starts one frame BEFORE
+    // the pad appears, because the handoff frame carries the lift.
+    const statusFrames = terminalFrames
+      .slice(Math.max(0, (padIndex <= 0 ? terminalFrames.length : padIndex) - 1))
+      .filter(f => typeof f.statusTop === 'number')
+    const statusTops = statusFrames.map(f => f.statusTop)
+    const statusHoldRange = statusTops.length > 1 ? Math.max(...statusTops) - Math.min(...statusTops) : 0
+    let statusHoldStep = 0
+    for (let i = 1; i < statusFrames.length; i++) {
+      statusHoldStep = Math.max(statusHoldStep, Math.abs(statusFrames[i].statusTop - statusFrames[i - 1].statusTop))
+    }
+    const statusHoldPassed = statusFrames.length > 1
+      && statusHoldRange <= RELEASE_NET_TOLERANCE_PX
+      && statusHoldStep <= RELEASE_NET_TOLERANCE_PX
+    if (!statusHoldPassed) allPassed = false
+    if (statusFrames.length > 1) {
+      if (statusHoldPassed) {
+        console.log(`\x1b[32mPASS status-row (${statusFrames.length}f from the handoff frame | screen range ${statusHoldRange.toFixed(3)}px, max step ${statusHoldStep.toFixed(3)}px — held while the pad retires)\x1b[0m`)
+      } else {
+        console.log(`\x1b[31mFAIL status-row (screen range ${statusHoldRange.toFixed(3)}px, max step ${statusHoldStep.toFixed(3)}px — the status row was lifted at the handoff and/or rode the release descent instead of being held)\x1b[0m`)
+      }
+    } else {
+      console.log('\x1b[33m⚠️  状态行保持探针未取得样本（窗口过短）\x1b[0m')
+    }
+
     terminalSummary = {
       'Terminal Frames': terminalFrames.length,
       'Max Drain Δy_down': `${Math.max(0, maxDrainDown).toFixed(3)} px`,
@@ -499,6 +533,7 @@ for (const sc of SCENARIOS) {
       'Release Net Drift': `${releaseNetDrift.toFixed(3)} px`,
       'Residual FlowPad': `${residualPad.toFixed(3)} px`,
       'New-Row Shift Gap': probe === null ? 'n/a' : `${probe.shiftGap.toFixed(3)} px`,
+      'Status-Row Range': `${statusHoldRange.toFixed(3)} px`,
     }
     const anchorPassed = doneAt !== undefined
       && maxDrainDown <= REBOUND_TOLERANCE_PX
