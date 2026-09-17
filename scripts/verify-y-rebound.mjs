@@ -158,6 +158,75 @@ for (const sc of SCENARIOS) {
   await page.goto(url)
   await page.waitForFunction(() => typeof window.__runStressTest === 'function')
 
+  // NEW-ROW-ADOPTION PROBE (strict-anchor scenarios only). A tool call that
+  // lands while the completion handoff is retiring its pad joins the flow AFTER
+  // the cleanup snapshotted its shift surfaces. Left out of the compensation it
+  // rides the per-frame `scrollTop` descent while the reply above it is held
+  // still — 73px of relative travel measured in the tool-card rig, which is the
+  // "card slides on its own" defect.
+  //
+  // The probe row is `display:none` ON PURPOSE: it must be resolvable by
+  // `shiftSurfacesOf` (a direct `[data-chat-flow]` child) without joining the
+  // layout, because this scenario's release assertion is measured on the same
+  // page and a real 52px row would perturb the very numbers it checks. Adoption
+  // is judged on the transform the retire loop writes onto that hidden row; the
+  // visible end-to-end travel is measured in scripts/probe-toolcard-handoff.mjs,
+  // which drives a real laid-out card.
+  if (sc.strictAnchor === true) {
+    await page.evaluate(() => {
+      window.__newRowProbe = { injectedAtPad: null, cardShift: null, anchorShift: null }
+      const flowOf = () => document.querySelector('[data-chat-flow]')
+      const padOf = () => {
+        const flow = flowOf()
+        return flow === null ? 0 : Number.parseFloat(getComputedStyle(flow).paddingBottom) || 0
+      }
+      const shiftOf = el => {
+        const m = /translate3d\(0(?:px)?,\s*(-?[\d.]+)px/.exec(el.style.transform || '')
+        return m === null ? 0 : Number.parseFloat(m[1])
+      }
+      let padFrames = 0
+      let card = null
+      const watch = () => {
+        const pad = padOf()
+        if (pad > 0.5) {
+          padFrames += 1
+          if (padFrames === 2 && card === null) {
+            card = document.createElement('div')
+            card.setAttribute('data-chat-anchor-key', 'tool-call-probe')
+            card.setAttribute('data-chat-flow-key', 'tool-call-probe')
+            card.setAttribute('data-chat-flow-kind', 'tool-call')
+            card.style.cssText = 'display:none'
+            const inner = document.createElement('div')
+            inner.setAttribute('data-chat-call-id', 'probe-call')
+            inner.textContent = 'probe tool row'
+            card.append(inner)
+            flowOf()?.append(card)
+            window.__newRowProbe.injectedAtPad = pad
+          }
+        }
+        if (card !== null && card.isConnected) {
+          const anchor = document.querySelector('[data-chat-anchor-key="assistant-1"]')
+          window.__newRowProbe.cardShift = shiftOf(card)
+          window.__newRowProbe.cardTop = card.getBoundingClientRect().top
+          window.__newRowProbe.anchorTop = anchor === null ? null : anchor.getBoundingClientRect().top
+          if (anchor !== null) window.__newRowProbe.anchorShift = shiftOf(anchor)
+          window.__newRowProbe.samples = window.__newRowProbe.samples ?? []
+          window.__newRowProbe.samples.push({
+            t: performance.now(),
+            pad: pad,
+            rel: window.__newRowProbe.anchorTop === null || window.__newRowProbe.cardTop === null
+              ? null
+              : window.__newRowProbe.anchorTop - window.__newRowProbe.cardTop,
+            cardShift: window.__newRowProbe.cardShift,
+            anchorShift: window.__newRowProbe.anchorShift,
+          })
+        }
+        requestAnimationFrame(watch)
+      }
+      requestAnimationFrame(watch)
+    })
+  }
+
   // Inject high-precision frame-level Y-position tracker
   await page.evaluate(() => {
     window.__yMotionLog = []
@@ -246,6 +315,27 @@ for (const sc of SCENARIOS) {
   await new Promise(resolve => setTimeout(resolve, sc.durationMs))
 
   // Collect data
+  const newRowProbe = await page.evaluate(() => {
+    const p = window.__newRowProbe
+    if (p === undefined || p.samples === undefined || p.samples.length < 3) return null
+    const steps = []
+    for (let i = 1; i < p.samples.length; i += 1) {
+      if (p.samples[i].rel === null || p.samples[i - 1].rel === null) continue
+      steps.push({ t: p.samples[i].t, step: p.samples[i].rel - p.samples[i - 1].rel, rel: p.samples[i].rel })
+    }
+    // The injector appends mid-frame, so the first two samples straddle the
+    // snapshot; the contract is about the steady state after adoption.
+    const settled = steps.slice(2)
+    return {
+      samples: p.samples.length,
+      injectedAtPad: p.injectedAtPad,
+      shiftGap: Math.abs((p.cardShift ?? 0) - (p.anchorShift ?? 0)),
+      cardShift: p.cardShift,
+      anchorShift: p.anchorShift,
+      relNet: settled.length < 2 ? 0 : Math.abs(settled[settled.length - 1].rel - settled[0].rel),
+      relMaxStep: settled.reduce((acc, cur) => Math.max(acc, Math.abs(cur.step)), 0),
+    }
+  })
   const motionLog = await page.evaluate(() => window.__yMotionLog ?? [])
   await page.close()
 
@@ -376,6 +466,40 @@ for (const sc of SCENARIOS) {
           ...releaseFrames.map(f => f.anchorTop),
         ) - Math.min(...releaseFrames.map(f => f.anchorTop))
       : 0
+
+    // NEW-ROW ADOPTION. The row injected two frames into the release must end the
+    // window carrying the same shift as the reply it sits under, and must not
+    // travel relative to it. Not adopted, it rides the whole `scrollTop` descent
+    // (tens of px) while the reply stays frozen — the failure this asserts.
+    const probe = newRowProbe
+    let newRowPassed = true
+    if (probe === null) {
+      console.log('\x1b[33m⚠️  新行纳管探针未取得样本（注入未发生或窗口过短）\x1b[0m')
+      newRowPassed = false
+    } else {
+      // ADOPTION ONLY. A hidden row has no screen position to compare, so the
+      // contract judged here is the one the engine owns: the retire loop enters
+      // the new surface into the same shift write the reply is under. The
+      // visible consequence is measured in scripts/probe-toolcard-handoff.mjs.
+      newRowPassed = probe.cardShift !== null
+        && probe.cardShift > 1
+        && probe.shiftGap <= RELEASE_NET_TOLERANCE_PX
+      if (newRowPassed) {
+        console.log(`\x1b[32mPASS new-row (injected at pad ${probe.injectedAtPad?.toFixed(1)}px | new row shift ${probe.cardShift?.toFixed(1)} vs reply ${probe.anchorShift?.toFixed(1)}, gap ${probe.shiftGap.toFixed(3)}px — adopted into the compensation)\x1b[0m`)
+      } else {
+        console.log(`\x1b[31mFAIL new-row (new row shift ${probe.cardShift?.toFixed(1)} vs reply ${probe.anchorShift?.toFixed(1)}, gap ${probe.shiftGap.toFixed(3)}px — a row mounted during the release was NOT adopted into the compensation and will ride the scroll descent)\x1b[0m`)
+      }
+    }
+    if (!newRowPassed) allPassed = false
+    terminalSummary = {
+      'Terminal Frames': terminalFrames.length,
+      'Max Drain Δy_down': `${Math.max(0, maxDrainDown).toFixed(3)} px`,
+      'Release Px': `${releasePx.toFixed(1)} px`,
+      'Max Release Step': `${Math.max(0, maxReleaseStep).toFixed(3)} px`,
+      'Release Net Drift': `${releaseNetDrift.toFixed(3)} px`,
+      'Residual FlowPad': `${residualPad.toFixed(3)} px`,
+      'New-Row Shift Gap': probe === null ? 'n/a' : `${probe.shiftGap.toFixed(3)} px`,
+    }
     const anchorPassed = doneAt !== undefined
       && maxDrainDown <= REBOUND_TOLERANCE_PX
       && textSettledAtRelease
@@ -384,14 +508,6 @@ for (const sc of SCENARIOS) {
       && releaseNetDrift <= RELEASE_NET_TOLERANCE_PX
       && residualPad <= 0.5
     if (!anchorPassed) allPassed = false
-    terminalSummary = {
-      'Terminal Frames': terminalFrames.length,
-      'Max Drain Δy_down': `${Math.max(0, maxDrainDown).toFixed(3)} px`,
-      'Release Px': `${releasePx.toFixed(1)} px`,
-      'Max Release Step': `${Math.max(0, maxReleaseStep).toFixed(3)} px`,
-      'Release Net Drift': `${releaseNetDrift.toFixed(3)} px`,
-      'Residual FlowPad': `${residualPad.toFixed(3)} px`,
-    }
     if (doneAt === undefined) {
       console.log('\x1b[33m⚠️  未捕获到收尾完成标记，跳过终态断言\x1b[0m')
       allPassed = false

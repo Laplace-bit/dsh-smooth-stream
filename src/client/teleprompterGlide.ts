@@ -1649,11 +1649,29 @@ function settleAtFloor(port: HTMLElement): void {
  * of extent away, the shift takes `step` of paint offset away — so the visual
  * sum stays constant while the space retires. Nothing readable moves; only the
  * empty band below the drained reply closes.
+ *
+ * ADOPT ROWS THAT MOUNT DURING THE RELEASE. This loop is the only thing moving
+ * the port for the whole window, and a row the host appends while it runs (a
+ * tool call landing right after the reply - a direct `[data-chat-flow]` child,
+ * so `shiftSurfacesOf` territory) does not exist when the cleanup snapshots the
+ * surface list and carries no transform of its own. Left out, that row rides the
+ * per-frame `scrollTop` descent while the reply above it is held still by the
+ * compensation: measured at 73px of screen travel against a frozen reading
+ * anchor, which reads as the card sliding on its own. So the list is re-resolved
+ * on every frame that actually moves the port, and any surface still carrying no
+ * transform — i.e. one that has never been shifted — is entered at the shift
+ * the rest of the content holds before this frame's release is subtracted.
  */
 function scheduleHandoffPadRetire(port: HTMLElement): void {
   const pad0 = flowPadOf(port)
-  const surfaces = shiftSurfacesOf(port)
   if (pad0 <= FOLLOW_SETTLE_EPSILON_PX) return
+  const surfaces = new Set<HTMLElement>(shiftSurfacesOf(port))
+  // Rows this loop has already entered into the shift write. A surface that is
+  // not in here and still shows no transform has never been compensated.
+  const shifted = new Set<HTMLElement>()
+  for (const surface of surfaces) {
+    if (surface.style.transform !== '') shifted.add(surface)
+  }
   const stepPx = Math.max(
     FOLLOW_PAINT_GUARD_PX,
     ((debugRuntime.activeTuning().runwayPx || FOLLOW_STATUS_RUNWAY_PX) / FOLLOW_RUNWAY_RETIRE_MS)
@@ -1683,7 +1701,19 @@ function scheduleHandoffPadRetire(port: HTMLElement): void {
     // whatever actually moved, in this same task, before it can paint.
     const movedBy = fromTop - port.scrollTop
     if (movedBy > 0) {
+      const carryingNow = currentShiftOf(
+        [...surfaces].find(surface => shifted.has(surface)) ?? port,
+      )
+      // Re-resolve on any frame that moved the port: a row appended since the
+      // previous frame is absent from the set, and skipping it is exactly the
+      // relative slide this guard exists to prevent.
+      for (const surface of shiftSurfacesOf(port)) {
+        if (surfaces.has(surface)) continue
+        surfaces.add(surface)
+        if (surface.style.transform === '') setShift(surface, carryingNow)
+      }
       for (const surface of surfaces) {
+        shifted.add(surface)
         setShift(surface, Math.max(0, currentShiftOf(surface) - movedBy))
       }
     }
