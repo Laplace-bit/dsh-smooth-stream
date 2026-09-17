@@ -1577,8 +1577,6 @@ function finishAtNaturalFloor(
   port: HTMLElement,
   retainCompositor = true,
   writeScrollTop = true,
-  /** Leave the inline transforms alone: a handoff retire loop owns them. */
-  deferCompositor = false,
 ): void {
   followCompletionSettle.delete(port)
   // No engine-owned geometry survives this call: label the port `natural` so
@@ -1604,10 +1602,6 @@ function finishAtNaturalFloor(
   port.removeAttribute(FOLLOW_OWNED_ATTR)
   port.style.overflowAnchor = ''
   port.style.scrollBehavior = ''
-  if (deferCompositor) {
-    followMotionStates.delete(port)
-    return
-  }
   for (const surface of surfaces) {
     if (promotedSet.has(surface)) holdCompositorAtRest(surface)
     else setShift(surface, 0)
@@ -1631,65 +1625,6 @@ function settleAtFloor(port: HTMLElement): void {
   const floor = Math.max(0, port.scrollHeight - port.clientHeight)
   setFollowScrollTop(port, floor)
   followReaderHolds.delete(port)
-}
-
-/**
- * Retire a handoff pad below the pinned floor at a bounded rate, paired with
- * the compositor shift it was canceling.
- *
- * The completion handoff runs from the effect cleanup, so there is no later
- * frame to amortize over — and releasing the pad (or zeroing the shift that
- * cancels it) in that task both move real content in one frame. Measured in the
- * burst-gap rig: the extent collapse alone drives the pinned viewport down 72px
- * while the shift handoff releases another ~35px, landing as a 28-46px
- * single-frame downward jump of the reading anchor.
- *
- * Each frame here retires ONE slice and decays the shift by the same amount.
- * The two write opposite directions into the same pixels — the pad takes `step`
- * of extent away, the shift takes `step` of paint offset away — so the visual
- * sum stays constant while the space retires. Nothing readable moves; only the
- * empty band below the drained reply closes.
- */
-function scheduleHandoffPadRetire(port: HTMLElement): void {
-  const pad0 = flowPadOf(port)
-  const surfaces = shiftSurfacesOf(port)
-  if (pad0 <= FOLLOW_SETTLE_EPSILON_PX) return
-  const stepPx = Math.max(
-    FOLLOW_PAINT_GUARD_PX,
-    ((debugRuntime.activeTuning().runwayPx || FOLLOW_STATUS_RUNWAY_PX) / FOLLOW_RUNWAY_RETIRE_MS)
-      * FOLLOW_MAX_FRAME_MS,
-  )
-  let padPx = pad0
-  const frame = (): void => {
-    if (!port.isConnected) return
-    // Adopt whatever the layout currently holds; the host may have retired part
-    // of the pad on its own while this ran.
-    padPx = Math.min(padPx, flowPadOf(port))
-    if (padPx <= FOLLOW_SETTLE_EPSILON_PX) return
-    const retired = Math.min(stepPx, padPx)
-    const fromTop = port.scrollTop
-    setFlowPad(port, Math.max(0, padPx - retired))
-    padPx -= retired
-    // Write the floor this slice produced instead of leaving the pinned
-    // scrollTop to be clamped onto it: an explicit write keeps the descent a
-    // glide of one step, never a reflow-driven snap of the whole pad.
-    setFollowScrollTop(port, Math.max(0, port.scrollHeight - port.clientHeight))
-    // CLOSED-LOOP COMPENSATION. Removing `retired` of extent moves a pinned
-    // viewport down by exactly that much, so the shift has to give back exactly
-    // that much. Measuring the scrollport's REAL delta instead of predicting it
-    // from `retired` is what makes this exact: the release frame also carries
-    // the drain's last growth and the engine's own settle glide, and two
-    // writers disagreeing there left a 1.8px step. Measure-and-cancel removes
-    // whatever actually moved, in this same task, before it can paint.
-    const movedBy = fromTop - port.scrollTop
-    if (movedBy > 0) {
-      for (const surface of surfaces) {
-        setShift(surface, Math.max(0, currentShiftOf(surface) - movedBy))
-      }
-    }
-    requestAnimationFrame(frame)
-  }
-  requestAnimationFrame(frame)
 }
 
 interface FollowLeader {
@@ -2760,33 +2695,10 @@ export function useConversationFollow(
       let settleSig = ''
       if (!activeRef.current) {
         followTraceUntilMs = Math.max(followTraceUntilMs, performance.now() + 10000)
-        const ownedRunway = runwayOffsetOf(host)
-        followTrace('fast-gate', { sh: host.scrollHeight, st: Math.round(host.scrollTop), pad: Math.round(flowPadOf(host)), own: Math.round(ownedRunway) })
-        // CONSTANT-EXTENT HANDOFF (zero-downward-rebound, root cause). This
-        // closure runs from the effect cleanup, so there is no later frame to
-        // amortize over: any extent this task removes is clamped onto the
-        // pinned floor inside the SAME task, and a pinned floor cannot move
-        // down without painting a single-frame downward jump. `restoreRunway`
-        // drops the whole owned margin at once and `setFlowPad(host, 0)`
-        // deletes any pad, so the reader received the full 72px runway as one
-        // slam (~28-46px on screen once the shift releases).
-        //
-        // Moving the margin into the flow pad keeps the scroll extent — and
-        // therefore the floor and the pinned scrollTop — exactly constant, so
-        // nothing on screen moves: lag is preserved by the same
-        // transferRunwayToFlowPad arithmetic the settle path relies on. The
-        // pad left below the fold is the SAME released space, and the terminal
-        // settle's bounded pad retirement (or the next turn's ensureRunway /
-        // resetHostScrollOwnershipForNewTurn) glides it away instead of this
-        // task erasing it under the pin.
-        const transferredPx = transferRunwayToFlowPad(host, ownedRunway)
-        if (transferredPx <= 0) restoreRunway(host)
-        scheduleHandoffPadRetire(host)
-        // `deferCompositor`: the retire loop decays the shift in lockstep with
-        // the pad it cancels. Letting this call zero the transforms first would
-        // paint the cancellation (`reserve`) as a second downward step on top
-        // of the extent release — measured as an 80px slam in every scenario.
-        finishAtNaturalFloor(host, !startedAsEntrance, true, true)
+        followTrace('fast-gate', { sh: host.scrollHeight, st: Math.round(host.scrollTop), pad: Math.round(flowPadOf(host)) })
+        restoreRunway(host)
+        setFlowPad(host, 0)
+        finishAtNaturalFloor(host, !startedAsEntrance, true)
         followLeaders.delete(host)
         followCompletionSettle.delete(host)
         releaseRevealScale()

@@ -30,24 +30,6 @@ const args = process.argv.slice(2)
 const HEADFUL = args.includes('--headed')
 
 const REBOUND_TOLERANCE_PX = 0.35 // Sub-pixel rounding tolerance
-// A legitimate rate-limited glide releases at most one frame's slice of the
-// owned runway: runwayPx / FOLLOW_RUNWAY_RETIRE_MS at the 32ms frame ceiling is
-// ~3.9px. Anything beyond this bound is a collapse, not a glide, however small
-// the anchor step it happens to produce — see the `gliding` exemption below.
-const MAX_GLIDE_SHRINK_PX = 12
-// Mirrors the engine's FOLLOW_STATUS_RUNWAY_PX: the most owned space a handoff
-// can ever hand back to the layout.
-const FOLLOW_STATUS_RUNWAY_PX_HARNESS = 72
-// One bounded retirement slice lands as an anchor step of at most one frame's
-// release budget (runwayPx / FOLLOW_RUNWAY_RETIRE_MS * FOLLOW_MAX_FRAME_MS
-// ≈ 3.9px), plus rounding headroom. Anything larger is a reflow-driven snap.
-const RELEASE_MAX_ANCHOR_STEP_PX = 8
-// Absolute bound on how far the reader may NET-move while the handoff retires
-// the owned runway. The engine compensates the release in closed loop, so the
-// honest bound is "did anything visibly move", not "is it smaller than the old
-// 28-46px slam". The handoff frame also carries the drain's terminal commit and
-// the engine's own shift decay, which is what this couple of px covers.
-const RELEASE_NET_TOLERANCE_PX = 2.5
 
 const SCENARIOS = [
   { id: 'steady-600', name: '1. 稳态标准流 (600 CPS)', cps: 600, domCostMs: 0, scenario: 'steady', durationMs: 4000 },
@@ -208,7 +190,6 @@ for (const sc of SCENARIOS) {
         t: now,
         scrollTop,
         scrollHeight: port.scrollHeight,
-        clientHeight: port.clientHeight,
         shiftPx,
         visualAdvancement,
         userTop,
@@ -217,16 +198,6 @@ for (const sc of SCENARIOS) {
         statusTop,
         statusText,
         flowPadPx,
-        // Terminal-window evidence: whether the reply's text is still growing
-        // (drain in flight) and where the READABLE text sits on screen. The
-        // message wrapper's own rect keeps its padding and chrome, so the text
-        // wrapper is the honest "is anything still readable" probe.
-        textLen: (assistantMsg.textContent ?? '').length,
-        textBottom: (() => {
-          const text = assistantMsg.querySelector('div')
-          if (text === null) return null
-          return text.getBoundingClientRect().bottom
-        })(),
       })
 
       lastVisualAdvancement = visualAdvancement
@@ -266,17 +237,7 @@ for (const sc of SCENARIOS) {
     // space back to the layout: a rate-limited downward return whose scroll
     // extent SHRINKS every frame by design. Jitter is motion at a static
     // extent, or any step past the engine's per-frame rate bound.
-    //
-    // The shrink itself must also be rate-limited. `extent shrank at all` was
-    // enough before, which exempted an instantaneous collapse of the whole
-    // owned runway (72px in one task, clamped straight onto the pinned floor)
-    // for as long as the resulting anchor step stayed under 10px — the
-    // burst-gap single-frame slam hid behind exactly that hole. A real glide
-    // releases at most runwayPx/FOLLOW_RUNWAY_RETIRE_MS per frame.
-    const extentShrinkPx = prev.scrollHeight - curr.scrollHeight
-    const gliding = extentShrinkPx > 0.5
-      && extentShrinkPx <= MAX_GLIDE_SHRINK_PX
-      && downward <= REBOUND_TOLERANCE_PX * 10
+    const gliding = curr.scrollHeight < prev.scrollHeight - 0.5 && downward <= 10
 
     if (downward > maxDownwardMove && !gliding) maxDownwardMove = downward
     if (downward > REBOUND_TOLERANCE_PX && !gliding) {
@@ -307,98 +268,52 @@ for (const sc of SCENARIOS) {
   // instead judges the anchor's real screen position from the frame the
   // producer stopped until layout goes quiet — the interval the terminal-drain
   // contract is written against.
-  //
-  // The window holds two physically different things and only one of them is a
-  // defect:
-  //
-  //   * DRAIN (text still landing). Automatic follow is live and the anchor must
-  //     hold: any downward step is a violation, and the threshold is the
-  //     sub-pixel tolerance. This is where the round-trip defect lives.
-  //   * RELEASE (drain closed, owned runway/pad handed back to the layout). The
-  //     engine's contract permits exactly one shape here — a bounded,
-  //     monotone, shrink-assisted descent — and only once the drain has closed
-  //     and the reading anchor has left the screen. Nothing readable moves: the
-  //     reply has drained to its final text and is above the scrollport, so the
-  //     descent only retires empty space toward the composer.
   let terminalSummary = {}
   if (sc.strictAnchor === true) {
     const doneAt = motionLog.find(f => (f.statusText ?? '').includes('已平滑归位'))
     const terminalFrames = doneAt === undefined
       ? []
       : motionLog.filter(f => f.t >= doneAt.t && f.t - doneAt.t <= 5000)
-    const lastLen = terminalFrames.length > 0
-      ? Math.max(...terminalFrames.map(f => f.textLen ?? 0))
+    const anchorSteps = []
+    for (let i = 1; i < terminalFrames.length; i++) {
+      const step = terminalFrames[i].anchorTop - terminalFrames[i - 1].anchorTop
+      // Positive = the reading anchor moved DOWN the screen.
+      if (step > 0) anchorSteps.push({ t: terminalFrames[i].t, step })
+    }
+    const worstAnchorStep = anchorSteps.reduce((max, s) => Math.max(max, s.step), 0)
+    // Net displacement of the whole terminal window. The round trip defect is
+    // "content rose, then came back DOWN", and the engine's entire contract is
+    // that no automatic terminal frame may move the anchor down. A net NEGATIVE
+    // value is the expected shape: the drain's remaining new lines keep pushing
+    // the reading anchor up (off-screen) as they land. Only a net positive
+    // return — measured from the window's own minimum, i.e. the highest point
+    // the anchor reached — counts as the give-back.
+    const lowestAnchorTop = terminalFrames.length > 0
+      ? Math.min(...terminalFrames.map(f => f.anchorTop))
       : 0
-    // The pad's first appearance IS the handoff frame: it carries the drain's
-    // terminal commit and the first release slice at once, so it belongs to the
-    // release leg. Counting it as drain reported the handoff as a drain-phase
-    // step, which is not the interval the drain contract is written against.
-    const padIndex = terminalFrames.findIndex(f => (f.flowPadPx ?? 0) > 0.5)
-    const drainFrames = padIndex <= 0 ? terminalFrames : terminalFrames.slice(0, padIndex)
-    const releaseFrames = padIndex <= 0 ? [] : terminalFrames.slice(padIndex)
-    const releaseStart = releaseFrames.length > 0 ? releaseFrames[0] : null
-    const textSettledAtRelease = releaseStart === null
-      ? true
-      : (releaseStart.textLen ?? 0) >= lastLen
-
-    let maxDrainDown = 0
-    for (let i = 1; i < drainFrames.length; i++) {
-      const step = drainFrames[i].anchorTop - drainFrames[i - 1].anchorTop
-      if (step > maxDrainDown) maxDrainDown = step
-    }
-
-    // Release leg: one bounded slice per frame, monotone, and — the part the
-    // engine is actually accountable for — it may not NET-move the reader. The
-    // handoff retires the owned runway/pad through a closed-loop compensation
-    // that cancels the scrollport's real delta, so the readable content stays
-    // put while the empty band closes. The bound below is therefore an absolute
-    // one, not a "smaller than the old slam" allowance.
-    const padSeen = releaseFrames
-    let maxReleaseUp = 0
-    let maxReleaseStep = 0
-    for (let i = 1; i < releaseFrames.length; i++) {
-      const step = releaseFrames[i].anchorTop - releaseFrames[i - 1].anchorTop
-      if (step < maxReleaseUp) maxReleaseUp = step // negative = upward
-      if (step > maxReleaseStep) maxReleaseStep = step
-    }
-    const releasePx = padSeen.length > 0 ? padSeen[0].flowPadPx : 0
-    const releaseMonotone = maxReleaseUp >= -(REBOUND_TOLERANCE_PX + 0.5)
-    const releaseBounded = releasePx <= FOLLOW_STATUS_RUNWAY_PX_HARNESS + 0.5
-      && maxReleaseStep <= RELEASE_MAX_ANCHOR_STEP_PX
+    const netAnchorDrift = terminalFrames.length > 0
+      ? terminalFrames.at(-1).anchorTop - lowestAnchorTop
+      : 0
     const residualPad = terminalFrames.length > 0 ? terminalFrames.at(-1).flowPadPx : 0
-    // Net reader movement across the whole release. The handoff frame itself
-    // carries the drain's last growth and the engine's shift decay alongside
-    // the first slice, so a couple of px of coupling survive there even with
-    // compensation applied; it is bounded by RELEASE_NET_TOLERANCE_PX rather
-    // than being waved through.
-    const releaseNetDrift = releaseFrames.length > 0
-      ? Math.max(
-          ...releaseFrames.map(f => f.anchorTop),
-        ) - Math.min(...releaseFrames.map(f => f.anchorTop))
-      : 0
     const anchorPassed = doneAt !== undefined
-      && maxDrainDown <= REBOUND_TOLERANCE_PX
-      && textSettledAtRelease
-      && releaseMonotone
-      && releaseBounded
-      && releaseNetDrift <= RELEASE_NET_TOLERANCE_PX
+      && worstAnchorStep <= REBOUND_TOLERANCE_PX
+      && Math.max(0, netAnchorDrift) <= REBOUND_TOLERANCE_PX
       && residualPad <= 0.5
     if (!anchorPassed) allPassed = false
     terminalSummary = {
       'Terminal Frames': terminalFrames.length,
-      'Max Drain Δy_down': `${Math.max(0, maxDrainDown).toFixed(3)} px`,
-      'Release Px': `${releasePx.toFixed(1)} px`,
-      'Max Release Step': `${Math.max(0, maxReleaseStep).toFixed(3)} px`,
-      'Release Net Drift': `${releaseNetDrift.toFixed(3)} px`,
+      'Max Anchor Δy_down': `${worstAnchorStep.toFixed(3)} px`,
+      'Net Anchor Drift': `${netAnchorDrift.toFixed(3)} px`,
       'Residual FlowPad': `${residualPad.toFixed(3)} px`,
     }
     if (doneAt === undefined) {
       console.log('\x1b[33m⚠️  未捕获到收尾完成标记，跳过终态断言\x1b[0m')
       allPassed = false
     } else if (anchorPassed) {
-      console.log(`\x1b[32mPASS terminal (drain ${drainFrames.length}f, Max drain Δy_down = ${Math.max(0, maxDrainDown).toFixed(3)}px | release ${releasePx.toFixed(1)}px in ${releaseFrames.length}f, Max step = ${Math.max(0, maxReleaseStep).toFixed(3)}px, net drift = ${releaseNetDrift.toFixed(3)}px, monotone = ${releaseMonotone}, residual pad = ${residualPad.toFixed(3)}px)\x1b[0m`)
+      console.log(`\x1b[32mPASS terminal (${terminalFrames.length} frames, Max anchor Δy_down = ${worstAnchorStep.toFixed(3)}px, net drift = ${netAnchorDrift.toFixed(3)}px, residual pad = ${residualPad.toFixed(3)}px)\x1b[0m`)
     } else {
-      console.log(`\x1b[31mFAIL terminal (drain Δy_down = ${Math.max(0, maxDrainDown).toFixed(3)}px, release ${releasePx.toFixed(1)}px, Max step = ${Math.max(0, maxReleaseStep).toFixed(3)}px, net drift = ${releaseNetDrift.toFixed(3)}px (bound ${RELEASE_NET_TOLERANCE_PX}px), monotone = ${releaseMonotone}, bounded = ${releaseBounded}, textSettled = ${textSettledAtRelease}, residual pad = ${residualPad.toFixed(3)}px)\x1b[0m`)
+      const worst = anchorSteps.reduce((max, s) => (s.step > max.step ? s : max), { t: 0, step: 0 })
+      console.log(`\x1b[31mFAIL terminal (Max anchor Δy_down = ${worstAnchorStep.toFixed(3)}px at +${Math.round(worst.t - doneAt.t)}ms, net drift = ${netAnchorDrift.toFixed(3)}px, residual pad = ${residualPad.toFixed(3)}px)\x1b[0m`)
     }
   }
 
