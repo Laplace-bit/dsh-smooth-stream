@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react'
+import { FrameCoordinator } from './FrameCoordinator.ts'
 import css from './LogarithmicFade.module.css'
 
 export const FADE_DURATION_MS = 240
@@ -11,6 +12,15 @@ const COLOR_PROPERTY = '--dsh-smooth-stream-fade-color'
 // Lightning CSS scopes highlight identifiers as well as class names.
 const highlightName = (index: number): string => css[`${PREFIX}${index}`] ?? `${PREFIX}${index}`
 const EXCLUDED = 'pre,code,math,.katex,.katex-display,mjx-container,svg,script,style,textarea,input,button,select,[role="button"],[contenteditable],[hidden],[aria-hidden="true"],[aria-live]'
+// Attributes that can start or stop an EXCLUDED match mid-stream (`hidden` and
+// `aria-hidden` flip whole subtrees, `class` carries the math renderers,
+// `role`/`contenteditable` match their own selectors). `style` is deliberately
+// absent: every colour write below is a style property, so observing it would
+// make the fade re-enter its own observer.
+const EXCLUDED_ATTRIBUTES = ['hidden', 'aria-hidden', 'role', 'contenteditable', 'class']
+// Attributes on <html>/<body> that can move the resolved `currentColor`, i.e.
+// an app theme switch that is not delivered through the media query.
+const APPEARANCE_ATTRIBUTES = ['class', 'style', 'data-theme', 'data-color-scheme', 'data-appearance']
 
 export function logarithmicOpacity(progress: number): number {
   const p = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 1
@@ -50,9 +60,13 @@ interface Scheduler {
   highlights: Highlight[]
   clients: Set<LogarithmicFadeController>
   pending: Set<LogarithmicFadeController>
-  frame: number
+  /** Task handle on the shared frame clock; non-null while a client is live. */
+  taskId: string | null
   registry: HighlightRegistry
   window: Window
+  coordinator: FrameCoordinator
+  /** Detaches the document-level appearance watcher when the last client goes. */
+  unwatchAppearance: () => void
 }
 
 const schedulers = new WeakMap<Document, Scheduler>()
@@ -81,14 +95,74 @@ export function resetFadeHotPathStats(): void {
 }
 
 function schedule(scheduler: Scheduler): void {
-  if (scheduler.frame !== 0 || scheduler.pending.size === 0) return
-  scheduler.frame = scheduler.window.requestAnimationFrame((now) => {
-    scheduler.frame = 0
-    for (const client of scheduler.pending) {
-      if (!client.paint(now)) scheduler.pending.delete(client)
-    }
-    schedule(scheduler)
+  if (scheduler.taskId !== null || scheduler.pending.size === 0) return
+  // One fade task per document on the shared clock, so the fade's bucket
+  // bookkeeping shares the reveal/follow frame instead of racing it.
+  scheduler.taskId = scheduler.coordinator.registerTask({
+    onSimulate: (_dtMs, now) => {
+      for (const client of scheduler.pending) {
+        if (!client.paint(now)) scheduler.pending.delete(client)
+      }
+      if (scheduler.pending.size === 0) {
+        scheduler.taskId = null
+        return false
+      }
+      return true
+    },
   })
+}
+
+/**
+ * Whether an attribute record actually moved the attribute's value. jsdom (and
+ * some engines) report a write even when the serialized value is unchanged, and
+ * this controller writes the scope class on every enable/disable transition —
+ * counting a no-op record as a DOM change would re-enter the observer forever.
+ * Requires `attributeOldValue` on the observing call.
+ * @param record - attribute mutation record from either observer.
+ * @returns true only when the value differs from the recorded old value.
+ */
+function attributeChanged(record: MutationRecord): boolean {
+  const attribute = record.attributeName
+  if (attribute === null) return true
+  return record.oldValue !== (record.target as Element).getAttribute(attribute)
+}
+
+/**
+ * One appearance watcher per document. A theme switch arrives either as an OS
+ * media-query flip (the app's default `preference: system`) or as an attribute
+ * write on <html>/<body>, so both are observed; the fade only ever writes
+ * custom properties on its own root, never on those elements, so this watcher
+ * cannot observe the controller's own output.
+ * @param scheduler - document-scoped registry notified when the look changes.
+ * @returns teardown for the last client's dispose.
+ */
+function watchAppearance(scheduler: Scheduler): () => void {
+  // The scheduler already resolved the root's realm; re-state it so the DOM
+  // constructors resolve off that window rather than the ambient global.
+  const win = scheduler.window as Window & typeof globalThis
+  const doc = win.document
+  const invalidate = (): void => {
+    for (const client of scheduler.clients) client.invalidateColors()
+  }
+  const observer = new win.MutationObserver((records) => {
+    if (records.some(attributeChanged)) invalidate()
+  })
+  const watched = doc.body === null ? [doc.documentElement] : [doc.documentElement, doc.body]
+  for (const element of watched) {
+    observer.observe(element, {
+      attributes: true,
+      attributeFilter: APPEARANCE_ATTRIBUTES,
+      attributeOldValue: true,
+    })
+  }
+  const query = typeof win.matchMedia === 'function'
+    ? win.matchMedia('(prefers-color-scheme: dark)')
+    : null
+  if (query !== null) query.addEventListener('change', invalidate)
+  return () => {
+    observer.disconnect()
+    query?.removeEventListener('change', invalidate)
+  }
 }
 
 function schedulerFor(root: HTMLElement): Scheduler | null {
@@ -107,10 +181,13 @@ function schedulerFor(root: HTMLElement): Scheduler | null {
       highlights,
       clients: new Set(),
       pending: new Set(),
-      frame: 0,
+      taskId: null,
       registry: realm.CSS.highlights,
       window: win,
+      coordinator: FrameCoordinator.forDocument(doc),
+      unwatchAppearance: () => {},
     }
+    scheduler.unwatchAppearance = watchAppearance(scheduler)
     schedulers.set(doc, scheduler)
   }
   return scheduler
@@ -139,8 +216,16 @@ export class LogarithmicFadeController {
   private nodes: TextNodeEntry[] = []
   /** Ineligible nodes in nodes[0..index): a span is fadeable when its bounds match. */
   private ineligiblePrefix: number[] = [0]
-  /** `closest(EXCLUDED)` per node identity, so a rescan never re-runs the selector. */
-  private readonly eligibleCache = new WeakMap<Text, boolean>()
+  /**
+   * `closest(EXCLUDED)` derived once per element instead of once per Text node:
+   * exclusion is inherited from the ancestor chain, so a memo stays usable only
+   * while the element keeps its own parent. Moving a subtree into `code` — or
+   * into anything else that matches — invalidates exactly the moved chain the
+   * next time it is read.
+   */
+  private excludedElements = new WeakMap<Element, { parent: Element | null, excluded: boolean }>()
+  /** Own tag/attribute match per element; dropped when an exclusion attribute moves. */
+  private ownExcluded = new WeakMap<Element, boolean>()
   /** Bumped by every observed mutation; reconcile() no-ops while it does not move. */
   private domRevision = 0
   /** Bumped only by structural (childList) mutations; the node table is rebuilt then. */
@@ -156,11 +241,18 @@ export class LogarithmicFadeController {
   private constructor(private readonly root: HTMLElement, private readonly scheduler: Scheduler) {
     scheduler.clients.add(this)
     const win = root.ownerDocument.defaultView as Window & typeof globalThis
-    // The observer is the single invalidation source. It does not watch
-    // attributes, and every write below is an attribute, a Range or a highlight
-    // bucket, so this can never re-enter itself.
+    // The observer is the single invalidation source. It watches structure,
+    // text and only the exclusion-relevant attributes; every colour write below
+    // is a `style` property, which stays unobserved, so it cannot re-enter.
     this.observer = new win.MutationObserver((records) => { this.onDomMutation(records) })
-    this.observer.observe(root, { subtree: true, childList: true, characterData: true })
+    this.observer.observe(root, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: EXCLUDED_ATTRIBUTES,
+      attributeOldValue: true,
+    })
   }
 
   static create(root: HTMLElement): LogarithmicFadeController | null {
@@ -184,13 +276,63 @@ export class LogarithmicFadeController {
 
   /** Invalidate and reconcile from one observer batch (one batch per commit). */
   private onDomMutation(records: MutationRecord[]): void {
+    let changed = false
+    let exclusionAttributesMoved = false
     for (const record of records) {
-      if (record.type !== 'childList') continue
+      if (record.type === 'childList') {
+        this.structureRevision += 1
+        changed = true
+        continue
+      }
+      if (record.type === 'characterData') {
+        changed = true
+        continue
+      }
+      // Only EXCLUDED_ATTRIBUTES reach this branch, and only value changes
+      // count: this controller writes its own scope class below, which must not
+      // be mistaken for a DOM change (it re-renders the same token list).
+      if (!attributeChanged(record)) continue
+      exclusionAttributesMoved = true
+      changed = true
+    }
+    // A batch made only of this controller's own no-op writes is not a DOM
+    // change. Reconciling on it would re-add the scope class, whose record is
+    // another such batch, and the observer would re-enter itself forever.
+    if (!changed) return
+    if (exclusionAttributesMoved) {
+      // `hidden`/`aria-hidden`/`class` on an ancestor decides the eligibility of
+      // every descendant Text node, so the whole memo is stale — not just the
+      // mutation target — and the next pass has to re-derive the table.
+      this.excludedElements = new WeakMap()
+      this.ownExcluded = new WeakMap()
       this.structureRevision += 1
-      break
     }
     this.domRevision += 1
     this.reconcile()
+  }
+
+  /**
+   * Whether this element matches a SKIP rule itself or inherits one from an
+   * ancestor — the memoised form of `element.closest(EXCLUDED) !== null`.
+   * Memoised per element and revalidated through the parent chain, so a node
+   * that moves into `code` — or whose ancestor does — is re-decided without
+   * paying the selector walk once per Text node per pass.
+   * @param element - element owning the Text node being classified.
+   * @returns true when text under this element must stay out of the fade.
+   */
+  private elementExcluded(element: Element): boolean {
+    const cached = this.excludedElements.get(element)
+    if (cached !== undefined && cached.parent === element.parentElement) return cached.excluded
+    const parent = element.parentElement
+    const inherited = parent === null ? false : this.elementExcluded(parent)
+    let own = this.ownExcluded.get(element)
+    if (own === undefined) {
+      own = element.matches(EXCLUDED)
+      this.ownExcluded.set(element, own)
+    }
+    const excluded = inherited || own
+    this.excludedElements.set(element, { parent, excluded })
+    return excluded
   }
 
   /** Rebuild the text-node table after a structural change. */
@@ -199,11 +341,11 @@ export class LogarithmicFadeController {
     const walker = this.root.ownerDocument.createTreeWalker(this.root, NodeFilter.SHOW_TEXT)
     for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
       const text = node as Text
-      let eligible = this.eligibleCache.get(text)
-      if (eligible === undefined) {
-        eligible = text.parentElement?.closest(EXCLUDED) === null
-        this.eligibleCache.set(text, eligible)
-      }
+      const parent = text.parentElement
+      // Derived through the parent element, never cached on Text identity: a
+      // node that was moved keeps its identity, so a Text-keyed memo would keep
+      // answering for the tree it used to live in.
+      const eligible = parent !== null && !this.elementExcluded(parent)
       nodes.push({ node: text, start: 0, end: 0, eligible })
     }
     this.nodes = nodes
@@ -285,37 +427,41 @@ export class LogarithmicFadeController {
     else element.style.setProperty(COLOR_PROPERTY, preserved.value, preserved.priority)
   }
 
+  private rootColorSet = false
+
+  private ensureRootColor(): void {
+    if (this.rootColorSet) return
+    const win = this.scheduler.window
+    const color = win.getComputedStyle(this.root).color || 'currentColor'
+    this.root.style.setProperty(COLOR_PROPERTY, color)
+    this.rootColorSet = true
+  }
+
   private restoreColors(): void {
+    if (this.rootColorSet) {
+      this.root.style.removeProperty(COLOR_PROPERTY)
+      this.rootColorSet = false
+    }
     for (const [element, preserved] of this.colors) this.restoreColor(element, preserved)
     this.colors.clear()
   }
 
-  private preserveColor(element: HTMLElement): void {
-    const preserved = this.colors.get(element)
-    if (preserved !== undefined) {
-      preserved.generation = this.colorGeneration
-      return
-    }
-    fadeHotPathStats.styleReads += 1
-    const color = this.scheduler.window.getComputedStyle(element).color
-    this.colors.set(element, {
-      value: element.style.getPropertyValue(COLOR_PROPERTY),
-      priority: element.style.getPropertyPriority(COLOR_PROPERTY),
-      generation: this.colorGeneration,
-    })
-    // An explicit source color prevents highlight inheritance from multiplying
-    // alpha through nested Markdown elements (root → paragraph → strong).
-    element.style.setProperty(COLOR_PROPERTY, color)
+  /**
+   * The document's appearance moved (theme switch, restyle): the captured ink
+   * colour is stale, so drop it and let the next pass read the new one. Costs
+   * nothing while no colour is captured, which is the common case — the read
+   * still happens only when text is actually fading.
+   */
+  invalidateColors(): void {
+    if (this.disposed || (!this.rootColorSet && this.colors.size === 0)) return
+    this.restoreColors()
+    // Force the next reconcile past its dirty check; it re-reads the colour and
+    // re-cuts the live tail, so the characters already fading recolour in place
+    // instead of finishing in the previous theme's ink.
+    this.domRevision += 1
+    this.reconcile()
   }
 
-  /** Drop the preserved colour of elements that left the fade tail this pass. */
-  private pruneColors(): void {
-    for (const [element, preserved] of this.colors) {
-      if (preserved.generation === this.colorGeneration) continue
-      this.colors.delete(element)
-      this.restoreColor(element, preserved)
-    }
-  }
 
   /**
    * Refresh the fade ranges. Two triggers used to run this 2-3x per frame with
@@ -356,17 +502,15 @@ export class LogarithmicFadeController {
       return
     }
     this.root.classList.add(css.scope!)
+    this.ensureRootColor()
     const now = this.pausedAt ?? this.scheduler.window.performance.now()
-    // A parser rewrite must not replay already readable content. Retain only
-    // the unchanged prefix; future appends resume the effect normally.
-    let prefix = 0
-    while (prefix < previous.length && prefix < text.length && previous[prefix] === text[prefix]) prefix += 1
     const appended = text.startsWith(previous)
+    let prefix = appended ? previous.length : 0
+    if (!appended) {
+      while (prefix < previous.length && prefix < text.length && previous[prefix] === text[prefix]) prefix += 1
+    }
     const nodes = this.nodes
     const ineligible = this.ineligiblePrefix
-    // containing() walks backwards by grapheme without segmenting the entire
-    // answer into an array. Offsets still refer to the original DOM text.
-    const segments = segmenter.segment(text)
     // Keep existing characters alive when the engine resets its speed during
     // completion. A shrinking window must not abruptly darken the old tail.
     const oldestLiveStart = old.reduce((start, character) => (
@@ -377,11 +521,27 @@ export class LogarithmicFadeController {
     const retainedBySpan = new Map<string, FadeCharacter>()
     for (const character of old) retainedBySpan.set(`${String(character.start)}:${String(character.end)}`, character)
     this.colorGeneration += 1
+
+    // Windowed segmentation: fade only affects the active tail. Windowing to the
+    // safe boundary keeps Intl.Segmenter at O(1) constant time (<0.1ms) even for
+    // long texts with tens of thousands of characters.
+    const windowStart = Math.max(
+      0,
+      Math.min(
+        text.length - FADE_MAX_TAIL_SIZE * 2,
+        oldestLiveStart < Infinity ? oldestLiveStart : text.length,
+      ),
+    )
+    const tailText = windowStart > 0 ? text.slice(windowStart) : text
+    const segments = segmenter.segment(tailText)
+
     let end = text.length
     for (let count = 0; count < FADE_MAX_TAIL_SIZE && end > 0 && (count < tailSize || end > oldestLiveStart); count += 1) {
-      const segment = segments.containing(end - 1)
+      const localEnd = end - windowStart
+      if (localEnd <= 0) break
+      const segment = segments.containing(localEnd - 1)
       if (segment === undefined) break
-      const start = segment.index
+      const start = segment.index + windowStart
       const retained = end <= prefix
         ? retainedBySpan.get(`${String(start)}:${String(end)}`)
         : undefined
@@ -398,16 +558,11 @@ export class LogarithmicFadeController {
           const range = this.root.ownerDocument.createRange()
           range.setStart(firstPart.node, start - firstPart.start)
           range.setEnd(lastPart.node, end - lastPart.start)
-          for (let index = first; index <= last; index += 1) {
-            const element = nodes[index]!.node.parentElement
-            if (element !== null) this.preserveColor(element)
-          }
           this.characters.push({ start, end, born, range, bucket: -1 })
         }
       }
       end = start
     }
-    this.pruneColors()
     if (this.paint(now)) {
       if (this.pausedAt === null) {
         this.scheduler.pending.add(this)
@@ -443,8 +598,9 @@ export class LogarithmicFadeController {
 
   private stopIfIdle(): void {
     if (this.scheduler.pending.size !== 0) return
-    this.scheduler.window.cancelAnimationFrame(this.scheduler.frame)
-    this.scheduler.frame = 0
+    if (this.scheduler.taskId === null) return
+    this.scheduler.coordinator.unregisterTask(this.scheduler.taskId)
+    this.scheduler.taskId = null
   }
 
   dispose(): void {
@@ -464,6 +620,9 @@ export class LogarithmicFadeController {
         const name = highlightName(index)
         if (this.scheduler.registry.get(name) === highlight) this.scheduler.registry.delete(name)
       }
+      // "Fade off" must cost nothing: no observer, no frame seat, no media
+      // listener left behind for a document that no longer fades.
+      this.scheduler.unwatchAppearance()
       schedulers.delete(this.root.ownerDocument)
     }
   }

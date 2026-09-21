@@ -53,7 +53,7 @@ function profileBaseUrl(specifier: string, bundled = true): string {
   return `${pathToFileURL(directory).href}/`
 }
 
-async function mountHost(baseUrl: string): Promise<{
+async function mountHost(baseUrl: string, config?: Record<string, unknown>): Promise<{
   ctx: Context
   fiber: ReturnType<Context['plugin']>
   registration: RpcRegistration
@@ -72,7 +72,9 @@ async function mountHost(baseUrl: string): Promise<{
     },
   } as never)
   await ctx.plugin(MemorySettings).await()
-  const fiber = ctx.plugin({ apply, Config })
+  const fiber = config === undefined
+    ? ctx.plugin({ apply, Config })
+    : ctx.plugin({ apply, Config }, config as never)
   await fiber.await()
   if (registration === undefined) throw new Error('smooth-stream RPC was not registered')
   return { ctx, fiber, registration, removed: () => removeCalls }
@@ -96,6 +98,32 @@ describe('smooth-stream host settings', () => {
     expect(ctx.settings.get(toNs(STREAM_SETTINGS_NS))).toMatchObject({ logarithmicFade: false })
     await fiber.dispose()
   })
+  it('resolves the installed preset below the user layer', async () => {
+    const { ctx, fiber, registration } = await mountHost(
+      profileBaseUrl(`link:${process.cwd()}`),
+      { preset: 'balanced' },
+    )
+    const ns = toNs(STREAM_SETTINGS_NS)
+
+    // Nothing stored by the user: the overlay's preset is the resolved value,
+    // so the renderer follows cordis.patch.yml instead of the schema default.
+    expect(ctx.settings.get(ns)).toMatchObject({ preset: 'balanced' })
+    const initial = await registration.handler(STREAM_SETTINGS_RPC.read, {}, signal())
+    expect(initial).toMatchObject({ ok: true, value: { preset: 'balanced' } })
+
+    // An explicit pick in the settings card lands in the user layer and wins.
+    const updated = await registration.handler(STREAM_SETTINGS_RPC.write, {
+      enabled: true,
+      controlScroll: true,
+      thinkAutoExpand: true,
+      preset: 'realtime',
+    }, signal())
+    expect(updated).toMatchObject({ ok: true, value: { preset: 'realtime' } })
+    expect(ctx.settings.get(ns)).toMatchObject({ preset: 'realtime' })
+
+    await fiber.dispose()
+  })
+
   it('reads the running package version from its manifest', () => {
     const manifest = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as { name: string; version: string }
     expect(STREAM_PACKAGE_NAME).toBe(manifest.name)

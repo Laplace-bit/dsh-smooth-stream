@@ -122,6 +122,9 @@
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--dsw-alias-border-l4, rgba(128, 128, 128, 0.4)) transparent;
+  contain: layout;
+  transform: translateZ(0);
+  will-change: scroll-position;
 }
 
 .thinkBody::-webkit-scrollbar {

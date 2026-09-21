@@ -1032,21 +1032,19 @@ describe('assistant renderer', () => {
       expect(glyph![1]).toContain('height: calc(14px + var(--dsh-content-font-delta, 0px))')
     })
 
-    it('omits the inner follow host for settled text that is only whitespace', () => {
-      // The row keeps its OWN follow boundary (the outer host at the component
-      // root is unconditional) - what must not mount is the per-text-block
-      // host, which would consume a flow gap for a block that renders nothing.
-      // `running` must still mount it: the reveal engine needs the host before
-      // any text has arrived.
-      const innerHosts = (root: HTMLElement): number =>
+    it('keeps a text boundary only while streaming text may appear', () => {
+      // The root owns conversation follow for both live text and its completion
+      // drain. A text block still needs a local DOM boundary for Markdown and
+      // reveal commits, but settled whitespace must not leave one behind.
+      const textBoundaries = (root: HTMLElement): number =>
         root.querySelectorAll(`.${css.body} > .${css.follow}`).length
       const blank = { kind: 'text', text: '   \n  ' }
       const settled = render(<TypewriterAssistantNodeView {...assistantProps('settled', [blank])} />)
-      expect(innerHosts(settled.container)).toBe(0)
+      expect(textBoundaries(settled.container)).toBe(0)
       const running = render(<TypewriterAssistantNodeView {...assistantProps('running', [blank])} />)
-      expect(innerHosts(running.container)).toBe(1)
+      expect(textBoundaries(running.container)).toBe(1)
       const real = render(<TypewriterAssistantNodeView {...assistantProps('settled', [{ kind: 'text', text: 'kept' }])} />)
-      expect(innerHosts(real.container)).toBe(1)
+      expect(textBoundaries(real.container)).toBe(1)
     })
   })
 

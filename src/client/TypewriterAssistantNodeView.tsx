@@ -7,6 +7,7 @@ import { notifyFollowCommit } from './teleprompterGlide.ts'
 import { useSmoothStreamContent, type StreamSmoothingPreset } from './useSmoothStreamContent.ts'
 import { useFpsGuard } from './useFpsGuard.ts'
 import { useLogarithmicFade } from './useLogarithmicFade.ts'
+import { useDecoupledMarkdown } from './useDecoupledMarkdown.ts'
 import { FollowHost } from './FollowHost.tsx'
 import { DEFAULT_STREAM_CONFIG, type StreamMode } from '../config.ts'
 import { DEFAULT_STREAM_SETTINGS, type StreamMotionPreference } from '../settings.ts'
@@ -49,15 +50,14 @@ interface AnimatedMarkdownTextProps extends MarkdownProps {
   logarithmicFade: boolean
   /** Whether the resolved reduced-motion gate keeps the reveal engine off. */
   motionReduced: boolean
-  /** True on the last text block: that block owns conversation follow. */
-  ownFollow: boolean
   followSpeedCpsRef?: { current: number } | undefined
   followRevealedCharsRef?: { current: number } | undefined
   followRevealScaleRef?: { current: number } | undefined
   onPredictiveChange?: ((predictive: boolean) => void) | undefined
+  /** Reports whether the final text arm still has visible reveal work. */
+  onRevealActivityChange?: ((active: boolean) => void) | undefined
   preset: StreamSmoothingPreset
   shouldHoldBack: () => boolean
-  controlScroll?: boolean
 }
 
 /** Conservative fallback before the streaming Markdown tail has geometry. */
@@ -82,50 +82,6 @@ function approximateInlineWidth(text: string, emPx: number): number {
   return width
 }
 
-function measurePendingTextGeometry(root: HTMLElement, visibleText: string): PendingTextGeometry {
-  if (
-    typeof document.createTreeWalker !== 'function'
-    || typeof NodeFilter === 'undefined'
-  ) {
-    return { root, visibleText, fontSize: 14, wrapThresholdWidth: null }
-  }
-  const rootRect = root.getBoundingClientRect()
-  const rootWidth = Math.max(0, rootRect.width, rootRect.right - rootRect.left, root.clientWidth)
-  if (rootWidth <= 0) return { root, visibleText, fontSize: 14, wrapThresholdWidth: null }
-
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  let tail: Text | null = null
-  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-    if ((node.textContent ?? '').length > 0) tail = node as Text
-  }
-  const parent = tail?.parentElement ?? root
-  const fontSize = Number.parseFloat(getComputedStyle(parent).fontSize) || 14
-  if (tail === null || typeof document.createRange !== 'function') {
-    return { root, visibleText, fontSize, wrapThresholdWidth: rootWidth }
-  }
-
-  try {
-    const length = tail.textContent?.length ?? 0
-    if (length <= 0) return { root, visibleText, fontSize, wrapThresholdWidth: rootWidth }
-    const range = document.createRange()
-    range.setStart(tail, Math.max(0, length - 1))
-    range.setEnd(tail, length)
-    const tailRect = range.getBoundingClientRect()
-    const contentRight = rootRect.right
-    if (!Number.isFinite(tailRect.right) || tailRect.right <= rootRect.left || contentRight <= rootRect.left) {
-      return { root, visibleText, fontSize, wrapThresholdWidth: rootWidth }
-    }
-    const remainingWidth = Math.max(0, contentRight - tailRect.right)
-    return {
-      root,
-      visibleText,
-      fontSize,
-      wrapThresholdWidth: remainingWidth + fontSize * 0.35,
-    }
-  } catch {
-    return { root, visibleText, fontSize, wrapThresholdWidth: rootWidth }
-  }
-}
 
 /** Whether buffered source can reach a new visual line before it drains. */
 function pendingTextCanGrow(
@@ -137,17 +93,16 @@ function pendingTextCanGrow(
   if (pending === '') return false
   if (/[\r\n]/u.test(pending)) return true
   const pendingChars = [...pending]
-  if (root === null) return pendingChars.length >= PREDICTIVE_WRAP_FALLBACK_CHARS
+  if (pendingChars.length >= PREDICTIVE_WRAP_FALLBACK_CHARS) return true
+  if (root === null) return false
 
   let geometry = geometryRef.current
-  if (geometry?.root !== root || geometry.visibleText !== visibleText) {
-    geometry = measurePendingTextGeometry(root, visibleText)
+  if (geometry?.root !== root) {
+    const rootWidth = root.clientWidth || 600
+    geometry = { root, visibleText, fontSize: 14, wrapThresholdWidth: Math.max(120, rootWidth * 0.4) }
     geometryRef.current = geometry
   }
-  if (geometry.wrapThresholdWidth === null) {
-    return pendingChars.length >= PREDICTIVE_WRAP_FALLBACK_CHARS
-  }
-  return approximateInlineWidth(pending, geometry.fontSize) >= geometry.wrapThresholdWidth
+  return approximateInlineWidth(pending, geometry.fontSize) >= (geometry.wrapThresholdWidth ?? (geometry.fontSize * PREDICTIVE_WRAP_FALLBACK_CHARS))
 }
 
 function announcementChunkEnd(source: string, start: number): number {
@@ -299,9 +254,9 @@ const StreamAnnouncement = memo(function StreamAnnouncement({
  * and rendered by the Harness `MarkdownText`
  * streaming arm (incremental parse, frozen non-tail blocks), so there is no
  * raw-text tail and no text-to-markdown swap: the tree stays markdown
- * throughout. The last text block owns conversation-port follow so wraps
- * glide instead of snapping. Once the stream closes and the reveal queue
- * drains, the settled full parse (KaTeX math, fence highlighting, file
+ * throughout. The outer assistant owner follows all text growth, including
+ * the final drain, so wraps glide without a completion handoff. Once the
+ * queue drains, the settled full parse (KaTeX math, fence highlighting, file
  * mentions) swaps in exactly once.
  */
 function AnimatedMarkdownText({
@@ -311,14 +266,13 @@ function AnimatedMarkdownText({
   streaming,
   logarithmicFade,
   motionReduced,
-  ownFollow,
   followSpeedCpsRef,
   followRevealedCharsRef,
   followRevealScaleRef,
   onPredictiveChange,
+  onRevealActivityChange,
   preset,
   shouldHoldBack,
-  controlScroll = true,
 }: AnimatedMarkdownTextProps) {
   const reduced = motionReduced
   const [typing, setTyping] = useState(streaming)
@@ -340,6 +294,7 @@ function AnimatedMarkdownText({
   })
   const shown = reduced ? text : displayed
   const live = typing && !reduced
+  const markdownShown = useDecoupledMarkdown(shown, live)
   useLogarithmicFade(followRootRef, logarithmicFade && !reduced, live, speedCpsRef)
 
   useEffect(() => {
@@ -366,6 +321,10 @@ function AnimatedMarkdownText({
     onPredictiveChange(next)
   }, [live, onPredictiveChange, shown, streaming, text])
 
+  useLayoutEffect(() => {
+    onRevealActivityChange?.(live)
+  }, [live, onRevealActivityChange])
+
   // The stream closed: keep revealing the remaining queue, then swap to the
   // settled parse exactly once. The markdown tree stays mounted until then.
   useEffect(() => {
@@ -383,25 +342,17 @@ function AnimatedMarkdownText({
   if (!streaming && !live && text.trim() === '') return null
 
   return (
-    <FollowHost
-      active={live && ownFollow}
-      speedCpsRef={speedCpsRef}
-      revealedCharsRef={followRevealedCharsRef}
-      revealScaleRef={followRevealScaleRef}
-      predictive={streaming}
-      controlScroll={controlScroll}
-      hostRef={followRootRef}
-    >
+    <div ref={followRootRef} className={css.follow}>
       <MarkdownText
         // `shown` stays authoritative through the completion drain: the
         // settled parse swaps in only when the queue has actually emptied.
         // Rendering `text` early bypasses the drain and teleports the tail.
-        text={live ? shown : text}
+        text={live ? markdownShown : text}
         streaming={live}
         labels={labels}
         fileMentions={live ? undefined : fileMentions}
       />
-    </FollowHost>
+    </div>
   )
 }
 
@@ -530,6 +481,11 @@ function AnimatedReasoning({
   const fadeSpeedRef = followSpeedCpsRef ?? localFadeSpeedRef
   const userScrolledRef = useRef(false)
   const rafIdRef = useRef(0)
+  // Latest "the live stream still owns this scroller" state. Tracked on every
+  // render so the queued frame can re-read it: a stop or a collapse landing
+  // between scheduling and the frame must not move the viewport.
+  const followActiveRef = useRef(false)
+  followActiveRef.current = running && expanded
   const commitAnchorRef = useRef<HTMLDivElement>(null)
   // The running→false flip is the AUTO-close: it collapses instantly and the
   // follower's settle spring absorbs the height step. A later manual toggle
@@ -563,14 +519,22 @@ function AnimatedReasoning({
   }, [running, thinkAutoExpand])
 
   useEffect(() => {
-    if (!expanded || userScrolledRef.current) return
+    // Only the live stream owns the reading position. A settled block is
+    // something to read from the top, so expanding a finished reasoning card
+    // must not scroll it — that would make its first lines unreachable.
+    if (!running || !expanded || userScrolledRef.current) return
     const el = thinkBodyRef.current
     if (el === null) return
     if (rafIdRef.current === 0) {
       rafIdRef.current = requestAnimationFrame(() => {
         rafIdRef.current = 0
-        if (!userScrolledRef.current && el !== null) {
-          el.scrollTop = el.scrollHeight
+        // Re-checked at frame time: the stream may have stopped, the block may
+        // have collapsed, or the user may have scrolled since scheduling. A
+        // queued frame never steals the position back.
+        if (!followActiveRef.current || userScrolledRef.current || el === null) return
+        const delta = el.scrollHeight - el.scrollTop - el.clientHeight
+        if (delta > 2) {
+          el.scrollTop = Number.MAX_SAFE_INTEGER
         }
       })
     }
@@ -681,10 +645,11 @@ function AnimatedReasoning({
  * streaming is revealed by the smoother through the Harness Markdown
  * renderer at a rate that tracks arrival. Reasoning blocks keep the
  * built-in Think disclosure and only receive a smoothed text feed; the
- * outer node owns conversation-port follow while streaming; the final text
- * block keeps ownership while its settled reveal queue drains. The FPS guard
- * holds offscreen reveals when the frame rate is degraded. Settled text
- * renders with the full Markdown pipeline.
+ * outer node owns conversation-port follow through both streaming and the
+ * final text drain. Keeping one owner avoids a lifecycle handoff that would
+ * reopen and later retire a second runway. The FPS guard holds offscreen
+ * reveals when the frame rate is degraded. Settled text renders with the full
+ * Markdown pipeline.
  */
 export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNodeView({
   mode: _mode = DEFAULT_STREAM_CONFIG.mode,
@@ -731,6 +696,17 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   const rootSpeedRef = useRef(35)
   const rootRevealedCharsRef = useRef(0)
   const rootRevealScaleRef = useRef(1)
+  const previousStreamingRef = useRef(streaming)
+  const [textRevealActive, setTextRevealActive] = useState(false)
+  const completionCandidate = !streaming
+    && previousStreamingRef.current
+    && data.blocks.some(block => block.kind === 'text' && block.text.trim() !== '')
+  useLayoutEffect(() => {
+    previousStreamingRef.current = streaming
+  }, [streaming])
+  const updateTextRevealActivity = useCallback((active: boolean): void => {
+    setTextRevealActive(previous => previous === active ? previous : active)
+  }, [])
   const reasoningTailIndex = streaming && data.blocks[data.blocks.length - 1]?.kind === 'reasoning'
     ? data.blocks.length - 1
     : -1
@@ -783,9 +759,11 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   const rendered: ReactNode[] = []
   const last = data.blocks.length - 1
   let lastFollow = -1
+  let lastText = -1
   for (let index = 0; index < data.blocks.length; index += 1) {
     const kind = data.blocks[index]?.kind
     if (kind === 'text' || kind === 'reasoning') lastFollow = index
+    if (kind === 'text') lastText = index
   }
   for (let index = 0; index < data.blocks.length; index += 1) {
     const block = data.blocks[index]
@@ -802,14 +780,13 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
             streaming={streaming}
             logarithmicFade={logarithmicFade && data.status !== 'interrupted'}
             motionReduced={reduced}
-            ownFollow={!streaming && index === lastFollow}
             followSpeedCpsRef={index === lastFollow ? rootSpeedRef : undefined}
             followRevealedCharsRef={index === lastFollow ? rootRevealedCharsRef : undefined}
             followRevealScaleRef={index === lastFollow ? rootRevealScaleRef : undefined}
             onPredictiveChange={index === lastFollow ? updateTextPrediction : undefined}
+            onRevealActivityChange={index === lastText ? updateTextRevealActivity : undefined}
             preset={preset}
             shouldHoldBack={shouldHoldBack}
-            controlScroll={controlScroll}
           />,
         )
         break
@@ -864,7 +841,10 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
     <div ref={guardRef} className={css.root} data-streaming={streaming || undefined}>
       <StreamAnnouncement text={announcementText} active={streaming && !reduced} />
       <FollowHost
-        active={streaming && !reduced}
+        // The status can close before its final text arm drains. Retain this
+        // same owner across that boundary; the candidate bridges the one
+        // layout commit before the child reports its live reveal state.
+        active={!reduced && (streaming || completionCandidate || textRevealActive)}
         speedCpsRef={rootSpeedRef}
         revealedCharsRef={rootRevealedCharsRef}
         revealScaleRef={rootRevealScaleRef}

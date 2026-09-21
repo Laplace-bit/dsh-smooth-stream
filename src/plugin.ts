@@ -116,7 +116,15 @@ export function apply(ctx: Context, config: Config): void {
     const scope = settingsCtx.settings.register(
       settingsNamespace,
       StreamSettingsSchema,
-      { applies: 'live' },
+      {
+        // The install-time entry config is the composition base, so it resolves
+        // *below* the user layer: a stored pick still wins, while "the user
+        // never chose" keeps following the overlay (cordis.patch.yml / profile
+        // config). Keeping it out of the schema default is what makes those two
+        // states distinguishable at all.
+        base: { preset: config.preset },
+        applies: 'live',
+      },
     )
     settingsCtx.inject(['connection'], (connectionCtx) => {
       let upgrade: Promise<void> | undefined
@@ -130,7 +138,7 @@ export function apply(ctx: Context, config: Config): void {
           writable: connectionCtx.settings.writable,
           enabled: settings.enabled,
           controlScroll: settings.controlScroll,
-          preset: settings.preset ?? DEFAULT_STREAM_CONFIG.preset,
+          preset: settings.preset ?? config.preset,
           motionPreference: settings.motionPreference,
           thinkAutoExpand: settings.thinkAutoExpand,
           logarithmicFade: settings.logarithmicFade,

@@ -1577,6 +1577,8 @@ function finishAtNaturalFloor(
   port: HTMLElement,
   retainCompositor = true,
   writeScrollTop = true,
+  /** A handoff release owns the current transforms until its pad is gone. */
+  deferCompositor = false,
 ): void {
   followCompletionSettle.delete(port)
   // No engine-owned geometry survives this call: label the port `natural` so
@@ -1602,6 +1604,10 @@ function finishAtNaturalFloor(
   port.removeAttribute(FOLLOW_OWNED_ATTR)
   port.style.overflowAnchor = ''
   port.style.scrollBehavior = ''
+  if (deferCompositor) {
+    followMotionStates.delete(port)
+    return
+  }
   for (const surface of surfaces) {
     if (promotedSet.has(surface)) holdCompositorAtRest(surface)
     else setShift(surface, 0)
@@ -1625,6 +1631,57 @@ function settleAtFloor(port: HTMLElement): void {
   const floor = Math.max(0, port.scrollHeight - port.clientHeight)
   setFollowScrollTop(port, floor)
   followReaderHolds.delete(port)
+}
+
+/**
+ * Close a stable terminal pad gradually while cancelling the measured floor
+ * movement with the same surfaces' compositor shift. Status-bearing and
+ * growing-tool handoffs stay on the normal completion path; they have their
+ * own host mutations to settle first.
+ */
+function scheduleStableTailPadRetire(port: HTMLElement): void {
+  let padPx = flowPadOf(port)
+  if (padPx <= FOLLOW_SETTLE_EPSILON_PX) return
+
+  const surfaces = new Set(shiftSurfacesOf(port))
+  const frame = (): void => {
+    if (!port.isConnected || turnStatusOf(port) !== null) return
+
+    // A newly mounted tail row must inherit the current compensation before it
+    // paints, otherwise it briefly slides relative to the settled answer.
+    const carryingShift = currentShiftOf([...surfaces][0] ?? port)
+    for (const surface of shiftSurfacesOf(port)) {
+      if (surfaces.has(surface)) continue
+      surfaces.add(surface)
+      if (surface.style.transform === '') setShift(surface, carryingShift)
+    }
+
+    padPx = Math.min(padPx, flowPadOf(port))
+    if (padPx <= FOLLOW_SETTLE_EPSILON_PX) {
+      for (const surface of surfaces) setShift(surface, 0)
+      return
+    }
+
+    const stepPx = Math.max(
+      FOLLOW_PAINT_GUARD_PX,
+      ((debugRuntime.activeTuning().runwayPx || FOLLOW_STATUS_RUNWAY_PX) / FOLLOW_RUNWAY_RETIRE_MS)
+        * FOLLOW_MAX_FRAME_MS,
+    )
+    const retiredPx = Math.min(stepPx, padPx)
+    const beforeTop = port.scrollTop
+    setFlowPad(port, Math.max(0, padPx - retiredPx))
+    padPx -= retiredPx
+    setFollowScrollTop(port, Math.max(0, port.scrollHeight - port.clientHeight))
+
+    const floorDelta = beforeTop - port.scrollTop
+    if (floorDelta > 0) {
+      for (const surface of surfaces) {
+        setShift(surface, Math.max(0, currentShiftOf(surface) - floorDelta))
+      }
+    }
+    requestAnimationFrame(frame)
+  }
+  requestAnimationFrame(frame)
 }
 
 interface FollowLeader {
@@ -2696,6 +2753,21 @@ export function useConversationFollow(
       if (!activeRef.current) {
         followTraceUntilMs = Math.max(followTraceUntilMs, performance.now() + 10000)
         followTrace('fast-gate', { sh: host.scrollHeight, st: Math.round(host.scrollTop), pad: Math.round(flowPadOf(host)) })
+        const stableTail = turnStatusOf(host) === null
+        const ownedRunway = runwayOffsetOf(host)
+        if (
+          stableTail
+          && (ownedRunway > FOLLOW_SETTLE_EPSILON_PX || flowPadOf(host) > FOLLOW_SETTLE_EPSILON_PX)
+        ) {
+          transferRunwayToFlowPad(host, ownedRunway)
+          scheduleStableTailPadRetire(host)
+          finishAtNaturalFloor(host, !startedAsEntrance, true, true)
+          followLeaders.delete(host)
+          followCompletionSettle.delete(host)
+          releaseRevealScale()
+          debugRuntime.reportFollow(host, null)
+          return
+        }
         restoreRunway(host)
         setFlowPad(host, 0)
         finishAtNaturalFloor(host, !startedAsEntrance, true)

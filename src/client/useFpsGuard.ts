@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useRef } from 'react'
 import { debugRuntime } from './debugRuntime.ts'
+import { FrameCoordinator } from './FrameCoordinator.ts'
 
 const FPS_THRESHOLD = 30
 const FPS_ALPHA = 0.12
@@ -33,14 +34,12 @@ export function useFpsGuard(active: boolean): {
 
   useEffect(() => {
     if (!active) return
-    let rafId = 0
     let lastDebugReport = 0
-    const frame = (now: number) => {
-      rafId = requestAnimationFrame(frame)
+    const frame = (now: number): boolean => {
       const fps = fpsRef.current
       if (fps.lastMs === 0) {
         fps.lastMs = now
-        return
+        return true
       }
       const delta = Math.min(MAX_FRAME_MS, Math.max(1, now - fps.lastMs))
       fps.lastMs = now
@@ -57,10 +56,14 @@ export function useFpsGuard(active: boolean): {
         debugRuntime.reportFps(currentFps, fps.emaMs, fps.degraded)
         lastDebugReport = now
       }
+      return true
     }
-    rafId = requestAnimationFrame(frame)
+    // The frame-rate monitor no longer owns a rAF chain of its own: it rides
+    // the shared document clock and only re-arms while the reply is streaming.
+    const coordinator = FrameCoordinator.forDocument()
+    const taskId = coordinator.registerTask({ onSimulate: (_dtMs, now) => frame(now) })
     return () => {
-      cancelAnimationFrame(rafId)
+      coordinator.unregisterTask(taskId)
       fpsRef.current = { emaMs: 0, lastMs: 0, healthyRun: 0, degraded: false }
       debugRuntime.clearFps()
     }
