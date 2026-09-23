@@ -1,8 +1,9 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from 'react'
-import { IconThinkOutline14, JsonBlock, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import { JsonBlock, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ImageGallery, type ImageLoader, type MessageImageLabels } from '@deepseek-ai/dsh-client-ui-attachment'
 import type { ChatNodeViewProps, TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { AnimatedDisclosure } from './AnimatedDisclosure.tsx'
+import { IconThink } from './harnessIcons.ts'
 import { notifyFollowCommit } from './teleprompterGlide.ts'
 import { useSmoothStreamContent, type StreamSmoothingPreset } from './useSmoothStreamContent.ts'
 import { useFpsGuard } from './useFpsGuard.ts'
@@ -342,7 +343,7 @@ function AnimatedMarkdownText({
   if (!streaming && !live && text.trim() === '') return null
 
   return (
-    <div ref={followRootRef} className={css.follow}>
+    <div ref={followRootRef} className={css.follow} data-follow-text="">
       <MarkdownText
         // `shown` stays authoritative through the completion drain: the
         // settled parse swaps in only when the queue has actually emptied.
@@ -606,7 +607,7 @@ function AnimatedReasoning({
           leadingClassName={css.thinkLeading}
           titleClassName={css.thinkTitle}
           chevronClassName={css.thinkChevron}
-          icon={<IconThinkOutline14 size={14} />}
+          icon={<IconThink size={14} />}
           // `message.think` is not in the `conversation` key union this prop is
           // typed with: no Harness version owns it there. On 0.1.5+ it lives in
           // the `chat` namespace, and on older builds only this plugin's own

@@ -2,15 +2,8 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import {
-  IconCloseOutline16,
-  IconCodeOutline16,
-  IconCopyOutline16,
-  IconQuestionOutline14,
-  IconRefreshOutline16,
-  Tooltip,
-  writeClipboard,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { Tooltip, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconClose, IconCode, IconCopy, IconQuestion, IconRefreshSmall } from './harnessIcons.ts'
 import type { StreamDebugTuning } from '../settings.ts'
 import type { DebugPanelFace, DebugRuntimeState, FollowTerminalPhase } from './debugRuntime.ts'
 import type { NS } from './locales.ts'
@@ -106,7 +99,7 @@ function TuningField({
               aria-label={label}
               title={t(control.tip)}
             >
-              <IconQuestionOutline14 />
+              <IconQuestion />
             </button>
           </Tooltip>
         </span>
@@ -178,7 +171,7 @@ export function DebugPanel(props: DebugPanelProps) {
         <span className={css.state}>{t(live ? 'debugLive' : 'debugIdle')}</span>
         {state.dirty ? <span className={css.unsaved}>{t('debugUnsaved')}</span> : null}
         <button className={css.iconButton} type="button" title={t('debugCopy')} aria-label={t('debugCopy')} onClick={() => { void copyDiagnostics() }}>
-          <IconCopyOutline16 />
+          <IconCopy />
         </button>
         <button
           className={css.iconButton}
@@ -192,7 +185,7 @@ export function DebugPanel(props: DebugPanelProps) {
             props.save()
           }}
         >
-          <IconCloseOutline16 />
+          <IconClose />
         </button>
         <span className={css.visuallyHidden} aria-live="polite">{copied ? t('debugCopied') : ''}</span>
       </header>
@@ -246,7 +239,7 @@ export function DebugPanel(props: DebugPanelProps) {
 
       <footer className={css.footer}>
         <button className={css.secondaryButton} type="button" disabled={!state.writable} onClick={props.reset}>
-          <IconRefreshOutline16 />
+          <IconRefreshSmall />
           {t('debugReset')}
         </button>
         <span className={css.footerSpacer} />
@@ -266,7 +259,7 @@ export function DebugPanel(props: DebugPanelProps) {
         title={t('debugPanelToggle')}
         onClick={() => { setOpen(current => !current) }}
       >
-        <IconCodeOutline16 />
+        <IconCode />
       </button>
       {typeof document === 'undefined' || panel === null ? null : createPortal(panel, document.body)}
     </>

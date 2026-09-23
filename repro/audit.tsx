@@ -108,12 +108,12 @@ function StreamedTree({ text }: { text: string }) {
         if (block.startsWith('```')) {
           const lines = block.split('\n')
           return (
-            <pre key={index} className="codeBlock">
+            <pre key={index} className="codeBlock" data-probe={index === blocks.length - 1 ? 'text-block' : undefined} data-follow-text={index === blocks.length - 1 ? '' : undefined}>
               <code>{lines.slice(1, -1).join('\n')}</code>
             </pre>
           )
         }
-        return <p key={index}>{block}</p>
+        return <p key={index} data-probe={index === blocks.length - 1 ? 'text-block' : undefined} data-follow-text={index === blocks.length - 1 ? '' : undefined}>{block}</p>
       })}
     </div>
   )
@@ -127,13 +127,13 @@ function SettledTree({ text, extraPx }: { text: string; extraPx: number }) {
         if (block.startsWith('```')) {
           const lines = block.split('\n')
           return (
-            <div key={index} className="codeShell">
+              <div key={index} className="codeShell" data-probe={index === blocks.length - 1 ? 'text-block' : undefined} data-follow-text={index === blocks.length - 1 ? '' : undefined}>
               {extraPx > 0 && <div className="codeBar" style={{ height: extraPx }} />}
               <pre className="codeBlock"><code>{lines.slice(1, -1).join('\n')}</code></pre>
             </div>
           )
         }
-        return <p key={index}>{block}</p>
+        return <p key={index} data-probe={index === blocks.length - 1 ? 'text-block' : undefined} data-follow-text={index === blocks.length - 1 ? '' : undefined}>{block}</p>
       })}
     </div>
   )
@@ -188,24 +188,13 @@ function TextArm({
     if (streaming) { setTyping(true); drainedRef.current = false; return }
     if (displayed.length === text.length && !drainedRef.current) {
       drainedRef.current = true
-      setTyping(false)
+      if (new URLSearchParams(window.location.search).get('swap') !== 'none') setTyping(false)
       onDrained()
     }
   }, [displayed.length, streaming, text.length, onDrained])
-  return (
-    // Production wiring: the text arm owns follow ONLY while draining after
-    // producer completion (`ownFollow={!streaming && lastTextBlock}`); while
-    // streaming the outer node follower leads.
-    <FollowHost
-      active={typing && !streaming}
-      predictive={false}
-      speedCpsRef={speedCpsRef}
-      revealedCharsRef={revealedCharsRef}
-      revealScaleRef={revealScaleRef}
-    >
-      {typing ? <StreamedTree text={displayed} /> : <SettledTree text={text} extraPx={swapDeltaPx} />}
-    </FollowHost>
-  )
+  return typing
+    ? <StreamedTree text={displayed} />
+    : <SettledTree text={text} extraPx={swapDeltaPx} />
 }
 
 /* ------------------------------- assistant ------------------------------- */
@@ -227,11 +216,15 @@ function AssistantMessage({
   const rootSpeedCpsRef = useRef(35)
   const rootRevealedCharsRef = useRef(0)
   const rootRevealScaleRef = useRef(1)
+  const [drained, setDrained] = useState(false)
+  useEffect(() => {
+    if (streaming) setDrained(false)
+  }, [streaming])
 
   return (
     <div ref={guardRef} className="msg assistant" data-chat-anchor-key="a1" data-streaming={streaming || undefined}>
       <FollowHost
-        active={streaming}
+        active={streaming || !drained}
         predictive={streaming}
         speedCpsRef={rootSpeedCpsRef}
         revealedCharsRef={rootRevealedCharsRef}
@@ -246,9 +239,11 @@ function AssistantMessage({
             speedCpsRef={rootSpeedCpsRef}
             revealedCharsRef={rootRevealedCharsRef}
             revealScaleRef={rootRevealScaleRef}
-            onDrained={onDrained}
+            onDrained={() => { setDrained(true); onDrained() }}
           />
-          <div className="tailProbe" data-probe="tail" />
+          {new URLSearchParams(window.location.search).get('footer') !== 'none' && (
+            <div className="tailProbe" data-probe="tail" />
+          )}
         </div>
       </FollowHost>
     </div>
@@ -306,7 +301,7 @@ function HostConversation() {
   const followRef = useRef<() => void>(() => {})
   followRef.current = () => {
     const local = listRef.current
-    if (local !== null && atBottomRef.current) {
+    if (local !== null && atBottomRef.current && new URLSearchParams(window.location.search).get('hostfollow') !== 'none') {
       const el = scrollerOf(local)
       el.scrollTop = el.scrollHeight
       observedTopRef.current = el.scrollTop
@@ -328,6 +323,7 @@ function HostConversation() {
     // settled swap landed: folding mid-drain makes the fold+swap commits
     // collide for short answers (both are large reflows in one window).
     if (profile === null || streaming || folded || !drained) return
+    if (new URLSearchParams(window.location.search).get('fold') === 'none') return
     const timer = window.setTimeout(() => {
       const flow = columnRef.current
       if (flow === null) return
@@ -455,7 +451,7 @@ function HostConversation() {
                 onDrained={() => { setDrained(true); window.__auditPhase('drained') }}
               />
             )}
-            {profile !== null && (
+            {profile !== null && new URLSearchParams(window.location.search).get('status') !== 'none' && (
               <div role="status" className="statusRow" data-probe="status">
                 <span className="dots">{streaming ? '正在深度思考…' : '已完成'}</span>
               </div>
@@ -470,10 +466,10 @@ function HostConversation() {
             ↓ 回到底部
           </button>
         )}
-      </div>
-      <div className="composerSeat" data-composer-seat="">
-        <input placeholder="输入消息…" />
-        <button>发送</button>
+        <div className="composerSeat" data-composer-seat="">
+          <input placeholder="输入消息…" />
+          <button>发送</button>
+        </div>
       </div>
     </div>
   )

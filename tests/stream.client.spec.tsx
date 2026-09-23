@@ -2661,10 +2661,11 @@ describe('assistant renderer', () => {
         <div data-composer-seat="">Composer</div>
       </div>,
     )
-    expect(currentTranslate(transcript)).toBeGreaterThan(0)
+    // A stable terminal without a status surface is positioned from the
+    // natural floor in the same frame. There is no compositor drain left for
+    // a later reader gesture to interrupt.
+    expect(currentTranslate(transcript)).toBe(0)
 
-    // The drain still carries ~70px of the glide in scroll, so a real pull
-    // must exceed the unpin threshold from that position, not the floor.
     fireEvent.wheel(port, { deltaY: -60 })
     port.scrollTop = 460
     await act(() => vi.advanceTimersByTimeAsync(16))
