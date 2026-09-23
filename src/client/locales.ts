@@ -52,6 +52,10 @@ export type SmoothStreamLocaleKey =
   | 'title' | 'description'
   | 'enabled' | 'enabledHint'
   | 'controlScroll' | 'controlScrollHint'
+  | 'preset' | 'presetHint'
+  | 'presetRealtime' | 'presetRealtimeHint'
+  | 'presetBalanced' | 'presetBalancedHint'
+  | 'presetSilky' | 'presetSilkyHint'
   | 'motionPreference' | 'motionPreferenceHint'
   | 'motionAuto' | 'motionAutoHint'
   | 'motionForceSmooth' | 'motionForceSmoothHint'
@@ -66,6 +70,8 @@ export type SmoothStreamLocaleKey =
   | 'debugFps' | 'debugFrameTime' | 'debugBacklog' | 'debugRevealSpeed' | 'debugProgress'
   | 'debugFollowState' | 'debugFollowing' | 'debugReleased'
   | 'debugLag' | 'debugVelocity' | 'debugReserve' | 'debugCapacity' | 'debugAppliedScale'
+  | 'debugTerminalPhase' | 'debugOwnedRunway' | 'debugTerminalBudget' | 'debugBaselineShift'
+  | 'debugAnchorDelta' | 'debugPhaseLive' | 'debugPhaseDrain' | 'debugPhaseCascade' | 'debugPhaseNatural'
   | 'debugRevealMultiplier' | 'debugQueuePressure' | 'debugMaxReveal'
   | 'debugSpringStiffness' | 'debugSpringDamping' | 'debugSpringMass'
   | 'debugRunway' | 'debugReserveResponse' | 'debugBackpressureMin'
@@ -86,6 +92,14 @@ export const en: Record<SmoothStreamLocaleKey, string> = {
   enabledHint: 'Let this plugin render and follow streaming replies. Turn off to use the built-in Harness renderer.',
   controlScroll: 'Take over scrolling',
   controlScrollHint: 'On by default; smooth-stream writes the conversation scroll position. Turn off to leave bottom-follow to Harness.',
+  preset: 'Pacing preset',
+  presetHint: 'Smoothing cadence profile for text reveal and glide.',
+  presetRealtime: 'Realtime',
+  presetRealtimeHint: 'Aggressive cadence, low latency, tracks output closely.',
+  presetBalanced: 'Balanced',
+  presetBalancedHint: 'Default balance between pace and visual rhythm.',
+  presetSilky: 'Silky',
+  presetSilkyHint: 'Higher backlog buffer, gentle EMA damping, maximum fluidity.',
   motionPreference: 'Motion',
   motionPreferenceHint: 'How streaming responds to the system reduce-motion setting.',
   motionAuto: 'Follow system',
@@ -129,6 +143,15 @@ export const en: Record<SmoothStreamLocaleKey, string> = {
   debugReserve: 'Reserve',
   debugCapacity: 'Capacity',
   debugAppliedScale: 'Applied scale',
+  debugTerminalPhase: 'Terminal phase',
+  debugOwnedRunway: 'Owned runway',
+  debugTerminalBudget: 'Terminal budget',
+  debugBaselineShift: 'Baseline shift',
+  debugAnchorDelta: 'Anchor Δ',
+  debugPhaseLive: 'live',
+  debugPhaseDrain: 'terminal-drain',
+  debugPhaseCascade: 'host-cascade',
+  debugPhaseNatural: 'natural',
   debugRevealMultiplier: 'Reveal multiplier',
   debugQueuePressure: 'Queue pressure',
   debugMaxReveal: 'Maximum reveal',
@@ -176,6 +199,14 @@ export const zh: Record<SmoothStreamLocaleKey, string> = {
   enabledHint: '由本插件渲染并跟随流式回复；关闭后使用 Harness 内置渲染。',
   controlScroll: '接管滚动',
   controlScrollHint: '默认开启，由丝滑流式写入会话滚动位置；关闭后贴底滚动交给 Harness。',
+  preset: '手感预设',
+  presetHint: '文字吐字节奏与视口跟随阻尼风格。',
+  presetRealtime: '激进快速 (realtime)',
+  presetRealtimeHint: '缓冲低、流速快，紧跟模型生成。',
+  presetBalanced: '均衡自然 (balanced)',
+  presetBalancedHint: '官方默认，平衡流速与节奏感。',
+  presetSilky: '极致丝滑 (silky)',
+  presetSilkyHint: '字符积压缓冲加大、阻尼更高、EMA 平滑度更好，视觉呼吸感最强。',
   motionPreference: '动效偏好',
   motionPreferenceHint: '流式渲染如何响应系统的「减少动态效果」设置。',
   motionAuto: '跟随系统',
@@ -219,6 +250,15 @@ export const zh: Record<SmoothStreamLocaleKey, string> = {
   debugReserve: '预留空间',
   debugCapacity: '安全容量',
   debugAppliedScale: '实际倍率',
+  debugTerminalPhase: '收尾阶段',
+  debugOwnedRunway: '实体留白',
+  debugTerminalBudget: '收尾预算',
+  debugBaselineShift: '基线位移',
+  debugAnchorDelta: '锚点位移',
+  debugPhaseLive: '流式中',
+  debugPhaseDrain: '收尾排空',
+  debugPhaseCascade: '宿主交接',
+  debugPhaseNatural: '自然态',
   debugRevealMultiplier: '揭示倍率',
   debugQueuePressure: '队列压力',
   debugMaxReveal: '最大揭示速度',

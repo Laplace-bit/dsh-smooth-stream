@@ -1032,21 +1032,19 @@ describe('assistant renderer', () => {
       expect(glyph![1]).toContain('height: calc(14px + var(--dsh-content-font-delta, 0px))')
     })
 
-    it('omits the inner follow host for settled text that is only whitespace', () => {
-      // The row keeps its OWN follow boundary (the outer host at the component
-      // root is unconditional) - what must not mount is the per-text-block
-      // host, which would consume a flow gap for a block that renders nothing.
-      // `running` must still mount it: the reveal engine needs the host before
-      // any text has arrived.
-      const innerHosts = (root: HTMLElement): number =>
+    it('keeps a text boundary only while streaming text may appear', () => {
+      // The root owns conversation follow for both live text and its completion
+      // drain. A text block still needs a local DOM boundary for Markdown and
+      // reveal commits, but settled whitespace must not leave one behind.
+      const textBoundaries = (root: HTMLElement): number =>
         root.querySelectorAll(`.${css.body} > .${css.follow}`).length
       const blank = { kind: 'text', text: '   \n  ' }
       const settled = render(<TypewriterAssistantNodeView {...assistantProps('settled', [blank])} />)
-      expect(innerHosts(settled.container)).toBe(0)
+      expect(textBoundaries(settled.container)).toBe(0)
       const running = render(<TypewriterAssistantNodeView {...assistantProps('running', [blank])} />)
-      expect(innerHosts(running.container)).toBe(1)
+      expect(textBoundaries(running.container)).toBe(1)
       const real = render(<TypewriterAssistantNodeView {...assistantProps('settled', [{ kind: 'text', text: 'kept' }])} />)
-      expect(innerHosts(real.container)).toBe(1)
+      expect(textBoundaries(real.container)).toBe(1)
     })
   })
 
@@ -2663,10 +2661,11 @@ describe('assistant renderer', () => {
         <div data-composer-seat="">Composer</div>
       </div>,
     )
-    expect(currentTranslate(transcript)).toBeGreaterThan(0)
+    // A stable terminal without a status surface is positioned from the
+    // natural floor in the same frame. There is no compositor drain left for
+    // a later reader gesture to interrupt.
+    expect(currentTranslate(transcript)).toBe(0)
 
-    // The drain still carries ~70px of the glide in scroll, so a real pull
-    // must exceed the unpin threshold from that position, not the floor.
     fireEvent.wheel(port, { deltaY: -60 })
     port.scrollTop = 460
     await act(() => vi.advanceTimersByTimeAsync(16))
@@ -3163,7 +3162,7 @@ describe('client plugin lifecycle', () => {
     expect(leftover[0]?.options.key).toBe('tool-call')
   })
 
-  it('wraps a prior tool-call that already declared children without re-registering', async () => {
+  it('wraps a prior agent row that already declared children without re-registering', async () => {
     function DummyTool({ node }: { node: { data: { root: object } } }) {
       return <div>tool:{'kind' in node.data.root ? 'settled' : 'running'}</div>
     }
@@ -3175,13 +3174,13 @@ describe('client plugin lifecycle', () => {
     } as never, (() => null) as never)
     ctx.slots.register({
       name: 'conversation.chat.node',
-      key: 'tool-call',
+      key: 'custom-tool',
       children: { 'tool.call.toolview': { kind: 'keyed', scope: 'session' } },
     } as never, DummyTool as never)
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
 
-    const entry = ctx.slots.entries('conversation.chat.node').find(item => item.options.key === 'tool-call')
+    const entry = ctx.slots.entries('conversation.chat.node').find(item => item.options.key === 'custom-tool')
     expect(entry?.component).not.toBe(DummyTool)
     const view = render(createElement(entry?.component as FunctionComponent<{ node: { data: { root: object } } }>, {
       node: { data: { root: { callId: '1', name: 'bash' } } },
@@ -3190,7 +3189,7 @@ describe('client plugin lifecycle', () => {
     expect(view.container.querySelector(`.${css.follow} > div`)).not.toBeNull()
 
     await fiber.dispose()
-    expect(ctx.slots.entries('conversation.chat.node').find(item => item.options.key === 'tool-call')?.component).toBe(DummyTool)
+    expect(ctx.slots.entries('conversation.chat.node').find(item => item.options.key === 'custom-tool')?.component).toBe(DummyTool)
   })
 
   it('wraps memoized Agent rows while preserving memoized human rows', async () => {
@@ -3229,12 +3228,15 @@ describe('client plugin lifecycle', () => {
     expect(contextEntry?.component).toBe(ContextRow)
   })
 
-  it('never wraps Host chrome rows (turn-process / turn-tail)', async () => {
+  it('never wraps Host chrome or tool-call rows (turn-process / turn-tail / tool-call)', async () => {
     function ProcessRow() {
       return <div>process</div>
     }
     function TailRow() {
       return <div>tail</div>
+    }
+    function ToolCallRow() {
+      return <div>tool-call</div>
     }
     function ContextRow() {
       return <div>context</div>
@@ -3255,6 +3257,10 @@ describe('client plugin lifecycle', () => {
     } as never, TailRow as never)
     ctx.slots.register({
       name: 'conversation.chat.node',
+      key: 'tool-call',
+    } as never, ToolCallRow as never)
+    ctx.slots.register({
+      name: 'conversation.chat.node',
       key: 'context',
     } as never, ContextRow as never)
 
@@ -3264,22 +3270,24 @@ describe('client plugin lifecycle', () => {
     const entries = ctx.slots.entries('conversation.chat.node')
     const processEntry = entries.find(item => item.options.key === 'turn-process')
     const tailEntry = entries.find(item => item.options.key === 'turn-tail')
+    const toolCallEntry = entries.find(item => item.options.key === 'tool-call')
     const contextEntry = entries.find(item => item.options.key === 'context')
 
-    // Host chrome keeps its bare renderer: the wrapper element would defeat
+    // Host chrome and tool-call keep their bare renderer: the wrapper element would defeat
     // ChatView's `.flowItem:empty { display: none }` erasure of a null-rendered
-    // summary row, and would push the summary label through the streamed-text
-    // reveal engine. Agent output still rides the follow boundary.
+    // summary row, and would push non-streamed badges through the character-reveal
+    // typewriter engine causing layout jitter. Agent output still rides the follow boundary.
     expect(processEntry?.component).toBe(ProcessRow)
     expect(tailEntry?.component).toBe(TailRow)
+    expect(toolCallEntry?.component).toBe(ToolCallRow)
     expect(contextEntry?.component).not.toBe(ContextRow)
 
     await fiber.dispose()
     expect(contextEntry?.component).toBe(ContextRow)
   })
 
-  it('wraps a tool-call registered after the overlay mounts', async () => {
-    function LateTool() {
+  it('wraps an agent row registered after the overlay mounts', async () => {
+    function LateAgentRow() {
       return <div>late</div>
     }
     const ctx = new Context()
@@ -3292,10 +3300,10 @@ describe('client plugin lifecycle', () => {
     await fiber.await()
     ctx.slots.register({
       name: 'conversation.chat.node',
-      key: 'tool-call',
-    } as never, LateTool as never)
-    const entry = ctx.slots.entries('conversation.chat.node').find(item => item.options.key === 'tool-call')
-    expect(entry?.component).not.toBe(LateTool)
+      key: 'custom-command',
+    } as never, LateAgentRow as never)
+    const entry = ctx.slots.entries('conversation.chat.node').find(item => item.options.key === 'custom-command')
+    expect(entry?.component).not.toBe(LateAgentRow)
     const view = render(createElement(entry?.component as FunctionComponent<{ node: { data: { root: object } } }>, {
       node: { data: { root: { callId: '2', name: 'read' } } },
     }))

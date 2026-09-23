@@ -30,10 +30,44 @@ export interface DebugMetrics {
   followRevealScale: number
   followFollowing: boolean
   followConstrained: boolean
+  /**
+   * Terminal-follow phase. `terminal-drain` (producer stopped, reveal queue
+   * still owes text) and `host-cascade` (host swapping status / collapsing
+   * Think / mounting the tail) need OPPOSITE corrections, so they must be
+   * distinguishable in the panel rather than inferred from `followActive`.
+   */
+  followTerminalPhase: FollowTerminalPhase
+  /** Physical owned bottom margin currently written into the DOM. */
+  followRunwayPx: number
+  /** Budget the terminal phase may spend, capped by the runway. */
+  followTerminalBudgetPx: number
+  /** `runwayPx - visibleReserve`: the term that turns into visible motion. */
+  followBaselineShiftPx: number
+  /** Screen-space reading-anchor delta this frame (null when unmeasurable). */
+  followAnchorDeltaPx: number | null
+  /** Reveal characters the smoother still owes after the producer stopped. */
+  followRemainingRevealChars: number
   scrollTop: number | null
   scrollHeight: number | null
   clientHeight: number | null
   lastUpdatedMs: number | null
+}
+
+export type FollowTerminalPhase = 'live' | 'terminal-drain' | 'host-cascade' | 'natural'
+
+/**
+ * Allocation-free read of the newest stream metric. The follower polls this
+ * every frame to learn whether the producer has stopped while reveal work
+ * remains, and `getSnapshot()` would allocate a fresh state object per frame
+ * just to answer one boolean.
+ */
+export function readNewestStreamMetric(): { producerComplete: boolean; backlog: number } | null {
+  let newest: StreamMetric | undefined
+  for (const candidate of streamMetrics.values()) {
+    if (newest === undefined || candidate.updatedAt > newest.updatedAt) newest = candidate
+  }
+  if (newest === undefined) return null
+  return { producerComplete: newest.producerComplete, backlog: newest.backlog }
 }
 
 export interface DebugRuntimeState {
@@ -70,6 +104,12 @@ interface StreamMetric {
   targetChars: number
   displayedChars: number
   active: boolean
+  /**
+   * The producer (model stream) has stopped even if the reveal queue still owes
+   * characters. The follower needs exactly this bit to tell a `terminal-drain`
+   * from live streaming, and it cannot be derived from `backlog > 0` alone.
+   */
+  producerComplete: boolean
   updatedAt: number
 }
 
@@ -85,6 +125,12 @@ interface FollowMetric {
   scrollHeight: number
   clientHeight: number
   active: boolean
+  terminalPhase: FollowTerminalPhase
+  runwayPx: number
+  terminalBudgetPx: number
+  baselineShiftPx: number
+  readingAnchorDeltaPx: number | null
+  remainingRevealChars: number
   updatedAt: number
 }
 
@@ -105,6 +151,12 @@ const EMPTY_METRICS: DebugMetrics = {
   followRevealScale: 1,
   followFollowing: false,
   followConstrained: false,
+  followTerminalPhase: 'live',
+  followRunwayPx: 0,
+  followTerminalBudgetPx: 0,
+  followBaselineShiftPx: 0,
+  followAnchorDeltaPx: null,
+  followRemainingRevealChars: 0,
   scrollTop: null,
   scrollHeight: null,
   clientHeight: null,
@@ -181,6 +233,12 @@ function currentMetrics(timestamp: number): DebugMetrics {
     followRevealScale: follow?.revealScale ?? 1,
     followFollowing: follow?.following ?? false,
     followConstrained: follow?.constrained ?? false,
+    followTerminalPhase: follow?.terminalPhase ?? 'live',
+    followRunwayPx: follow?.runwayPx ?? 0,
+    followTerminalBudgetPx: follow?.terminalBudgetPx ?? 0,
+    followBaselineShiftPx: follow?.baselineShiftPx ?? 0,
+    followAnchorDeltaPx: follow?.readingAnchorDeltaPx ?? null,
+    followRemainingRevealChars: follow?.remainingRevealChars ?? 0,
     scrollTop: follow?.scrollTop ?? null,
     scrollHeight: follow?.scrollHeight ?? null,
     clientHeight: follow?.clientHeight ?? null,

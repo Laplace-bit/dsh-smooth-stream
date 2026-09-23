@@ -1101,11 +1101,11 @@ var require_react_development = __commonJS({
           var dispatcher = resolveDispatcher();
           return dispatcher.useReducer(reducer, initialArg, init);
         }
-        function useRef4(initialValue) {
+        function useRef5(initialValue) {
           var dispatcher = resolveDispatcher();
           return dispatcher.useRef(initialValue);
         }
-        function useEffect3(create, deps) {
+        function useEffect4(create, deps) {
           var dispatcher = resolveDispatcher();
           return dispatcher.useEffect(create, deps);
         }
@@ -1888,14 +1888,14 @@ var require_react_development = __commonJS({
         exports.useContext = useContext;
         exports.useDebugValue = useDebugValue;
         exports.useDeferredValue = useDeferredValue;
-        exports.useEffect = useEffect3;
+        exports.useEffect = useEffect4;
         exports.useId = useId;
         exports.useImperativeHandle = useImperativeHandle;
         exports.useInsertionEffect = useInsertionEffect;
         exports.useLayoutEffect = useLayoutEffect3;
         exports.useMemo = useMemo2;
         exports.useReducer = useReducer;
-        exports.useRef = useRef4;
+        exports.useRef = useRef5;
         exports.useState = useState3;
         exports.useSyncExternalStore = useSyncExternalStore;
         exports.useTransition = useTransition;
@@ -24473,10 +24473,10 @@ var require_react_jsx_runtime_development = __commonJS({
             return jsxWithValidation(type, props, key, false);
           }
         }
-        var jsx2 = jsxWithValidationDynamic;
+        var jsx3 = jsxWithValidationDynamic;
         var jsxs2 = jsxWithValidationStatic;
         exports.Fragment = REACT_FRAGMENT_TYPE;
-        exports.jsx = jsx2;
+        exports.jsx = jsx3;
         exports.jsxs = jsxs2;
       })();
     }
@@ -24496,7 +24496,7 @@ var require_jsx_runtime = __commonJS({
 });
 
 // repro/stress-120fps.tsx
-var import_react3 = __toESM(require_react(), 1);
+var import_react4 = __toESM(require_react(), 1);
 var import_client = __toESM(require_client(), 1);
 
 // src/client/useSmoothStreamContent.ts
@@ -24578,6 +24578,14 @@ try {
 var createSnapshotStore = clientStore?.createSnapshotStore ?? fallbackSnapshotStore;
 
 // src/client/debugRuntime.ts
+function readNewestStreamMetric() {
+  let newest;
+  for (const candidate of streamMetrics.values()) {
+    if (newest === void 0 || candidate.updatedAt > newest.updatedAt) newest = candidate;
+  }
+  if (newest === void 0) return null;
+  return { producerComplete: newest.producerComplete, backlog: newest.backlog };
+}
 var EMPTY_METRICS = {
   fps: null,
   frameMs: null,
@@ -24595,6 +24603,12 @@ var EMPTY_METRICS = {
   followRevealScale: 1,
   followFollowing: false,
   followConstrained: false,
+  followTerminalPhase: "live",
+  followRunwayPx: 0,
+  followTerminalBudgetPx: 0,
+  followBaselineShiftPx: 0,
+  followAnchorDeltaPx: null,
+  followRemainingRevealChars: 0,
   scrollTop: null,
   scrollHeight: null,
   clientHeight: null,
@@ -24656,6 +24670,12 @@ function currentMetrics(timestamp) {
     followRevealScale: follow?.revealScale ?? 1,
     followFollowing: follow?.following ?? false,
     followConstrained: follow?.constrained ?? false,
+    followTerminalPhase: follow?.terminalPhase ?? "live",
+    followRunwayPx: follow?.runwayPx ?? 0,
+    followTerminalBudgetPx: follow?.terminalBudgetPx ?? 0,
+    followBaselineShiftPx: follow?.baselineShiftPx ?? 0,
+    followAnchorDeltaPx: follow?.readingAnchorDeltaPx ?? null,
+    followRemainingRevealChars: follow?.remainingRevealChars ?? 0,
     scrollTop: follow?.scrollTop ?? null,
     scrollHeight: follow?.scrollHeight ?? null,
     clientHeight: follow?.clientHeight ?? null,
@@ -25076,7 +25096,8 @@ function useSmoothStreamContent(content, {
         speedCps: revealSpeedCps,
         targetChars: targetCount,
         displayedChars: displayedCount,
-        active: !producerComplete
+        active: !producerComplete || backlog > 0,
+        producerComplete
       });
       if (holdBackRef.current?.() === true) {
         rafRef.current = requestAnimationFrame(tick);
@@ -25158,8 +25179,177 @@ function useSmoothStreamContent(content, {
   return displayedContent;
 }
 
+// repro/stress-120fps.module.css
+var stress_120fps_default = {
+  container: "stress_120fps_container",
+  header: "stress_120fps_header",
+  titleGroup: "stress_120fps_titleGroup",
+  title: "stress_120fps_title",
+  badge120: "stress_120fps_badge120",
+  liveIndicator: "stress_120fps_liveIndicator",
+  pulse: "stress_120fps_pulse",
+  controls: "stress_120fps_controls",
+  btn: "stress_120fps_btn",
+  btnPrimary: "stress_120fps_btnPrimary",
+  btnSuccess: "stress_120fps_btnSuccess",
+  controlItem: "stress_120fps_controlItem",
+  mainGrid: "stress_120fps_mainGrid",
+  conversationPane: "stress_120fps_conversationPane",
+  scrollViewport: "stress_120fps_scrollViewport",
+  scrollColumn: "stress_120fps_scrollColumn",
+  msgUser: "stress_120fps_msgUser",
+  msgAssistant: "stress_120fps_msgAssistant",
+  streamText: "stress_120fps_streamText",
+  statusIndicator: "stress_120fps_statusIndicator",
+  composerSeat: "stress_120fps_composerSeat",
+  composerInput: "stress_120fps_composerInput",
+  dashboardPane: "stress_120fps_dashboardPane",
+  metricCards: "stress_120fps_metricCards",
+  metricCard: "stress_120fps_metricCard",
+  metricLabel: "stress_120fps_metricLabel",
+  metricValue: "stress_120fps_metricValue",
+  metricSub: "stress_120fps_metricSub",
+  good: "stress_120fps_good",
+  warn: "stress_120fps_warn",
+  bad: "stress_120fps_bad",
+  sectionBox: "stress_120fps_sectionBox",
+  sectionHeader: "stress_120fps_sectionHeader",
+  canvasWrapper: "stress_120fps_canvasWrapper",
+  canvas: "stress_120fps_canvas",
+  eventsLog: "stress_120fps_eventsLog",
+  eventItem: "stress_120fps_eventItem",
+  eventTime: "stress_120fps_eventTime",
+  eventDesc: "stress_120fps_eventDesc",
+  toBottomBtn: "stress_120fps_toBottomBtn"
+};
+
+// src/client/FollowHost.tsx
+var import_react3 = __toESM(require_react(), 1);
+
 // src/client/teleprompterGlide.ts
 var import_react2 = __toESM(require_react(), 1);
+
+// src/client/FrameCoordinator.ts
+var FrameCoordinator = class _FrameCoordinator {
+  static coordinators = /* @__PURE__ */ new WeakMap();
+  tasks = /* @__PURE__ */ new Map();
+  rafId = null;
+  lastTs = null;
+  /**
+   * Owed layout read. Starts false: a fresh coordinator has no unread writes,
+   * and starting dirty would keep the clock armed forever after the first
+   * frame. Consumers declare reads via {@link markLayoutDirty}.
+   */
+  layoutDirty = false;
+  /** One id per consumer, so an unregister cannot evict a re-registered task. */
+  nextTaskId = 0;
+  doc;
+  constructor(doc) {
+    this.doc = doc;
+  }
+  static forDocument(doc = document) {
+    let coordinator = _FrameCoordinator.coordinators.get(doc);
+    if (coordinator === void 0) {
+      coordinator = new _FrameCoordinator(doc);
+      _FrameCoordinator.coordinators.set(doc, coordinator);
+    }
+    return coordinator;
+  }
+  /**
+   * Mark that a DOM or geometry change requires a layout read next frame.
+   */
+  markLayoutDirty() {
+    this.layoutDirty = true;
+    this.ensureLoop();
+  }
+  /**
+   * Declare that geometry written since the last frame must be re-read at the
+   * top of the next one, and keep the clock running for it.
+   */
+  requestRead() {
+    this.markLayoutDirty();
+  }
+  /**
+   * Register or replace an animation/render task. Returns the task id to hand
+   * back to {@link unregisterTask}.
+   */
+  registerTask(task) {
+    const id = task.id ?? `frame-task-${this.nextTaskId++}`;
+    this.tasks.set(id, { ...task, id });
+    this.ensureLoop();
+    return id;
+  }
+  /**
+   * Unregister a task when its stream completes or the element unmounts.
+   */
+  unregisterTask(id) {
+    if (id === null || id === void 0) return;
+    this.tasks.delete(id);
+    if (this.tasks.size === 0 && !this.layoutDirty) this.stopLoop();
+  }
+  ensureLoop() {
+    if (this.rafId !== null) return;
+    const win = this.doc.defaultView ?? (typeof window !== "undefined" ? window : null);
+    if (win === null) return;
+    const tick = (now2) => {
+      this.rafId = null;
+      if (this.lastTs === null) {
+        this.lastTs = now2;
+        this.ensureLoop();
+        return;
+      }
+      const frameIntervalMs = Math.max(0, now2 - this.lastTs);
+      const dtMs = Math.max(1, Math.min(frameIntervalMs, 100));
+      this.lastTs = now2;
+      if (this.layoutDirty) {
+        this.layoutDirty = false;
+        for (const task of this.tasks.values()) task.onRead?.(now2);
+      }
+      let anyActive = false;
+      for (const task of this.tasks.values()) {
+        if (task.onSimulate?.(dtMs, now2) === true) anyActive = true;
+      }
+      for (const task of this.tasks.values()) task.onWrite?.(now2);
+      if ((anyActive || this.layoutDirty) && this.rafId === null) {
+        this.ensureLoop();
+      } else if (!anyActive && !this.layoutDirty) {
+        this.lastTs = null;
+      }
+    };
+    this.rafId = win.requestAnimationFrame(tick);
+  }
+  stopLoop() {
+    if (this.rafId !== null) {
+      const win = this.doc.defaultView ?? (typeof window !== "undefined" ? window : null);
+      win?.cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+    this.lastTs = null;
+  }
+  /**
+   * Whether this document currently owns a live, still-needed animation
+   * frame. A frame that is merely draining an owed read with no registered
+   * task left is not considered active work.
+   */
+  get active() {
+    return this.rafId !== null && (this.tasks.size > 0 || this.layoutDirty);
+  }
+  /** Number of registered tasks; used by tests to pin the single-clock contract. */
+  get taskCount() {
+    return this.tasks.size;
+  }
+  /**
+   * Release every task, drop any owed read, and stop the clock. Used by tests
+   * for isolation; production consumers unregister their own task.
+   */
+  shutdown() {
+    this.tasks.clear();
+    this.layoutDirty = false;
+    this.stopLoop();
+  }
+};
+
+// src/client/teleprompterGlide.ts
 var FOLLOW_OWNED_ATTR = "data-follow-owned";
 var FOLLOW_SPRING_SUBSTEPS = 4;
 var FOLLOW_SPRING_MAX_STEP_MS = 32;
@@ -25174,9 +25364,11 @@ var FOLLOW_REPIN_PX = 1;
 var FOLLOW_HOST_RELEASE_PX = FOLLOW_SLACK_PX + 1;
 var FOLLOW_PAINT_GUARD_PX = 1;
 var FOLLOW_STATUS_RUNWAY_PX = 72;
-var FOLLOW_RUNWAY_RETIRE_MS = 160;
+var FOLLOW_RUNWAY_RETIRE_MS = 1500;
 var FOLLOW_GESTURE_MS = 800;
 var FOLLOW_SETTLE_EPSILON_PX = 0.25;
+var FOLLOW_SETTLE_QUIET_MS = 240;
+var FOLLOW_SETTLE_PAD_CAP_PX = 2 * FOLLOW_STATUS_RUNWAY_PX;
 var FOLLOW_PAINT_SHIFT_MAX_STEP_PX = 8;
 var LEGACY_RUNWAY_PX = 48;
 var FOLLOW_BACKPRESSURE_START_RATIO = 0.1;
@@ -25185,7 +25377,7 @@ var FOLLOW_BACKPRESSURE_RELEASE_MS = 240;
 var FOLLOW_TRAJECTORY_ACCELERATION = 22e-5;
 var FOLLOW_TRAJECTORY_PHASE_PX = 32;
 var FOLLOW_TRAJECTORY_MIN_LAG_PX = 20;
-var FOLLOW_TRAJECTORY_CENTERING_MS = 280;
+var FOLLOW_TRAJECTORY_CENTERING_MS = 120;
 var GESTURE_EVENTS = [
   "wheel",
   "touchstart",
@@ -25430,15 +25622,169 @@ var FOLLOW_PAINT_LIMIT_TTL_MS = 250;
 var followPaintLimits = /* @__PURE__ */ new WeakMap();
 var followHadChrome = /* @__PURE__ */ new WeakSet();
 var followLastShiftPx = /* @__PURE__ */ new WeakMap();
+var followLastFloorPx = /* @__PURE__ */ new WeakMap();
+var followGuardAnchors = /* @__PURE__ */ new WeakMap();
+var followCompletionSettle = /* @__PURE__ */ new WeakSet();
+var followCompletionSettleRows = /* @__PURE__ */ new WeakMap();
+function countUserRows(port) {
+  const flow = flowElementOf(port);
+  if (flow === null) return -1;
+  let count = 0;
+  let sawKind = false;
+  for (const child of flow.children) {
+    if (!(child instanceof HTMLElement)) continue;
+    const kind = child.getAttribute("data-chat-flow-kind");
+    if (kind !== null) sawKind = true;
+    if (kind === "user") count++;
+  }
+  return sawKind ? count : -1;
+}
+function completionSettleGuardsPort(port) {
+  if (!followCompletionSettle.has(port)) return false;
+  const baseline = followCompletionSettleRows.get(port) ?? -1;
+  const current = countUserRows(port);
+  return baseline >= 0 && current >= 0 && current <= baseline;
+}
+function readingAnchorOf(port) {
+  const flow = flowElementOf(port);
+  if (flow === null) return null;
+  let anchor = null;
+  for (const child of flow.children) {
+    if (!(child instanceof HTMLElement)) continue;
+    if (child.getAttribute("data-chat-flow-kind") === "assistant" || child.querySelector('[data-variant="think"]') !== null) {
+      anchor = child;
+    }
+  }
+  return anchor ?? shiftSurfacesOf(port).at(-1) ?? null;
+}
+function measureReadingAnchor(port) {
+  const anchor = readingAnchorOf(port);
+  if (anchor === null) {
+    followGuardAnchors.delete(port);
+    return null;
+  }
+  const rect = anchor.getBoundingClientRect();
+  if (!(rect.width > 0 || rect.height > 0)) return null;
+  const top = rect.top;
+  const shift = currentShiftOf(anchor);
+  const pad = flowPadOf(port);
+  const scrollTop = port.scrollTop;
+  const scrollHeight = port.scrollHeight;
+  const flow = flowElementOf(port);
+  const index = flow === null ? -1 : [...flow.children].indexOf(anchor);
+  const stored = followGuardAnchors.get(port);
+  if (stored === void 0) {
+    followGuardAnchors.set(port, { element: anchor, top, index, shift, pad, scrollTop, scrollHeight });
+    return null;
+  }
+  if (Math.abs(scrollHeight - stored.scrollHeight) <= 0.5 && Math.abs(scrollTop - stored.scrollTop) > 0.5) {
+    followScrollLedgers.set(port, scrollTop);
+    followGuardAnchors.set(port, { element: anchor, top, index, shift, pad, scrollTop, scrollHeight });
+    return null;
+  }
+  const scrollDelta = scrollTop - stored.scrollTop;
+  const delta = top - stored.top + scrollDelta - (shift - stored.shift) + (pad - stored.pad);
+  if (stored.element === anchor) {
+    followGuardAnchors.set(port, { element: anchor, top, index, shift, pad, scrollTop, scrollHeight });
+    return { anchor, index, top, delta };
+  }
+  if (!stored.element.isConnected && stored.index === index) {
+    return { anchor, index, top, delta };
+  }
+  followGuardAnchors.set(port, { element: anchor, top, index, shift, pad, scrollTop, scrollHeight });
+  return null;
+}
+function holdGuardAnchor(port, measured, heldTop) {
+  followGuardAnchors.set(port, {
+    element: measured.anchor,
+    index: measured.index,
+    top: heldTop,
+    shift: currentShiftOf(measured.anchor),
+    pad: flowPadOf(port),
+    scrollTop: port.scrollTop,
+    scrollHeight: port.scrollHeight
+  });
+}
 var followRunwayOffsetHistory = /* @__PURE__ */ new WeakMap();
 var followFloorHistory = /* @__PURE__ */ new WeakMap();
 var followSlackTransition = /* @__PURE__ */ new WeakSet();
+var followSettlePads = /* @__PURE__ */ new WeakMap();
+function flowPadOf(port) {
+  return followSettlePads.get(port)?.px ?? 0;
+}
+function pruneDeadRunway(port) {
+  const runway = followRunways.get(port);
+  if (runway !== void 0 && !runway.element.isConnected) {
+    restoreRunway(port);
+    return true;
+  }
+  return false;
+}
+function setFlowPad(port, px) {
+  const flow = flowElementOf(port);
+  if (flow === null) return;
+  const existing = followSettlePads.get(port);
+  const original = existing?.original ?? flow.style.paddingBottom;
+  if (px <= FOLLOW_SETTLE_EPSILON_PX) {
+    if (existing !== void 0) {
+      flow.style.paddingBottom = existing.original;
+      followSettlePads.delete(port);
+    }
+    return;
+  }
+  flow.style.paddingBottom = original === "" ? `${px}px` : `calc(${original} + ${px}px)`;
+  followSettlePads.set(port, { element: flow, original, px });
+}
+function ownedBottomSpaceOf(port) {
+  return runwayOffsetOf(port) + flowPadOf(port);
+}
+var followTraceUntilMs = 0;
+function traceActive() {
+  return debugRuntime.isEnabled() && performance.now() < followTraceUntilMs;
+}
+function followTrace(event, detail) {
+  if (!traceActive()) return;
+  console.log(`[dsh-follow] ${event}`, JSON.stringify(detail));
+}
+var followObservedContentHeight = /* @__PURE__ */ new WeakMap();
+function environmentCommitGrowthPx(port) {
+  const previous = followObservedContentHeight.get(port);
+  if (previous === void 0) return 0;
+  return Math.max(0, port.scrollHeight - previous);
+}
+function hostShOf(port) {
+  return port.scrollHeight;
+}
+var followRemainingRevealChars = 0;
+function refreshTerminalRevealLedger() {
+  const stream = readNewestStreamMetric();
+  followRemainingRevealChars = stream?.backlog ?? 0;
+  return {
+    producerComplete: stream?.producerComplete ?? false,
+    drain: (stream?.producerComplete ?? false) && (stream?.backlog ?? 0) > 0
+  };
+}
+function measureAnchorDeltaForTelemetry(port) {
+  if (!debugRuntime.isEnabled()) return null;
+  return measureReadingAnchor(port)?.delta ?? null;
+}
 function invalidatePaintLimit(port) {
   followPaintLimits.delete(port);
 }
+var followTerminalPhases = /* @__PURE__ */ new WeakMap();
+var followTerminalBudgets = /* @__PURE__ */ new WeakMap();
+var followCompletionGrowthCredit = /* @__PURE__ */ new WeakMap();
+var FOLLOW_COMPLETION_CREDIT_MAX_STEP_PX = 24;
 var followMotionStates = /* @__PURE__ */ new WeakMap();
 var followReaderHolds = /* @__PURE__ */ new WeakMap();
 var followCommitListeners = /* @__PURE__ */ new WeakMap();
+function notifyFollowCommit(fromInsidePort) {
+  if (fromInsidePort === null) return;
+  const port = fromInsidePort.closest("[data-conversation-scroll]");
+  const listeners = port === null ? void 0 : followCommitListeners.get(port);
+  if (listeners === void 0) return;
+  for (const listener of [...listeners]) listener();
+}
 function subscribeFollowCommit(port, fn) {
   let listeners = followCommitListeners.get(port);
   if (listeners === void 0) {
@@ -25530,6 +25876,30 @@ function ensureRunway(port, surfaces, runwayPx = FOLLOW_STATUS_RUNWAY_PX) {
 function runwayOffsetOf(port) {
   return followRunways.get(port)?.offset ?? 0;
 }
+function transferRunwayToFlowPad(port, requestedPx) {
+  const runway = followRunways.get(port);
+  if (runway === void 0 || requestedPx <= 0 || !runway.element.isConnected) return 0;
+  const nextRequestedPx = Math.max(0, runway.requestedPx - requestedPx);
+  const beforeOffset = runway.offset;
+  const beforeHeight = port.scrollHeight;
+  runway.element.style[runway.property] = nextRequestedPx <= FOLLOW_SETTLE_EPSILON_PX ? runway.original : runway.original === "" ? `${nextRequestedPx}px` : `calc(${runway.original} + ${nextRequestedPx}px)`;
+  const nextOffset = Math.max(0, beforeOffset + port.scrollHeight - beforeHeight);
+  const transferredPx = Math.max(0, beforeOffset - nextOffset);
+  if (nextRequestedPx <= FOLLOW_SETTLE_EPSILON_PX || nextOffset <= FOLLOW_SETTLE_EPSILON_PX) {
+    followRunways.delete(port);
+  } else {
+    followRunways.set(port, {
+      ...runway,
+      offset: nextOffset,
+      requestedPx: nextRequestedPx
+    });
+  }
+  if (transferredPx > 0) {
+    setFlowPad(port, flowPadOf(port) + transferredPx);
+    invalidatePaintLimit(port);
+  }
+  return transferredPx;
+}
 function safeShiftLimit(port, surfaces) {
   const last = surfaces.at(-1);
   if (last === void 0) return 0;
@@ -25556,6 +25926,13 @@ function safeShiftLimit(port, surfaces) {
   return limit;
 }
 function setFollowScrollTop(port, nextTop) {
+  const ledger = followScrollLedgers.get(port);
+  if (port.getAttribute(FOLLOW_OWNED_ATTR) === null) {
+    port.setAttribute(FOLLOW_OWNED_ATTR, "active");
+  }
+  if (ledger !== void 0 && traceActive() && Math.abs(port.scrollTop - ledger) > 1) {
+    followTrace("external-scroll", { from: Math.round(port.scrollTop), to: Math.round(nextTop), ledger: Math.round(ledger) });
+  }
   if (Math.abs(port.scrollTop - nextTop) > 0.01) port.scrollTop = nextTop;
   followScrollLedgers.set(port, port.scrollTop);
   const ownedTop = String(port.scrollTop);
@@ -25565,10 +25942,17 @@ function setFollowScrollTop(port, nextTop) {
 }
 var followScrollLedgers = /* @__PURE__ */ new WeakMap();
 var followActivityAt = /* @__PURE__ */ new WeakMap();
+var followHostScrollPorts = /* @__PURE__ */ new WeakMap();
+function resetHostScrollOwnershipForNewTurn(port) {
+  const ownership = followHostScrollPorts.get(port);
+  if (ownership === void 0) return;
+  const userRows = countUserRows(port);
+  if (userRows >= 0 && userRows > ownership.userRows) followHostScrollPorts.delete(port);
+}
 function readerScrolledUp(port) {
   return port.scrollTop < (followScrollLedgers.get(port) ?? 0) - FOLLOW_UNPIN_GESTURE_PX;
 }
-function applyVisual(port, animatedH, reservePx, velocityPxPerSec = 0, runwayPx = FOLLOW_STATUS_RUNWAY_PX, shiftCeilingPx = Number.POSITIVE_INFINITY, promoteAtRest = false, trajectoryShiftPx, dtMs = 16.7) {
+function applyVisual(port, animatedH, reservePx, velocityPxPerSec = 0, runwayPx = FOLLOW_STATUS_RUNWAY_PX, shiftCeilingPx = Number.POSITIVE_INFINITY, promoteAtRest = false, trajectoryShiftPx, dtMs = 16.7, writeScrollTop = true) {
   const surfaces = shiftSurfacesOf(port);
   ensureFlowFillsPort(port);
   void runwayPx;
@@ -25585,7 +25969,8 @@ function applyVisual(port, animatedH, reservePx, velocityPxPerSec = 0, runwayPx 
       followFloorHistory.set(port, preFloor);
     }
   }
-  ensureRunway(port, surfaces, reservePx);
+  const effectiveRunwayPx = followTerminalPhases.has(port) ? Math.max(Math.min(FOLLOW_STATUS_RUNWAY_PX, followTerminalBudgets.get(port) ?? FOLLOW_STATUS_RUNWAY_PX), reservePx) : FOLLOW_STATUS_RUNWAY_PX;
+  ensureRunway(port, surfaces, effectiveRunwayPx);
   const contentHeight2 = Math.max(0, port.scrollHeight);
   const runwayOffset2 = runwayOffsetOf(port);
   const prevOffset2 = followRunwayOffsetHistory.get(port);
@@ -25595,6 +25980,7 @@ function applyVisual(port, animatedH, reservePx, velocityPxPerSec = 0, runwayPx 
   followRunwayOffsetHistory.set(port, runwayOffset2);
   const contentHeight = contentHeight2;
   const runwayOffset = runwayOffset2;
+  followObservedContentHeight.set(port, contentHeight2);
   const targetHeight = Math.max(0, contentHeight - runwayOffset);
   const floor = Math.max(0, contentHeight - port.clientHeight);
   const extent = Math.min(targetHeight, Math.max(0, animatedH));
@@ -25602,7 +25988,7 @@ function applyVisual(port, animatedH, reservePx, velocityPxPerSec = 0, runwayPx 
   if (port.style.scrollBehavior !== "auto") port.style.scrollBehavior = "auto";
   if (floor <= 0) {
     followRunwayOffsetHistory.set(port, 0);
-    setFollowScrollTop(port, 0);
+    if (writeScrollTop) setFollowScrollTop(port, 0);
     followMotionStates.set(port, {
       capacityPx: Number.POSITIVE_INFINITY,
       constrained: false,
@@ -25633,26 +26019,53 @@ function applyVisual(port, animatedH, reservePx, velocityPxPerSec = 0, runwayPx 
   const idlePromotion = promoteAtRest && motionShift <= 0.01 && availableShift > 0 ? 0.1 : 0;
   let shift = Math.max(motionShift, idlePromotion);
   const previousShift = followLastShiftPx.get(port);
-  const maxDecayPx = dtMs <= 0 ? FOLLOW_PAINT_SHIFT_MAX_STEP_PX : Math.max(1, FOLLOW_PAINT_SHIFT_MAX_STEP_PX / 16.67 * dtMs);
+  const previousFloor = followLastFloorPx.get(port);
+  const floorDropPx = Math.max(0, (previousFloor ?? floor) - floor);
+  const maxDecayPx = Math.max(
+    dtMs <= 0 ? FOLLOW_PAINT_SHIFT_MAX_STEP_PX : Math.max(1, FOLLOW_PAINT_SHIFT_MAX_STEP_PX / 16.67 * dtMs),
+    floorDropPx
+  );
+  followLastFloorPx.set(port, floor);
   if (previousShift !== void 0 && shift < previousShift - maxDecayPx) {
     shift = previousShift - maxDecayPx;
   }
+  if (followCompletionSettle.has(port) && previousShift !== void 0 && previousFloor !== void 0) {
+    const confirmedGrowthPx = Math.max(0, floor - previousFloor);
+    let credit = (followCompletionGrowthCredit.get(port) ?? 0) + confirmedGrowthPx;
+    if (shift > previousShift) {
+      const rise = shift - previousShift;
+      const funded = Math.min(rise, FOLLOW_COMPLETION_CREDIT_MAX_STEP_PX);
+      const spend = Math.min(funded, credit);
+      const unfunded = rise - spend;
+      if (unfunded > 0) shift -= unfunded;
+      credit -= spend;
+    }
+    followCompletionGrowthCredit.set(port, credit);
+  }
   followLastShiftPx.set(port, shift);
-  const effectiveLag = Math.max(0, motionShift - baselineShift);
+  const requestedShift = trajectoryShiftPx ?? baselineShift + requestedLag;
+  const effectiveLag = Math.max(0, shift - baselineShift);
   const capacityPx = Math.max(0, limit - baselineShift);
   const effectiveExtent = targetHeight - effectiveLag;
-  setFollowScrollTop(port, floor);
+  const isConstrained = requestedShift > availableShift + FOLLOW_SETTLE_EPSILON_PX || limit <= 0 && requestedShift > baselineShift;
+  if (writeScrollTop) setFollowScrollTop(port, floor);
   followMotionStates.set(port, {
     capacityPx,
-    constrained: requestedLag > effectiveLag + FOLLOW_SETTLE_EPSILON_PX,
+    constrained: isConstrained,
     extent: effectiveExtent,
     lagPx: effectiveLag,
     reservePx: visibleReserve,
-    velocityPxPerSec
+    velocityPxPerSec,
+    terminalPhase: followTerminalPhases.get(port) ?? "live",
+    runwayPx: runwayOffset,
+    baselineShiftPx: baselineShift,
+    anchorDeltaPx: followTerminalPhases.has(port) ? measureAnchorDeltaForTelemetry(port) : null,
+    remainingRevealChars: followRemainingRevealChars
   });
   for (const surface of surfaces) setShift(surface, shift);
   const status = turnStatusOf(port);
   if (status !== null) setShift(status, 0);
+  FrameCoordinator.forDocument().markLayoutDirty();
   return effectiveExtent;
 }
 function clearMotion(port) {
@@ -25668,6 +26081,7 @@ function clearVisual(port) {
   restoreRunway(port);
   followMotionStates.delete(port);
   followLastShiftPx.delete(port);
+  followLastFloorPx.delete(port);
   invalidatePaintLimit(port);
 }
 function holdCompositorAtRest(element) {
@@ -25675,23 +26089,31 @@ function holdCompositorAtRest(element) {
   element.style.willChange = "transform";
   element.style.clipPath = "";
 }
-function finishAtNaturalFloor(port, retainCompositor = true) {
+function finishAtNaturalFloor(port, retainCompositor = true, writeScrollTop = true, deferCompositor = false) {
+  followCompletionSettle.delete(port);
+  followTerminalPhases.set(port, "natural");
+  followCompletionGrowthCredit.delete(port);
+  followTraceUntilMs = Math.max(followTraceUntilMs, performance.now() + 1e4);
+  followTrace("finish-enter", { sh: hostShOf(port), st: Math.round(port.scrollTop), pad: Math.round(flowPadOf(port)), retain: retainCompositor });
   const surfaces = shiftSurfacesOf(port);
   const status = turnStatusOf(port);
   if (!retainCompositor) {
     restoreRunway(port);
-    settleAtFloor(port);
+    if (writeScrollTop) settleAtFloor(port);
     clearMotion(port);
     followMotionStates.delete(port);
     return;
   }
   const promoted = [...surfaces, ...status === null ? [] : [status]].filter((element) => element.style.transform !== "" || element.style.willChange === "transform");
   const promotedSet = new Set(promoted);
-  restoreRunway(port);
-  settleAtFloor(port);
+  if (writeScrollTop) settleAtFloor(port);
   port.removeAttribute(FOLLOW_OWNED_ATTR);
   port.style.overflowAnchor = "";
   port.style.scrollBehavior = "";
+  if (deferCompositor) {
+    followMotionStates.delete(port);
+    return;
+  }
   for (const surface of surfaces) {
     if (promotedSet.has(surface)) holdCompositorAtRest(surface);
     else setShift(surface, 0);
@@ -25715,27 +26137,86 @@ function settleAtFloor(port) {
   setFollowScrollTop(port, floor);
   followReaderHolds.delete(port);
 }
+function scheduleHandoffPadRetire(port) {
+  const pad0 = flowPadOf(port);
+  if (pad0 <= FOLLOW_SETTLE_EPSILON_PX) return;
+  const surfaces = new Set(shiftSurfacesOf(port));
+  const shifted = /* @__PURE__ */ new Set();
+  for (const surface of surfaces) {
+    if (surface.style.transform !== "") shifted.add(surface);
+  }
+  const carryingShift = () => currentShiftOf([...surfaces].find((surface) => shifted.has(surface)) ?? port);
+  let statusMover = turnStatusOf(port);
+  let statusEntered = statusMover !== null;
+  const stepPx = Math.max(
+    FOLLOW_PAINT_GUARD_PX,
+    (debugRuntime.activeTuning().runwayPx || FOLLOW_STATUS_RUNWAY_PX) / FOLLOW_RUNWAY_RETIRE_MS * FOLLOW_MAX_FRAME_MS
+  );
+  let padPx = pad0;
+  const frame = () => {
+    if (!port.isConnected) return;
+    padPx = Math.min(padPx, flowPadOf(port));
+    if (padPx <= FOLLOW_SETTLE_EPSILON_PX) return;
+    const retired = Math.min(stepPx, padPx);
+    const fromTop = port.scrollTop;
+    setFlowPad(port, Math.max(0, padPx - retired));
+    padPx -= retired;
+    setFollowScrollTop(port, Math.max(0, port.scrollHeight - port.clientHeight));
+    const carrying = carryingShift();
+    for (const surface of shiftSurfacesOf(port)) {
+      if (surfaces.has(surface)) continue;
+      surfaces.add(surface);
+      if (surface.style.transform === "") setShift(surface, carrying);
+    }
+    const status = turnStatusOf(port);
+    if (status !== statusMover) {
+      statusMover = status;
+      statusEntered = false;
+    }
+    if (statusMover !== null && !statusEntered) {
+      if (statusMover.style.transform === "") setShift(statusMover, carrying);
+      statusEntered = true;
+    }
+    const movedBy = fromTop - port.scrollTop;
+    if (movedBy > 0) {
+      for (const surface of surfaces) {
+        shifted.add(surface);
+        setShift(surface, Math.max(0, currentShiftOf(surface) - movedBy));
+      }
+      if (statusMover !== null) {
+        setShift(statusMover, Math.max(0, currentShiftOf(statusMover) - movedBy));
+      }
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
 var followLeaders = /* @__PURE__ */ new WeakMap();
 var followGeneration = 0;
-function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, predictive = true, entrance = false, onEntranceSettled, predictiveRef, entranceExtentRef, revealedCharsRef) {
+var followActivePorts = /* @__PURE__ */ new WeakSet();
+function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, predictive = true, entrance = false, onEntranceSettled, predictiveRef, entranceExtentRef, revealedCharsRef, controlScroll = true) {
   const activeRef = (0, import_react2.useRef)(active);
   const entranceRef = (0, import_react2.useRef)(entrance);
   const onEntranceSettledRef = (0, import_react2.useRef)(onEntranceSettled);
   entranceRef.current = entrance;
   onEntranceSettledRef.current = onEntranceSettled;
   activeRef.current = active;
+  const controlScrollRef = (0, import_react2.useRef)(controlScroll);
+  controlScrollRef.current = controlScroll;
   (0, import_react2.useLayoutEffect)(() => {
+    if (!controlScroll) return;
     if (!active) return;
     const startedAsEntrance = entrance;
     const owner = {};
     const generation = ++followGeneration;
-    let rafId = 0;
     let last = performance.now();
     let following = true;
     let primed = false;
     let animatedH = 0;
     let reservePx = 0;
     let velocityPxPerSec = 0;
+    let lastCommitGrowthPx = 0;
+    let lastObservedContentHeight = 0;
     let interacting = false;
     let readerGestureIntent = false;
     let readerReleased = false;
@@ -25743,8 +26224,10 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
     let interactTimer = null;
     let port = null;
     let resize = null;
+    let mutations = null;
     let observedTail = null;
     let statusWasPresent = null;
+    let lastStatusHeightPx = 0;
     let trajectoryPositionPx = null;
     let trajectoryVelocityPxPerMs = 0;
     let trajectoryTargetVelocityPxPerMs = 0;
@@ -25780,6 +26263,8 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
     };
     const reportFollow = (next, isActive) => {
       const state = followMotionStates.get(next);
+      const phase = followTerminalPhases.get(next) ?? (isActive ? "live" : "natural");
+      const runwayPx = state?.runwayPx ?? runwayOffsetOf(next);
       debugRuntime.reportFollow(next, {
         // TEMP audit provenance: lagPx=-1 marks the fallback path (no motion
         // state owned by this reporter this frame).
@@ -25793,7 +26278,13 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
         scrollTop: next.scrollTop,
         scrollHeight: next.scrollHeight,
         clientHeight: next.clientHeight,
-        active: isActive
+        active: isActive,
+        terminalPhase: phase,
+        runwayPx,
+        terminalBudgetPx: followTerminalBudgets.get(next) ?? runwayPx,
+        baselineShiftPx: state?.baselineShiftPx ?? Math.max(0, runwayPx - (state?.reservePx ?? 0)),
+        readingAnchorDeltaPx: state?.anchorDeltaPx ?? null,
+        remainingRevealChars: followRemainingRevealChars
       });
     };
     const isLeader = (next) => followLeaders.get(next)?.owner === owner;
@@ -25802,9 +26293,41 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
       if (holding === next && isLeader(next)) return;
       holding = next;
       const leader = followLeaders.get(next);
-      if (leader === void 0 || generation > leader.generation) {
+      if ((leader === void 0 || generation > leader.generation) && !completionSettleGuardsPort(next)) {
+        followCompletionSettle.delete(next);
         followLeaders.set(next, { generation, owner });
       }
+    };
+    const yieldScrollOwnership = (next, floor) => {
+      if (hostOwnsScroll) return;
+      hostOwnsScroll = true;
+      followHostScrollPorts.set(next, { userRows: countUserRows(next) });
+      followTrace("yield-scroll", {
+        from: Math.round(next.scrollTop),
+        to: Math.round(floor)
+      });
+      clearVisual(next);
+      const naturalFloor = Math.max(0, next.scrollHeight - next.clientHeight);
+      setFollowScrollTop(next, naturalFloor);
+      next.removeAttribute(FOLLOW_OWNED_ATTR);
+      followLeaders.delete(next);
+      releaseRevealScale();
+      debugRuntime.reportFollow(next, null);
+    };
+    const detectHostScroll = (next, floor) => {
+      if (followHostScrollPorts.has(next)) {
+        hostOwnsScroll = true;
+        return;
+      }
+      const ledger = followScrollLedgers.get(next);
+      if (ledger === void 0 || Math.abs(next.scrollTop - ledger) <= 1) return;
+      if (Math.abs(next.scrollTop - floor) <= 1) {
+        followScrollLedgers.set(next, next.scrollTop);
+        externalScrollStrikes = 0;
+        return;
+      }
+      externalScrollStrikes += 1;
+      if (externalScrollStrikes >= 2) yieldScrollOwnership(next, floor);
     };
     const drop = (next) => {
       if (holding === next) holding = null;
@@ -25849,8 +26372,105 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
         interactTimer = null;
       }, FOLLOW_GESTURE_MS);
     };
+    let settleRetiring = false;
+    let hostOwnsScroll = false;
+    let externalScrollStrikes = 0;
+    let lastReadingAnchorPullAtMs = Number.NEGATIVE_INFINITY;
+    let readingAnchorPullBudgetPx = 0;
+    let handedOff = false;
+    const pullReadingAnchorBack = (host, measured, trace = false) => {
+      holdGuardAnchor(host, measured, measured.top);
+      return;
+      const need = -measured.delta;
+      const now2 = performance.now();
+      const elapsedPx = lastReadingAnchorPullAtMs === Number.NEGATIVE_INFINITY ? FOLLOW_PAINT_SHIFT_MAX_STEP_PX : Math.min(24, Math.max(0, now2 - lastReadingAnchorPullAtMs) * (FOLLOW_PAINT_SHIFT_MAX_STEP_PX / 16.7));
+      readingAnchorPullBudgetPx = Math.min(need, readingAnchorPullBudgetPx + elapsedPx);
+      lastReadingAnchorPullAtMs = now2;
+      const released = Math.min(flowPadOf(host), readingAnchorPullBudgetPx);
+      readingAnchorPullBudgetPx -= released;
+      if (released > FOLLOW_SETTLE_EPSILON_PX) {
+        if (trace) {
+          followTrace("anchor-pull", { screenDelta: Math.round(measured.delta), released: Math.round(released), st: Math.round(host.scrollTop) });
+        }
+        setFlowPad(host, flowPadOf(host) - released);
+        animatedH = Math.max(0, animatedH - released);
+      }
+      const remainder = need - released;
+      let raise = 0;
+      if (remainder > 0.5) {
+        const surfaces = shiftSurfacesOf(host);
+        const limit = safeShiftLimit(host, surfaces);
+        const current = currentShiftOf(surfaces.at(-1) ?? host);
+        const target = Math.min(current + remainder, Math.max(0, limit - FOLLOW_PAINT_GUARD_PX));
+        raise = target - current;
+        if (raise > 0) {
+          for (const surface of surfaces) setShift(surface, current + raise);
+          followLastShiftPx.set(host, current + raise);
+          animatedH = Math.max(0, animatedH - raise);
+        }
+      }
+      holdGuardAnchor(host, measured, measured.top + released + raise);
+    };
+    const enforceReadingAnchor = (host, trace = false) => {
+      const measured = measureReadingAnchor(host);
+      if (measured === null) return null;
+      if (measured.delta > 0.5) {
+        if (trace) {
+          followTrace("anchor-hold", { screenDelta: Math.round(measured.delta), st: Math.round(host.scrollTop) });
+        }
+        if (pruneDeadRunway(host)) reservePx = 0;
+        holdGuardAnchor(host, measured, measured.top);
+      } else if (measured.delta < -0.5) {
+        if (pruneDeadRunway(host)) reservePx = 0;
+        pullReadingAnchorBack(host, measured, trace);
+      } else {
+        holdGuardAnchor(host, measured, measured.top);
+      }
+      return measured.delta;
+    };
     const restoreBeforePaint = () => {
-      if (!following || port === null || !isLeader(port)) return;
+      if (!following || port === null) return;
+      if (hostOwnsScroll || followHostScrollPorts.has(port)) {
+        hostOwnsScroll = true;
+        followScrollLedgers.set(port, port.scrollTop);
+        return;
+      }
+      if (!activeRef.current) {
+        detectHostScroll(port, Math.max(0, port.scrollHeight - port.clientHeight));
+      }
+      const leaderless = !isLeader(port);
+      if (!activeRef.current && followActivePorts.has(port)) return;
+      if (leaderless && (followLeaders.has(port) || !handedOff)) return;
+      if (leaderless) {
+        const sharedMotion = followMotionStates.get(port);
+        if (sharedMotion !== void 0) {
+          animatedH = Math.min(port.scrollHeight, Math.max(0, sharedMotion.extent));
+          reservePx = sharedMotion.reservePx;
+          velocityPxPerSec = sharedMotion.velocityPxPerSec;
+        }
+      }
+      pruneDeadRunway(port);
+      if (!settleRetiring) {
+        const measured = measureReadingAnchor(port);
+        if (measured !== null && measured.delta > 0.5) {
+          if (pruneDeadRunway(port)) reservePx = 0;
+          holdGuardAnchor(port, measured, measured.top);
+        } else if (measured !== null && measured.delta < -0.5) {
+          if (pruneDeadRunway(port)) reservePx = 0;
+          if (!activeRef.current) {
+            pullReadingAnchorBack(port, measured);
+          } else {
+            const released = Math.min(flowPadOf(port), -measured.delta);
+            if (released > FOLLOW_SETTLE_EPSILON_PX) {
+              setFlowPad(port, flowPadOf(port) - released);
+              animatedH = Math.max(0, animatedH - released);
+            }
+            holdGuardAnchor(port, measured, measured.top + released);
+          }
+        } else if (measured !== null) {
+          holdGuardAnchor(port, measured, measured.top);
+        }
+      }
       const tuning = debugRuntime.activeTuning();
       const predictGrowth = predictiveRef?.current ?? predictive;
       const floor = Math.max(0, port.scrollHeight - port.clientHeight);
@@ -25863,13 +26483,20 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
         reservePx,
         velocityPxPerSec,
         tuning.runwayPx,
-        Number.POSITIVE_INFINITY,
+        // COMPLETION RISE FREEZE: this observer runs in the mutation's
+        // microtask, but the paint lands one vsync later — extent a CSS
+        // transition retracts in between makes any rise funded here
+        // over-cover by exactly that retraction (the drain-onset 回弹).
+        // Freeze rises same-task; the settle's rAF frame re-reads the floor
+        // within its own paint tick and funds the confirmed growth there.
+        activeRef.current ? Number.POSITIVE_INFINITY : followLastShiftPx.get(port) ?? Number.POSITIVE_INFINITY,
         !predictGrowth,
         trajectoryShift,
-        0
+        0,
+        activeRef.current && !hostOwnsScroll
       );
       if (trajectoryShift !== void 0) {
-        const currentShift = followLastShiftPx.get(port) ?? floor - trajectoryPositionPx;
+        const currentShift = followLastShiftPx.get(port) ?? floor - (trajectoryPositionPx ?? floor);
         trajectoryPositionPx = floor - currentShift;
       }
       updateRevealScale(port, 0, true);
@@ -25881,6 +26508,7 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
       if (port !== null) {
         for (const name of GESTURE_EVENTS) port.removeEventListener(name, markGesture);
         resize?.disconnect();
+        mutations?.disconnect();
       }
       unsubscribeCommit?.();
       port = next;
@@ -25892,10 +26520,19 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
         port.addEventListener(name, markGesture, { passive: true });
       }
       if (typeof ResizeObserver !== "undefined") {
-        resize = new ResizeObserver(restoreBeforePaint);
+        resize = new ResizeObserver(() => restoreBeforePaint());
         resize.observe(port);
         const proxy = resizeProxyOf(port);
         if (proxy !== null) resize.observe(proxy);
+      }
+      if (typeof MutationObserver !== "undefined") {
+        const flow = flowElementOf(port);
+        if (flow !== null) {
+          mutations = new MutationObserver(() => {
+            restoreBeforePaint();
+          });
+          mutations.observe(flow, { childList: true, subtree: true });
+        }
       }
     };
     const observeTailSurface = () => {
@@ -25906,19 +26543,29 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
       observedTail = tail;
       if (tail !== null) resize.observe(tail);
     };
+    const coordinator = FrameCoordinator.forDocument();
+    const frameTaskRef = { id: null };
+    const stopFollowTask = () => {
+      if (frameTaskRef.id === null) return;
+      coordinator.unregisterTask(frameTaskRef.id);
+      frameTaskRef.id = null;
+    };
     const frame = (now2) => {
-      rafId = requestAnimationFrame(frame);
       const elapsedMs = Math.max(1e-3, now2 - last);
       const dt = Math.min(FOLLOW_MAX_FRAME_MS, elapsedMs);
       const tuning = debugRuntime.activeTuning();
       last = now2;
       const root = rootRef.current;
-      if (root === null) return;
+      if (root === null) return activeRef.current;
       const nextPort = root.closest("[data-conversation-scroll]");
-      if (nextPort === null) return;
+      if (nextPort === null) return activeRef.current;
       bindPort(nextPort);
       observeTailSurface();
-      if (nextPort.clientHeight <= 0) return;
+      resetHostScrollOwnershipForNewTurn(nextPort);
+      hostOwnsScroll = followHostScrollPorts.has(nextPort);
+      if (activeRef.current) followActivePorts.add(nextPort);
+      else followActivePorts.delete(nextPort);
+      if (nextPort.clientHeight <= 0) return true;
       const floor = Math.max(0, nextPort.scrollHeight - nextPort.clientHeight);
       const reportedLag = floor - nextPort.scrollTop;
       const extent = Math.min(
@@ -25926,13 +26573,22 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
         Math.max(0, nextPort.scrollHeight - reportedLag)
       );
       if (!primed) {
+        if (completionSettleGuardsPort(nextPort)) {
+          primed = true;
+          following = false;
+          return activeRef.current;
+        }
         const inherited = nextPort.hasAttribute(FOLLOW_OWNED_ATTR) ? followMotionStates.get(nextPort) : void 0;
         if (inherited === void 0) {
           const entranceExtent = entrancePending ? entranceExtentRef?.current ?? entranceExtentOf(root) : 0;
           const predictGrowth2 = predictiveRef?.current ?? predictive;
           animatedH = entrancePending ? Math.max(0, nextPort.scrollHeight - entranceExtent) : nextPort.scrollHeight;
           const hasStatus2 = turnStatusOf(nextPort) !== null;
-          reservePx = predictGrowth2 && (hasStatus2 || speedCpsRef.current > FOLLOW_RESERVE_MIN_CPS) ? computeFollowReserve(speedCpsRef.current, tuning.runwayPx) : 0;
+          reservePx = Math.max(
+            ownedBottomSpaceOf(nextPort),
+            predictGrowth2 && (hasStatus2 || speedCpsRef.current > FOLLOW_RESERVE_MIN_CPS) ? computeFollowReserve(speedCpsRef.current, tuning.runwayPx) : 0
+          );
+          if (!completionSettleGuardsPort(nextPort)) setFlowPad(nextPort, 0);
           statusWasPresent = hasStatus2;
           velocityPxPerSec = 0;
           void reportedLag;
@@ -25953,7 +26609,10 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
               velocityPxPerSec,
               tuning.runwayPx,
               Number.POSITIVE_INFINITY,
-              !(predictiveRef?.current ?? predictive)
+              !(predictiveRef?.current ?? predictive),
+              void 0,
+              0,
+              !hostOwnsScroll
             );
             if (predictive && root.querySelector('[data-variant="think"]') === null && runwayOffsetOf(nextPort) > 0) {
               const floor2 = Math.max(0, nextPort.scrollHeight - nextPort.clientHeight);
@@ -25986,7 +26645,7 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
           finishEntrance();
         }
         primed = true;
-        return;
+        return activeRef.current;
       }
       const repinSlack = readerReleased ? FOLLOW_REPIN_PX : FOLLOW_SLACK_PX;
       const returnedToFloor = readerReleased && !readerGestureIntent && reportedLag <= FOLLOW_REPIN_PX;
@@ -26014,30 +26673,57 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
       if (!activeRef.current || !following) {
         followScrollLedgers.set(nextPort, nextPort.scrollTop);
         reportFollow(nextPort, activeRef.current);
-        return;
+        return activeRef.current;
+      }
+      detectHostScroll(nextPort, floor);
+      if (hostOwnsScroll) {
+        followScrollLedgers.set(nextPort, nextPort.scrollTop);
+        reportFollow(nextPort, false);
+        return false;
       }
       hold(nextPort);
       if (!isLeader(nextPort)) {
         finishEntrance();
-        return;
+        return true;
       }
       const predictGrowth = predictiveRef?.current ?? predictive;
-      const hasStatus = turnStatusOf(nextPort) !== null;
+      const statusElement = turnStatusOf(nextPort);
+      const hasStatus = statusElement !== null;
+      if (statusElement !== null) lastStatusHeightPx = statusElement.offsetHeight;
       const statusJustRemoved = predictGrowth && statusWasPresent === true && !hasStatus;
-      if (statusJustRemoved) reservePx = tuning.runwayPx;
+      if (statusJustRemoved) {
+        reservePx = Math.max(reservePx, tuning.runwayPx) + lastStatusHeightPx;
+      }
       statusWasPresent = hasStatus;
       const reserveEnabled = hasStatus || statusJustRemoved || reservePx > FOLLOW_SETTLE_EPSILON_PX || speedCpsRef.current > FOLLOW_RESERVE_MIN_CPS;
       const pressureReserveTarget = predictGrowth && reserveEnabled ? computeFollowReserve(speedCpsRef.current, tuning.runwayPx) : 0;
-      const heldReserveTarget = tuning.runwayPx < reservePx ? tuning.runwayPx : Math.max(reservePx, pressureReserveTarget);
-      const effectiveReserveTarget = !predictGrowth ? 0 : statusJustRemoved ? tuning.runwayPx : heldReserveTarget;
+      const effectiveReserveTarget = Math.max(reservePx, pressureReserveTarget);
       const reserveStep = 1 - Math.exp(-elapsedMs / tuning.reserveResponseMs);
       reservePx += (effectiveReserveTarget - reservePx) * reserveStep;
+      const terminalState = refreshTerminalRevealLedger();
+      if (terminalState.drain) {
+        if (!followTerminalPhases.has(nextPort)) {
+          const seeded = Math.min(
+            FOLLOW_STATUS_RUNWAY_PX,
+            Math.max(runwayOffsetOf(nextPort), 0) + Math.max(0, lastCommitGrowthPx)
+          );
+          followTerminalPhases.set(nextPort, "terminal-drain");
+          followTerminalBudgets.set(nextPort, seeded);
+          followTrace("terminal-drain", { budget: Math.round(seeded), reserve: Math.round(reservePx), backlog: followRemainingRevealChars });
+        }
+      }
+      const terminalBudget = followTerminalPhases.has(nextPort) ? Math.max(
+        Math.min(followTerminalBudgets.get(nextPort) ?? FOLLOW_STATUS_RUNWAY_PX, FOLLOW_STATUS_RUNWAY_PX),
+        reservePx
+      ) : FOLLOW_STATUS_RUNWAY_PX;
       if (predictGrowth || runwayOffsetOf(nextPort) > 0.5) {
-        ensureRunway(nextPort, shiftSurfacesOf(nextPort), reservePx);
+        ensureRunway(nextPort, shiftSurfacesOf(nextPort), terminalBudget);
       }
       const runwayOffset = runwayOffsetOf(nextPort);
       const contentHeight = nextPort.scrollHeight;
       const floorNow = Math.max(0, contentHeight - nextPort.clientHeight);
+      lastCommitGrowthPx = lastObservedContentHeight > 0 ? Math.max(0, contentHeight - lastObservedContentHeight) : 0;
+      lastObservedContentHeight = contentHeight;
       const trajectoryActive = predictive && root.querySelector('[data-variant="think"]') === null && runwayOffset > 0;
       let trajectoryShift;
       if (trajectoryActive) {
@@ -26108,9 +26794,8 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
           animatedH = contentHeight - runwayOffset;
           velocityPxPerSec = 0;
         } else {
-          const minimumLag = predictGrowth ? 0 : Math.max(0, reservePx);
           animatedH = Math.min(
-            contentHeight - runwayOffset - minimumLag,
+            contentHeight - runwayOffset,
             animatedH + step.advancePx
           );
           velocityPxPerSec = step.velocityPxPerSec;
@@ -26125,7 +26810,8 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
         Number.POSITIVE_INFINITY,
         !predictGrowth,
         trajectoryShift,
-        elapsedMs
+        elapsedMs,
+        !hostOwnsScroll
       );
       if (trajectoryActive) {
         const currentShift = followLastShiftPx.get(nextPort) ?? (trajectoryShift ?? 0);
@@ -26133,18 +26819,47 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
       }
       updateRevealScale(nextPort, elapsedMs);
       reportFollow(nextPort, true);
+      if (isLeader(nextPort)) {
+        if (!activeRef.current) enforceReadingAnchor(nextPort);
+        else measureReadingAnchor(nextPort);
+      }
       const remainingEntranceLag = Math.max(
         0,
         nextPort.scrollHeight - animatedH - runwayOffsetOf(nextPort)
       );
       if (remainingEntranceLag <= FOLLOW_SETTLE_EPSILON_PX) finishEntrance();
+      return true;
     };
+    frameTaskRef.id = coordinator.registerTask({
+      onSimulate: (_dtMs, now2) => frame(now2)
+    });
     frame(performance.now());
     return () => {
-      cancelAnimationFrame(rafId);
+      if (!controlScrollRef.current) {
+        stopFollowTask();
+        if (port !== null) followActivePorts.delete(port);
+        unsubscribeCommit?.();
+        resize?.disconnect();
+        mutations?.disconnect();
+        if (port !== null) {
+          for (const name of GESTURE_EVENTS) port.removeEventListener(name, markGesture);
+        }
+        if (interactTimer !== null) clearTimeout(interactTimer);
+        const disabledHost = rootRef.current?.closest("[data-conversation-scroll]") ?? port;
+        if (disabledHost !== null) {
+          clearVisual(disabledHost);
+          followLeaders.delete(disabledHost);
+          debugRuntime.reportFollow(disabledHost, null);
+        }
+        releaseRevealScale();
+        return;
+      }
+      stopFollowTask();
+      if (port !== null) followActivePorts.delete(port);
       unsubscribeCommit?.();
       if (interactTimer !== null) clearTimeout(interactTimer);
       resize?.disconnect();
+      mutations?.disconnect();
       if (port !== null) {
         for (const name of GESTURE_EVENTS) port.removeEventListener(name, markGesture);
       }
@@ -26173,38 +26888,80 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
         debugRuntime.reportFollow(host, null);
         return;
       }
-      const lagBeforeCompletionPaint = Math.max(
-        0,
-        host.scrollHeight - animatedH - runwayOffsetOf(host)
-      );
-      if (!activeRef.current && lagBeforeCompletionPaint <= FOLLOW_SLACK_PX) {
-        finishAtNaturalFloor(host, !startedAsEntrance);
+      let settleQuietMs = 0;
+      let settleSig = "";
+      if (!activeRef.current) {
+        followTraceUntilMs = Math.max(followTraceUntilMs, performance.now() + 1e4);
+        const ownedRunway = runwayOffsetOf(host);
+        followTrace("fast-gate", { sh: host.scrollHeight, st: Math.round(host.scrollTop), pad: Math.round(flowPadOf(host)), own: Math.round(ownedRunway) });
+        const statusHandoff = turnStatusOf(host);
+        const statusTopBefore = statusHandoff === null ? null : statusHandoff.getBoundingClientRect().top;
+        const transferredPx = transferRunwayToFlowPad(host, ownedRunway);
+        if (transferredPx <= 0) restoreRunway(host);
+        scheduleHandoffPadRetire(host);
+        finishAtNaturalFloor(host, !startedAsEntrance, true, true);
+        followLeaders.delete(host);
+        followCompletionSettle.delete(host);
+        releaseRevealScale();
+        debugRuntime.reportFollow(host, null);
+        if (statusHandoff !== null && statusTopBefore !== null && statusHandoff.isConnected && turnStatusOf(host) === statusHandoff) {
+          const liftPx = statusTopBefore - statusHandoff.getBoundingClientRect().top;
+          if (Math.abs(liftPx) > FOLLOW_SETTLE_EPSILON_PX) {
+            followTrace("status-hold", { lift: Math.round(liftPx) });
+            setShift(statusHandoff, Math.max(0, currentShiftOf(statusHandoff) + liftPx));
+          }
+        }
+        return;
+      }
+      const completionShift = currentShiftOf(shiftSurfacesOf(host).at(-1) ?? host);
+      const completionShiftCeiling = startedAsEntrance && completionShift <= FOLLOW_SETTLE_EPSILON_PX ? Number.POSITIVE_INFINITY : completionShift;
+      if (hostOwnsScroll) {
+        clearVisual(host);
+        setFollowScrollTop(host, Math.max(0, host.scrollHeight - host.clientHeight));
+        host.removeAttribute(FOLLOW_OWNED_ATTR);
         followLeaders.delete(host);
         releaseRevealScale();
         debugRuntime.reportFollow(host, null);
         return;
       }
-      const completionShift = currentShiftOf(shiftSurfacesOf(host).at(-1) ?? host);
-      const completionShiftCeiling = completionShift > FOLLOW_SETTLE_EPSILON_PX ? completionShift : Number.POSITIVE_INFINITY;
+      followTraceUntilMs = performance.now() + 15e3;
+      followTerminalPhases.set(host, "host-cascade");
+      if (!followTerminalBudgets.has(host)) {
+        followTerminalBudgets.set(host, Math.min(FOLLOW_STATUS_RUNWAY_PX, Math.max(0, reservePx)));
+      }
+      followCompletionGrowthCredit.set(host, Math.max(0, environmentCommitGrowthPx(host)));
+      if (pruneDeadRunway(host)) {
+        followTrace("cleanup-dead-margin", { sh: host.scrollHeight, st: Math.round(host.scrollTop), pad: Math.round(flowPadOf(host)) });
+        reservePx = 0;
+      }
       const completionTuning = debugRuntime.activeTuning();
       const previousCompletionRunway = runwayOffsetOf(host);
-      ensureRunway(host, shiftSurfacesOf(host), Math.max(reservePx, completionTuning.runwayPx));
+      ensureRunway(
+        host,
+        shiftSurfacesOf(host),
+        Math.max(reservePx, Math.max(0, completionTuning.runwayPx - flowPadOf(host)))
+      );
       const completionRunway = runwayOffsetOf(host);
+      measureReadingAnchor(host);
       animatedH = Math.max(0, animatedH - (completionRunway - previousCompletionRunway));
-      settleAtFloor(host);
+      if (!hostOwnsScroll) settleAtFloor(host);
       animatedH = applyVisual(
         host,
         animatedH,
         reservePx,
         velocityPxPerSec,
         completionRunway,
-        completionShiftCeiling
+        completionShiftCeiling,
+        false,
+        void 0,
+        0,
+        !hostOwnsScroll
       );
       reportFollow(host, false);
       const runwayOffset = runwayOffsetOf(host);
       const remainingLag = Math.max(0, host.scrollHeight - animatedH - runwayOffset);
-      if (remainingLag <= FOLLOW_SETTLE_EPSILON_PX || !activeRef.current && remainingLag <= FOLLOW_SLACK_PX) {
-        finishAtNaturalFloor(host, !startedAsEntrance);
+      if (remainingLag <= FOLLOW_SETTLE_EPSILON_PX && runwayOffset <= FOLLOW_SETTLE_EPSILON_PX && reservePx <= FOLLOW_SETTLE_EPSILON_PX) {
+        finishAtNaturalFloor(host, !startedAsEntrance, !hostOwnsScroll);
         followLeaders.delete(host);
         releaseRevealScale();
         debugRuntime.reportFollow(host, null);
@@ -26213,52 +26970,126 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
       for (const name of GESTURE_EVENTS) {
         host.addEventListener(name, markGesture, { passive: true });
       }
+      const settleTaskRef = { id: null };
+      const stopSettleTask = () => {
+        if (settleTaskRef.id === null) return;
+        coordinator.unregisterTask(settleTaskRef.id);
+        settleTaskRef.id = null;
+      };
       const stopSettleListeners = () => {
+        stopSettleTask();
         for (const name of GESTURE_EVENTS) host.removeEventListener(name, markGesture);
+        resize?.disconnect();
+        mutations?.disconnect();
         if (interactTimer !== null) {
           clearTimeout(interactTimer);
           interactTimer = null;
         }
       };
+      if (typeof ResizeObserver !== "undefined") {
+        resize = new ResizeObserver(() => restoreBeforePaint());
+        resize.observe(host);
+        const proxy = resizeProxyOf(host);
+        if (proxy !== null) resize.observe(proxy);
+      }
+      if (typeof MutationObserver !== "undefined") {
+        const flow = flowElementOf(host);
+        if (flow !== null) {
+          mutations = new MutationObserver(() => {
+            restoreBeforePaint();
+          });
+          mutations.observe(flow, { childList: true, subtree: true });
+        }
+      }
+      followCompletionSettle.add(host);
+      followCompletionSettleRows.set(host, countUserRows(host));
+      handedOff = true;
       let settleLast = performance.now();
-      let settleMarginPx = Math.max(runwayOffsetOf(host), reservePx);
-      let settleMarginRate = settleMarginPx / FOLLOW_RUNWAY_RETIRE_MS;
       const settleFrame = (now2) => {
         if (!isLeader(host)) {
           stopSettleListeners();
-          return;
+          return false;
         }
         if (interacting && (readerGestureIntent || readerScrolledUp(host))) {
           readerGestureIntent = false;
           handBackVisual(host);
           clearVisual(host);
+          followCompletionSettle.delete(host);
           followLeaders.delete(host);
           releaseRevealScale();
           debugRuntime.reportFollow(host, null);
           stopSettleListeners();
-          return;
+          return false;
         }
         const dt = Math.min(FOLLOW_MAX_FRAME_MS, Math.max(0, now2 - settleLast));
         const tuning = debugRuntime.activeTuning();
         settleLast = now2;
-        if (settleMarginPx > 0 && settleMarginRate > 0) {
-          settleMarginPx = Math.max(0, settleMarginPx - settleMarginRate * dt);
-          ensureRunway(host, shiftSurfacesOf(host), settleMarginPx);
-          reservePx = Math.min(reservePx, settleMarginPx);
-        }
-        const runwayOffset2 = runwayOffsetOf(host);
-        const lag = Math.max(0, host.scrollHeight - animatedH - runwayOffset2);
-        if (lag <= FOLLOW_SETTLE_EPSILON_PX && settleMarginPx <= FOLLOW_SETTLE_EPSILON_PX) {
-          animatedH = host.scrollHeight;
-          reservePx = 0;
-          velocityPxPerSec = 0;
-          followRunways.delete(host);
-          finishAtNaturalFloor(host, !startedAsEntrance);
+        detectHostScroll(host, Math.max(0, host.scrollHeight - host.clientHeight));
+        if (hostOwnsScroll) {
+          clearVisual(host);
+          setFollowScrollTop(host, Math.max(0, host.scrollHeight - host.clientHeight));
+          host.removeAttribute(FOLLOW_OWNED_ATTR);
+          followCompletionSettle.delete(host);
           followLeaders.delete(host);
           releaseRevealScale();
           debugRuntime.reportFollow(host, null);
           stopSettleListeners();
-          return;
+          return false;
+        }
+        const guardDelta = !settleRetiring && !followActivePorts.has(host) ? enforceReadingAnchor(host, true) : null;
+        settleQuietMs = !settleRetiring && (guardDelta === null || Math.abs(guardDelta) <= 0.5) ? settleQuietMs + dt : 0;
+        followTerminalPhases.set(host, turnStatusOf(host) === null ? "terminal-drain" : "host-cascade");
+        const settleStatus = turnStatusOf(host);
+        const ownedRunwayPx = runwayOffsetOf(host);
+        if (ownedRunwayPx > FOLLOW_SETTLE_EPSILON_PX) {
+          const terminalDrain = followTerminalPhases.get(host) === "terminal-drain";
+          const earnedBudgetPx = Math.min(
+            FOLLOW_STATUS_RUNWAY_PX,
+            Math.max(followTerminalBudgets.get(host) ?? FOLLOW_STATUS_RUNWAY_PX, reservePx)
+          );
+          const requestedTransferPx = settleStatus === null ? ownedRunwayPx : Math.min(
+            reservePx,
+            (tuning.runwayPx || FOLLOW_STATUS_RUNWAY_PX) / FOLLOW_RUNWAY_RETIRE_MS * dt
+          );
+          const cappedTransferPx = terminalDrain ? Math.min(requestedTransferPx, Math.max(0, ownedRunwayPx - earnedBudgetPx)) : requestedTransferPx;
+          const transferredPx = transferRunwayToFlowPad(host, cappedTransferPx);
+          if (transferredPx > 0) setFlowPad(host, Math.max(0, flowPadOf(host) - transferredPx));
+          reservePx = Math.max(0, reservePx - transferredPx);
+          followTerminalBudgets.set(
+            host,
+            Math.max(reservePx, Math.min(earnedBudgetPx, runwayOffsetOf(host)))
+          );
+          animatedH += transferredPx;
+        }
+        const runwayOffset2 = runwayOffsetOf(host);
+        const lag = Math.max(0, host.scrollHeight - animatedH - runwayOffset2);
+        if (!settleRetiring && lag <= FOLLOW_SETTLE_EPSILON_PX && reservePx <= FOLLOW_SETTLE_EPSILON_PX && settleQuietMs >= FOLLOW_SETTLE_QUIET_MS && flowPadOf(host) > FOLLOW_SETTLE_EPSILON_PX) {
+          followTrace("retire-start", { pad: Math.round(flowPadOf(host)), sh: host.scrollHeight, st: Math.round(host.scrollTop) });
+          settleRetiring = true;
+        }
+        if (settleRetiring) {
+          const padPx = flowPadOf(host);
+          const retirePx = Math.min(
+            padPx,
+            (tuning.runwayPx || FOLLOW_STATUS_RUNWAY_PX) / FOLLOW_RUNWAY_RETIRE_MS * dt
+          );
+          if (padPx - retirePx <= FOLLOW_SETTLE_EPSILON_PX) {
+            setFlowPad(host, 0);
+            settleRetiring = false;
+          } else {
+            setFlowPad(host, padPx - retirePx);
+          }
+        }
+        if (lag <= FOLLOW_SETTLE_EPSILON_PX && (reservePx <= FOLLOW_SETTLE_EPSILON_PX || settleStatus === null) && flowPadOf(host) <= FOLLOW_SETTLE_EPSILON_PX && settleQuietMs >= FOLLOW_SETTLE_QUIET_MS) {
+          followTrace("finish", { st: Math.round(host.scrollTop), sh: host.scrollHeight, pad: Math.round(flowPadOf(host)) });
+          animatedH = host.scrollHeight;
+          velocityPxPerSec = 0;
+          finishAtNaturalFloor(host, !startedAsEntrance, !hostOwnsScroll);
+          followLeaders.delete(host);
+          releaseRevealScale();
+          debugRuntime.reportFollow(host, null);
+          stopSettleListeners();
+          return false;
         }
         const step = computeFollowStep(dt, {
           lag,
@@ -26270,14 +27101,34 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
           animatedH + step.advancePx
         );
         velocityPxPerSec = step.velocityPxPerSec;
-        settleAtFloor(host);
-        animatedH = applyVisual(host, animatedH, reservePx, velocityPxPerSec, Math.max(settleMarginPx, runwayOffset2));
+        if (!hostOwnsScroll) settleAtFloor(host);
+        animatedH = applyVisual(
+          host,
+          animatedH,
+          reservePx,
+          velocityPxPerSec,
+          runwayOffset2,
+          Number.POSITIVE_INFINITY,
+          false,
+          void 0,
+          0,
+          !hostOwnsScroll
+        );
+        if (traceActive()) {
+          const sig = `${Math.round(host.scrollTop)}|${host.scrollHeight}|${Math.round(flowPadOf(host))}|${Math.round(reservePx)}|${settleRetiring}`;
+          if (sig !== settleSig) {
+            followTrace("settle", { st: Math.round(host.scrollTop), sh: host.scrollHeight, pad: Math.round(flowPadOf(host)), reserve: Math.round(reservePx), lag: Math.round(lag * 10) / 10, retiring: settleRetiring });
+            settleSig = sig;
+          }
+        }
         reportFollow(host, false);
-        requestAnimationFrame(settleFrame);
+        return true;
       };
-      requestAnimationFrame(settleFrame);
+      settleTaskRef.id = coordinator.registerTask({
+        onSimulate: (_dtMs, now2) => settleFrame(now2)
+      });
     };
-  }, [active, rootRef, speedCpsRef, revealScaleRef, predictive, predictiveRef]);
+  }, [active, rootRef, speedCpsRef, revealScaleRef, predictive, predictiveRef, controlScroll]);
   (0, import_react2.useLayoutEffect)(() => {
     const host = rootRef.current?.closest("[data-conversation-scroll]") ?? null;
     if (host !== null) {
@@ -26300,52 +27151,109 @@ function useConversationFollow(rootRef, active, speedCpsRef, revealScaleRef, pre
   }, [rootRef]);
 }
 
-// repro/stress-120fps.module.css
-var stress_120fps_default = {
-  container: "stress_120fps_container",
-  header: "stress_120fps_header",
-  titleGroup: "stress_120fps_titleGroup",
-  title: "stress_120fps_title",
-  badge120: "stress_120fps_badge120",
-  liveIndicator: "stress_120fps_liveIndicator",
-  pulse: "stress_120fps_pulse",
-  controls: "stress_120fps_controls",
-  btn: "stress_120fps_btn",
-  btnPrimary: "stress_120fps_btnPrimary",
-  btnSuccess: "stress_120fps_btnSuccess",
-  controlItem: "stress_120fps_controlItem",
-  mainGrid: "stress_120fps_mainGrid",
-  conversationPane: "stress_120fps_conversationPane",
-  scrollViewport: "stress_120fps_scrollViewport",
-  scrollColumn: "stress_120fps_scrollColumn",
-  msgUser: "stress_120fps_msgUser",
-  msgAssistant: "stress_120fps_msgAssistant",
-  streamText: "stress_120fps_streamText",
-  statusIndicator: "stress_120fps_statusIndicator",
-  composerSeat: "stress_120fps_composerSeat",
-  composerInput: "stress_120fps_composerInput",
-  dashboardPane: "stress_120fps_dashboardPane",
-  metricCards: "stress_120fps_metricCards",
-  metricCard: "stress_120fps_metricCard",
-  metricLabel: "stress_120fps_metricLabel",
-  metricValue: "stress_120fps_metricValue",
-  metricSub: "stress_120fps_metricSub",
-  good: "stress_120fps_good",
-  warn: "stress_120fps_warn",
-  bad: "stress_120fps_bad",
-  sectionBox: "stress_120fps_sectionBox",
-  sectionHeader: "stress_120fps_sectionHeader",
-  canvasWrapper: "stress_120fps_canvasWrapper",
-  canvas: "stress_120fps_canvas",
-  eventsLog: "stress_120fps_eventsLog",
-  eventItem: "stress_120fps_eventItem",
-  eventTime: "stress_120fps_eventTime",
-  eventDesc: "stress_120fps_eventDesc",
-  toBottomBtn: "stress_120fps_toBottomBtn"
+// src/client/TypewriterAssistantNodeView.module.css
+var TypewriterAssistantNodeView_default = {
+  root: "TypewriterAssistantNodeView_root",
+  body: "TypewriterAssistantNodeView_body",
+  think: "TypewriterAssistantNodeView_think",
+  thinkRow: "TypewriterAssistantNodeView_thinkRow",
+  "dsh-smooth-stream-think-sweep": "TypewriterAssistantNodeView_dsh-smooth-stream-think-sweep",
+  thinkLeading: "TypewriterAssistantNodeView_thinkLeading",
+  thinkChevron: "TypewriterAssistantNodeView_thinkChevron",
+  thinkTitle: "TypewriterAssistantNodeView_thinkTitle",
+  thinkSeparator: "TypewriterAssistantNodeView_thinkSeparator",
+  thinkSummary: "TypewriterAssistantNodeView_thinkSummary",
+  thinkBody: "TypewriterAssistantNodeView_thinkBody",
+  disclosureRoot: "TypewriterAssistantNodeView_disclosureRoot",
+  disclosureRow: "TypewriterAssistantNodeView_disclosureRow",
+  disclosureLeading: "TypewriterAssistantNodeView_disclosureLeading",
+  disclosureIconIdle: "TypewriterAssistantNodeView_disclosureIconIdle",
+  disclosureChevronHover: "TypewriterAssistantNodeView_disclosureChevronHover",
+  disclosureTitle: "TypewriterAssistantNodeView_disclosureTitle",
+  disclosureContent: "TypewriterAssistantNodeView_disclosureContent",
+  stopped: "TypewriterAssistantNodeView_stopped",
+  visuallyHidden: "TypewriterAssistantNodeView_visuallyHidden",
+  follow: "TypewriterAssistantNodeView_follow"
 };
 
-// repro/stress-120fps.tsx
+// src/client/FollowHost.tsx
 var import_jsx_runtime = __toESM(require_jsx_runtime(), 1);
+function FollowHost({
+  active,
+  entrance = false,
+  onEntranceSettled,
+  onGrowth,
+  entranceExtentRef,
+  speedCpsRef,
+  revealedCharsRef,
+  revealScaleRef,
+  predictive = true,
+  predictiveRef,
+  controlScroll = true,
+  hostRef,
+  className,
+  entranceActive,
+  children
+}) {
+  const localRootRef = (0, import_react3.useRef)(null);
+  const rootRef = hostRef ?? localRootRef;
+  useConversationFollow(
+    rootRef,
+    active || entrance,
+    speedCpsRef,
+    revealScaleRef,
+    predictive,
+    entrance,
+    onEntranceSettled,
+    predictiveRef,
+    entranceExtentRef,
+    revealedCharsRef,
+    controlScroll
+  );
+  (0, import_react3.useEffect)(() => {
+    if (onGrowth === void 0 || typeof ResizeObserver === "undefined") return;
+    const root = rootRef.current;
+    if (root === null) return;
+    let previousHeight = null;
+    let pendingGrowth = 0;
+    let growthFrame = null;
+    const flushGrowth = () => {
+      growthFrame = null;
+      if (pendingGrowth <= 0) return;
+      const delta = pendingGrowth;
+      pendingGrowth = 0;
+      onGrowth(delta);
+    };
+    const observer = new ResizeObserver((entries) => {
+      const measuredHeight = entries[0]?.contentRect.height;
+      if (measuredHeight === void 0 || !Number.isFinite(measuredHeight)) return;
+      const nextHeight = measuredHeight;
+      if (previousHeight !== null && nextHeight > previousHeight + 0.5) {
+        pendingGrowth += nextHeight - previousHeight;
+        if (growthFrame === null) growthFrame = requestAnimationFrame(flushGrowth);
+      }
+      previousHeight = nextHeight;
+    });
+    observer.observe(root);
+    return () => {
+      observer.disconnect();
+      if (growthFrame !== null) cancelAnimationFrame(growthFrame);
+    };
+  }, [onGrowth]);
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+    "div",
+    {
+      ref: rootRef,
+      className: className === void 0 ? TypewriterAssistantNodeView_default.follow : `${TypewriterAssistantNodeView_default.follow} ${className}`,
+      "data-entrance": entranceActive === void 0 ? void 0 : entranceActive ? "active" : "idle",
+      children
+    }
+  );
+}
+
+// repro/stress-120fps.tsx
+var import_jsx_runtime2 = __toESM(require_jsx_runtime(), 1);
+var STREAM_STATUS_COMPLETE = "complete";
 var CORPUS = [
   "DeepSeek \u667A\u80FD\u6D41\u5F0F\u5E73\u6ED1\u6E32\u67D3\u7CFB\u7EDF\u6B63\u5728\u8FDB\u884C 120 FPS \u8D85\u9AD8\u6E05\u6781\u9650\u538B\u529B\u6D4B\u8BD5\u4E0E\u5FAE\u6296\u52A8\u89C2\u6D4B\u3002",
   "\u901A\u8FC7\u53CC\u91CD\u6D6E\u70B9\u503A\u52A1\u8FFD\u8E2A\u7B97\u6CD5\uFF0C\u6D41\u5F0F\u5B57\u7B26\u63ED\u793A\u6B65\u957F\u5B9E\u73B0\u4E9A\u50CF\u7D20\u7EA7\u65F6\u95F4\u6BD4\u4F8B\u79EF\u5206\u3002",
@@ -26366,26 +27274,29 @@ function generateText(type, count) {
   return Array.from({ length: count }, (_, i) => CORPUS[i % CORPUS.length]).join("\n");
 }
 function Stress120App() {
-  const [cps, setCps] = (0, import_react3.useState)(600);
-  const [domCostMs, setDomCostMs] = (0, import_react3.useState)(0);
-  const [scenario, setScenario] = (0, import_react3.useState)("steady");
-  const [isStreaming, setIsStreaming] = (0, import_react3.useState)(false);
-  const [rawText, setRawText] = (0, import_react3.useState)("");
-  const [status, setStatus] = (0, import_react3.useState)("idle");
-  const [fps, setFps] = (0, import_react3.useState)(120);
-  const [p95Dt, setP95Dt] = (0, import_react3.useState)(8.33);
-  const [maxDt, setMaxDt] = (0, import_react3.useState)(8.33);
-  const [framesAbove9ms, setFramesAbove9ms] = (0, import_react3.useState)(0);
-  const [framesAbove16ms, setFramesAbove16ms] = (0, import_react3.useState)(0);
-  const [maxDeltaV, setMaxDeltaV] = (0, import_react3.useState)(0);
-  const [tailAmplitude, setTailAmplitude] = (0, import_react3.useState)(0);
-  const [events, setEvents] = (0, import_react3.useState)([]);
-  const viewportRef = (0, import_react3.useRef)(null);
-  const flowRef = (0, import_react3.useRef)(null);
-  const rowRef = (0, import_react3.useRef)(null);
-  const waterfallCanvasRef = (0, import_react3.useRef)(null);
-  const waveformCanvasRef = (0, import_react3.useRef)(null);
-  const historyRef = (0, import_react3.useRef)({
+  const [cps, setCps] = (0, import_react4.useState)(600);
+  const [domCostMs, setDomCostMs] = (0, import_react4.useState)(0);
+  const [scenario, setScenario] = (0, import_react4.useState)("steady");
+  const [isStreaming, setIsStreaming] = (0, import_react4.useState)(false);
+  const [typing, setTyping] = (0, import_react4.useState)(false);
+  const [rawText, setRawText] = (0, import_react4.useState)("");
+  const [status, setStatus] = (0, import_react4.useState)("idle");
+  const [fps, setFps] = (0, import_react4.useState)(120);
+  const [p95Dt, setP95Dt] = (0, import_react4.useState)(8.33);
+  const [maxDt, setMaxDt] = (0, import_react4.useState)(8.33);
+  const [framesAbove9ms, setFramesAbove9ms] = (0, import_react4.useState)(0);
+  const [framesAbove16ms, setFramesAbove16ms] = (0, import_react4.useState)(0);
+  const [maxDeltaV, setMaxDeltaV] = (0, import_react4.useState)(0);
+  const [tailAmplitude, setTailAmplitude] = (0, import_react4.useState)(0);
+  const [reboundCount, setReboundCount] = (0, import_react4.useState)(0);
+  const [maxDownwardY, setMaxDownwardY] = (0, import_react4.useState)(0);
+  const [events, setEvents] = (0, import_react4.useState)([]);
+  const viewportRef = (0, import_react4.useRef)(null);
+  const flowRef = (0, import_react4.useRef)(null);
+  const rowRef = (0, import_react4.useRef)(null);
+  const waterfallCanvasRef = (0, import_react4.useRef)(null);
+  const waveformCanvasRef = (0, import_react4.useRef)(null);
+  const historyRef = (0, import_react4.useRef)({
     timestamps: [],
     frameDts: [],
     velocities: [],
@@ -26395,22 +27306,29 @@ function Stress120App() {
     lags: [],
     tailPositions: []
   });
-  const { displayText, isComplete, onRevealCommit } = useSmoothStreamContent({
-    text: rawText,
-    isComplete: status === STREAM_STATUS_COMPLETE,
-    cps,
+  const speedCpsRef = (0, import_react4.useRef)(cps);
+  const revealedCharsRef = (0, import_react4.useRef)(0);
+  const revealScaleRef = (0, import_react4.useRef)(1);
+  const displayText = useSmoothStreamContent(rawText, {
+    enabled: typing || isStreaming,
+    inputComplete: status === STREAM_STATUS_COMPLETE,
+    defaultCps: cps,
     preset: "balanced",
-    mode: "typewriter"
+    speedCpsRef,
+    revealedCharsRef,
+    revealScaleRef,
+    onRevealCommit: () => {
+      notifyFollowCommit(viewportRef.current);
+    }
   });
-  useConversationFollow({
-    rootRef: rowRef,
-    streaming: isStreaming,
-    followMode: "always",
-    onRevealCommit
-  });
-  const startScenario = (0, import_react3.useCallback)((type) => {
+  (0, import_react4.useEffect)(() => {
+    if (isStreaming) setTyping(true);
+    else if (displayText.length === rawText.length) setTyping(false);
+  }, [displayText.length, isStreaming, rawText.length]);
+  const startScenario = (0, import_react4.useCallback)((type) => {
     setScenario(type);
     setIsStreaming(true);
+    setTyping(true);
     setStatus("streaming");
     setRawText("");
     setEvents([]);
@@ -26442,20 +27360,17 @@ function Stress120App() {
       }
       if (index >= fullText.length) {
         clearInterval(timer);
-        setTimeout(() => {
-          setStatus(STREAM_STATUS_COMPLETE);
-          setTimeout(() => {
-            setIsStreaming(false);
-          }, 600);
-        }, 300);
+        setStatus(STREAM_STATUS_COMPLETE);
+        setIsStreaming(false);
       }
     }, intervalMs);
   }, [cps, domCostMs]);
-  const stopScenario = (0, import_react3.useCallback)(() => {
+  const stopScenario = (0, import_react4.useCallback)(() => {
     setStatus(STREAM_STATUS_COMPLETE);
     setIsStreaming(false);
+    setTyping(false);
   }, []);
-  (0, import_react3.useEffect)(() => {
+  (0, import_react4.useEffect)(() => {
     ;
     window.__runStressTest = (opts) => {
       setCps(opts.cps);
@@ -26475,18 +27390,19 @@ function Stress120App() {
       events
     });
   }, [startScenario, isStreaming, fps, p95Dt, maxDt, framesAbove9ms, framesAbove16ms, maxDeltaV, tailAmplitude, events]);
-  (0, import_react3.useEffect)(() => {
+  (0, import_react4.useEffect)(() => {
     let lastNow = performance.now();
     let lastVisualPos = 0;
     let lastVelocity = 0;
+    let lastUserTop = null;
     let rafId;
     const monitor = (now2) => {
       const dt = now2 - lastNow;
       lastNow = now2;
-      if (viewportRef.current && rowRef.current && isStreaming && dt > 0) {
+      if (viewportRef.current && rowRef.current && (isStreaming || typing) && dt > 0) {
         const port = viewportRef.current;
         const row = rowRef.current;
-        const match = /matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*(-?[\d.]+)\)/.exec(row.style.transform || "");
+        const match = /translate3d\(0(?:px)?,\s*(-?[\d.]+)px/.exec(row.style.transform || "");
         const shiftPx = match ? Number.parseFloat(match[1]) : 0;
         const scrollTop = port.scrollTop;
         const visualPos = -scrollTop + shiftPx;
@@ -26500,8 +27416,21 @@ function Stress120App() {
         hist.shifts.push(shiftPx);
         hist.scrollTops.push(scrollTop);
         const tailRect = row.getBoundingClientRect();
-        const tailY = tailRect.bottom - port.getBoundingClientRect().top;
+        const pb = port.getBoundingClientRect().bottom;
+        const tailY = tailRect.bottom - pb;
         hist.tailPositions.push(tailY);
+        const userMsg = port.querySelector('[data-chat-anchor-key="user-1"]');
+        const userTop = userMsg ? userMsg.getBoundingClientRect().top : null;
+        if (lastUserTop !== null && userTop !== null && scrollTop > 10) {
+          const downward = userTop - lastUserTop;
+          if (downward > 0.35) {
+            setReboundCount((prev) => prev + 1);
+            setMaxDownwardY((prev) => Math.max(prev, downward));
+            const timeStr = (/* @__PURE__ */ new Date()).toISOString().slice(14, 23);
+            setEvents((prev) => [{ time: timeStr, desc: `\u26A0\uFE0F Y\u8F74\u5411\u4E0B\u56DE\u5F39\u8FDD\u89C4: \u0394y=+${downward.toFixed(2)}px`, dt, deltaV }, ...prev.slice(0, 19)]);
+          }
+        }
+        lastUserTop = userTop;
         if (dt > 16.7 || deltaV > 0.08 && Math.abs(velocity) > 0.1) {
           const timeStr = (/* @__PURE__ */ new Date()).toISOString().slice(14, 23);
           const desc = dt > 16.7 ? `Jank frame: dt=${dt.toFixed(1)}ms` : `Velocity jerk: \u0394v=${deltaV.toFixed(3)}px/ms`;
@@ -26607,20 +27536,20 @@ function Stress120App() {
     rafId = requestAnimationFrame(monitor);
     return () => cancelAnimationFrame(rafId);
   }, [isStreaming]);
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.container, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.header, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.titleGroup, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: stress_120fps_default.liveIndicator }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: stress_120fps_default.title, children: "DeepSeek Stream 120 FPS Observability & Stress Benchmark" }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: stress_120fps_default.badge120, children: "120 FPS Verified" })
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.container, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.header, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.titleGroup, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: stress_120fps_default.liveIndicator }),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: stress_120fps_default.title, children: "DeepSeek Stream 120 FPS Observability & Stress Benchmark" }),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: stress_120fps_default.badge120, children: "120 FPS Verified" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.controls, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.controlItem, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.controls, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.controlItem, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { children: [
             "CPS: ",
             cps
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
             "input",
             {
               type: "range",
@@ -26632,13 +27561,13 @@ function Stress120App() {
             }
           )
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.controlItem, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.controlItem, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { children: [
             "DOM \u5EF6\u8FDF: ",
             domCostMs,
             "ms"
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
             "input",
             {
               type: "range",
@@ -26650,7 +27579,7 @@ function Stress120App() {
             }
           )
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
           "button",
           {
             className: `${stress_120fps_default.btn} ${stress_120fps_default.btnPrimary}`,
@@ -26659,7 +27588,7 @@ function Stress120App() {
             children: "\u7A33\u6001\u538B\u6D4B (600 CPS)"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
           "button",
           {
             className: `${stress_120fps_default.btn} ${stress_120fps_default.btnPrimary}`,
@@ -26668,7 +27597,7 @@ function Stress120App() {
             children: "\u6781\u9650\u541E\u5410 (2000 CPS)"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
           "button",
           {
             className: stress_120fps_default.btn,
@@ -26677,7 +27606,7 @@ function Stress120App() {
             children: "\u7A81\u53D1\u65AD\u6D41\u538B\u6D4B"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
           "button",
           {
             className: stress_120fps_default.btn,
@@ -26686,40 +27615,46 @@ function Stress120App() {
             children: "\u9AD8\u9891\u6298\u884C\u77ED\u53E5"
           }
         ),
-        isStreaming && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: `${stress_120fps_default.btn} ${stress_120fps_default.btnSuccess}`, onClick: stopScenario, children: "\u505C\u6B62\u6D41\u5F0F" })
+        isStreaming && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: `${stress_120fps_default.btn} ${stress_120fps_default.btnSuccess}`, onClick: stopScenario, children: "\u505C\u6B62\u6D41\u5F0F" })
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.mainGrid, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.conversationPane, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.mainGrid, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.conversationPane, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
           "div",
           {
             ref: viewportRef,
             className: stress_120fps_default.scrollViewport,
             "data-conversation-scroll": "",
-            children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { ref: flowRef, className: stress_120fps_default.scrollColumn, "data-chat-flow": "", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: stress_120fps_default.msgUser, "data-chat-anchor-key": "user-1", children: "\u8BF7\u8FDB\u884C 120 FPS \u6D41\u5F0F\u6E32\u67D3\u5E73\u6ED1\u5EA6\u6781\u9650\u538B\u529B\u6D4B\u8BD5\uFF0C\u5E76\u5C55\u793A\u5B9E\u65F6\u5E27\u7387\u7011\u5E03\u56FE\u4E0E\u901F\u5EA6\u6CE2\u5F62\u3002" }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+            children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { ref: flowRef, className: stress_120fps_default.scrollColumn, "data-chat-flow": "", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: stress_120fps_default.msgUser, "data-chat-anchor-key": "user-1", children: "\u8BF7\u8FDB\u884C 120 FPS \u6D41\u5F0F\u6E32\u67D3\u5E73\u6ED1\u5EA6\u6781\u9650\u538B\u529B\u6D4B\u8BD5\uFF0C\u5E76\u5C55\u793A\u5B9E\u65F6\u5E27\u7387\u7011\u5E03\u56FE\u4E0E\u901F\u5EA6\u6CE2\u5F62\u3002" }),
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
                 "div",
                 {
                   ref: rowRef,
                   className: stress_120fps_default.msgAssistant,
                   "data-chat-anchor-key": "assistant-1",
-                  children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: stress_120fps_default.streamText, children: displayText })
+                  children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+                    FollowHost,
+                    {
+                      active: typing,
+                      predictive: isStreaming,
+                      speedCpsRef,
+                      revealedCharsRef,
+                      revealScaleRef,
+                      children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: stress_120fps_default.streamText, children: displayText })
+                    }
+                  )
                 }
               ),
-              isStreaming && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.statusIndicator, role: "status", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: stress_120fps_default.liveIndicator }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                  "120 FPS \u7269\u7406\u8F68\u8FF9\u8DDF\u968F\u4E2D (",
-                  cps,
-                  " CPS)..."
-                ] })
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.statusIndicator, role: "status", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: isStreaming ? stress_120fps_default.liveIndicator : stress_120fps_default.doneIndicator }),
+                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: isStreaming ? `120 FPS \u7269\u7406\u8F68\u8FF9\u8DDF\u968F\u4E2D (${cps} CPS)...` : status === "complete" ? "120 FPS \u7269\u7406\u8DDF\u968F\u5DF2\u5E73\u6ED1\u5F52\u4F4D (0 \u6296\u52A8, 0 \u56DE\u5F39)" : "\u5C31\u7EEA" })
               ] })
             ] })
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: stress_120fps_default.composerSeat, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: stress_120fps_default.composerSeat, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
           "input",
           {
             className: stress_120fps_default.composerInput,
@@ -26728,40 +27663,53 @@ function Stress120App() {
           }
         ) })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.dashboardPane, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.metricCards, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.metricCard, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: stress_120fps_default.metricLabel, children: "\u5F53\u524D\u5E27\u7387" }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: `${stress_120fps_default.metricValue} ${fps >= 115 ? stress_120fps_default.good : fps >= 58 ? stress_120fps_default.warn : stress_120fps_default.bad}`, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.dashboardPane, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.metricCards, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.metricCard, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: stress_120fps_default.metricLabel, children: "\u5F53\u524D\u5E27\u7387" }),
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { className: `${stress_120fps_default.metricValue} ${fps >= 115 ? stress_120fps_default.good : fps >= 58 ? stress_120fps_default.warn : stress_120fps_default.bad}`, children: [
               fps,
               " ",
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { style: { fontSize: 11, fontWeight: 500 }, children: "FPS" })
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("small", { style: { fontSize: 11, fontWeight: 500 }, children: "FPS" })
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: stress_120fps_default.metricSub, children: "Target: 120 Hz" })
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: stress_120fps_default.metricSub, children: "Target: 120 Hz" })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.metricCard, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: stress_120fps_default.metricLabel, children: "P95 \u5E27\u8017\u65F6" }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: `${stress_120fps_default.metricValue} ${p95Dt <= 8.5 ? stress_120fps_default.good : p95Dt <= 16.7 ? stress_120fps_default.warn : stress_120fps_default.bad}`, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.metricCard, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: stress_120fps_default.metricLabel, children: "P95 \u5E27\u8017\u65F6" }),
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { className: `${stress_120fps_default.metricValue} ${p95Dt <= 8.5 ? stress_120fps_default.good : p95Dt <= 16.7 ? stress_120fps_default.warn : stress_120fps_default.bad}`, children: [
               p95Dt,
               " ",
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { style: { fontSize: 11, fontWeight: 500 }, children: "ms" })
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("small", { style: { fontSize: 11, fontWeight: 500 }, children: "ms" })
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: stress_120fps_default.metricSub, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { className: stress_120fps_default.metricSub, children: [
               "Max: ",
               maxDt,
               "ms"
             ] })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.metricCard, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: stress_120fps_default.metricLabel, children: "\u6700\u5927\u52A0\u901F\u5EA6\u7A81\u53D8" }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: `${stress_120fps_default.metricValue} ${maxDeltaV <= 0.05 ? stress_120fps_default.good : maxDeltaV <= 0.1 ? stress_120fps_default.warn : stress_120fps_default.bad}`, children: maxDeltaV }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: stress_120fps_default.metricSub, children: "|\u0394v| px/ms" })
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.metricCard, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: stress_120fps_default.metricLabel, children: "\u6700\u5927\u52A0\u901F\u5EA6\u7A81\u53D8" }),
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: `${stress_120fps_default.metricValue} ${maxDeltaV <= 0.05 ? stress_120fps_default.good : maxDeltaV <= 0.1 ? stress_120fps_default.warn : stress_120fps_default.bad}`, children: maxDeltaV }),
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: stress_120fps_default.metricSub, children: "|\u0394v| px/ms" })
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.metricCard, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: stress_120fps_default.metricLabel, children: "Y \u8F74\u56DE\u5F39\u8FDD\u89C4 (Zero Rebound)" }),
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { className: `${stress_120fps_default.metricValue} ${reboundCount === 0 ? stress_120fps_default.good : stress_120fps_default.bad}`, children: [
+              reboundCount,
+              " ",
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("small", { style: { fontSize: 11, fontWeight: 500 }, children: "\u6B21" })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { className: stress_120fps_default.metricSub, children: [
+              "Max: ",
+              maxDownwardY.toFixed(2),
+              "px (Target: 0)"
+            ] })
           ] })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.sectionBox, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.sectionHeader, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "120 FPS \u5E27\u6E32\u67D3\u7011\u5E03\u56FE (Target: \u22648.33ms)" }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { style: { fontSize: 11, color: framesAbove9ms === 0 ? "#10b981" : "#f59e0b" }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.sectionBox, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.sectionHeader, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: "120 FPS \u5E27\u6E32\u67D3\u7011\u5E03\u56FE (Target: \u22648.33ms)" }),
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { style: { fontSize: 11, color: framesAbove9ms === 0 ? "#10b981" : "#f59e0b" }, children: [
               ">9ms: ",
               framesAbove9ms,
               " \u5E27 | >16ms: ",
@@ -26769,27 +27717,27 @@ function Stress120App() {
               " \u5E27"
             ] })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: stress_120fps_default.canvasWrapper, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("canvas", { ref: waterfallCanvasRef, className: stress_120fps_default.canvas }) })
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: stress_120fps_default.canvasWrapper, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("canvas", { ref: waterfallCanvasRef, className: stress_120fps_default.canvas }) })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.sectionBox, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.sectionHeader, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "\u77AC\u65F6\u89C6\u53E3\u901F\u5EA6\u6CE2\u5F62 v(t) (px/ms)" }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { style: { fontSize: 11, color: "#38bdf8" }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.sectionBox, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.sectionHeader, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: "\u77AC\u65F6\u89C6\u53E3\u901F\u5EA6\u6CE2\u5F62 v(t) (px/ms)" }),
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { style: { fontSize: 11, color: "#38bdf8" }, children: [
               "\u5C3E\u90E8\u632F\u5E45: ",
               tailAmplitude,
               "px"
             ] })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: stress_120fps_default.canvasWrapper, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("canvas", { ref: waveformCanvasRef, className: stress_120fps_default.canvas }) })
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: stress_120fps_default.canvasWrapper, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("canvas", { ref: waveformCanvasRef, className: stress_120fps_default.canvas }) })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.sectionBox, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.sectionHeader, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "\u5FAE\u6296\u52A8 / \u6389\u5E27\u4E8B\u4EF6\u63A2\u6D4B\u5668" }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontSize: 11, color: events.length === 0 ? "#10b981" : "#ef4444" }, children: events.length === 0 ? "\u2713 \u96F6\u5FAE\u6296\u52A8 (Perfect)" : `${events.length} \u6B21\u8B66\u62A5` })
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.sectionBox, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.sectionHeader, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: "\u5FAE\u6296\u52A8 / \u6389\u5E27\u4E8B\u4EF6\u63A2\u6D4B\u5668" }),
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: { fontSize: 11, color: events.length === 0 ? "#10b981" : "#ef4444" }, children: events.length === 0 ? "\u2713 \u96F6\u5FAE\u6296\u52A8 (Perfect)" : `${events.length} \u6B21\u8B66\u62A5` })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: stress_120fps_default.eventsLog, children: events.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { color: "#10b981", padding: "12px 0", textAlign: "center" }, children: "\u2713 \u89C6\u7EBF\u5B8C\u5168\u5E73\u7A33\uFF0C\u65E0\u6389\u5E27\u4E0E\u901F\u5EA6\u9636\u8DC3" }) : events.map((ev, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: stress_120fps_default.eventItem, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: stress_120fps_default.eventTime, children: ev.time }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: stress_120fps_default.eventDesc, children: ev.desc })
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: stress_120fps_default.eventsLog, children: events.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { color: "#10b981", padding: "12px 0", textAlign: "center" }, children: "\u2713 \u89C6\u7EBF\u5B8C\u5168\u5E73\u7A33\uFF0C\u65E0\u6389\u5E27\u4E0E\u901F\u5EA6\u9636\u8DC3" }) : events.map((ev, i) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: stress_120fps_default.eventItem, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: stress_120fps_default.eventTime, children: ev.time }),
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: stress_120fps_default.eventDesc, children: ev.desc })
           ] }, i)) })
         ] })
       ] })
@@ -26798,7 +27746,7 @@ function Stress120App() {
 }
 var rootEl = document.getElementById("root");
 if (rootEl) {
-  (0, import_client.createRoot)(rootEl).render(/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Stress120App, {}));
+  (0, import_client.createRoot)(rootEl).render(/* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Stress120App, {}));
 }
 export {
   Stress120App

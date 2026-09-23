@@ -2,19 +2,25 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import {
-  IconCloseOutline16,
-  IconCodeOutline16,
-  IconCopyOutline16,
-  IconQuestionOutline14,
-  IconRefreshOutline16,
-  Tooltip,
-  writeClipboard,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { Tooltip, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconClose, IconCode, IconCopy, IconQuestion, IconRefreshSmall } from './harnessIcons.ts'
 import type { StreamDebugTuning } from '../settings.ts'
-import type { DebugPanelFace, DebugRuntimeState } from './debugRuntime.ts'
+import type { DebugPanelFace, DebugRuntimeState, FollowTerminalPhase } from './debugRuntime.ts'
 import type { NS } from './locales.ts'
 import css from './DebugPanel.module.css'
+
+/**
+ * Locale key per terminal-follow phase. `terminal-drain` and `host-cascade`
+ * are the two that must never be confused: the first is the engine finishing
+ * ordinary text, the second is a hostile host commit that needs temporary
+ * credit.
+ */
+const PHASE_LABEL: Record<FollowTerminalPhase, Parameters<PropsLocale<typeof NS>['t']>[0]> = {
+  'live': 'debugPhaseLive',
+  'terminal-drain': 'debugPhaseDrain',
+  'host-cascade': 'debugPhaseCascade',
+  'natural': 'debugPhaseNatural',
+}
 
 export type DebugPanelProps =
   PropsRuntime<'conversation.session.header.utilities'>
@@ -93,7 +99,7 @@ function TuningField({
               aria-label={label}
               title={t(control.tip)}
             >
-              <IconQuestionOutline14 />
+              <IconQuestion />
             </button>
           </Tooltip>
         </span>
@@ -165,7 +171,7 @@ export function DebugPanel(props: DebugPanelProps) {
         <span className={css.state}>{t(live ? 'debugLive' : 'debugIdle')}</span>
         {state.dirty ? <span className={css.unsaved}>{t('debugUnsaved')}</span> : null}
         <button className={css.iconButton} type="button" title={t('debugCopy')} aria-label={t('debugCopy')} onClick={() => { void copyDiagnostics() }}>
-          <IconCopyOutline16 />
+          <IconCopy />
         </button>
         <button
           className={css.iconButton}
@@ -179,7 +185,7 @@ export function DebugPanel(props: DebugPanelProps) {
             props.save()
           }}
         >
-          <IconCloseOutline16 />
+          <IconClose />
         </button>
         <span className={css.visuallyHidden} aria-live="polite">{copied ? t('debugCopied') : ''}</span>
       </header>
@@ -199,6 +205,19 @@ export function DebugPanel(props: DebugPanelProps) {
             <Metric label={t('debugVelocity')} value={`${fixed(metrics.followVelocityPxPerSec, 0)} px/s`} />
             <Metric label={t('debugReserve')} value={`${fixed(metrics.followReservePx)} px`} />
             <Metric label={t('debugCapacity')} value={`${fixed(metrics.followCapacityPx)} px`} />
+            <Metric
+              label={t('debugTerminalPhase')}
+              value={t(PHASE_LABEL[metrics.followTerminalPhase])}
+              tone={metrics.followTerminalPhase === 'host-cascade' ? 'warn' : undefined}
+            />
+            <Metric label={t('debugOwnedRunway')} value={`${fixed(metrics.followRunwayPx)} px`} />
+            <Metric label={t('debugTerminalBudget')} value={`${fixed(metrics.followTerminalBudgetPx)} px`} />
+            <Metric label={t('debugBaselineShift')} value={`${fixed(metrics.followBaselineShiftPx)} px`} />
+            <Metric
+              label={t('debugAnchorDelta')}
+              value={metrics.followAnchorDeltaPx === null ? '—' : `${fixed(metrics.followAnchorDeltaPx)} px`}
+              tone={(metrics.followAnchorDeltaPx ?? 0) > 0.35 ? 'warn' : undefined}
+            />
             <Metric label={t('debugAppliedScale')} value={`${fixed(metrics.followRevealScale, 2)}x`} />
           </dl>
         </section>
@@ -220,7 +239,7 @@ export function DebugPanel(props: DebugPanelProps) {
 
       <footer className={css.footer}>
         <button className={css.secondaryButton} type="button" disabled={!state.writable} onClick={props.reset}>
-          <IconRefreshOutline16 />
+          <IconRefreshSmall />
           {t('debugReset')}
         </button>
         <span className={css.footerSpacer} />
@@ -240,7 +259,7 @@ export function DebugPanel(props: DebugPanelProps) {
         title={t('debugPanelToggle')}
         onClick={() => { setOpen(current => !current) }}
       >
-        <IconCodeOutline16 />
+        <IconCode />
       </button>
       {typeof document === 'undefined' || panel === null ? null : createPortal(panel, document.body)}
     </>

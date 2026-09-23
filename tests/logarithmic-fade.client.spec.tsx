@@ -4,6 +4,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { fadeTailSize, logarithmicOpacity, LogarithmicFadeController, useLogarithmicFade } from '../src/client/useLogarithmicFade.ts'
 import { TypewriterAssistantNodeView } from '../src/client/TypewriterAssistantNodeView.tsx'
 
+/** Custom property the fade publishes its captured ink colour through. */
+const FADE_COLOR = '--dsh-smooth-stream-fade-color'
+
 const registry = new Map<string, Set<Range>>()
 const controllers: LogarithmicFadeController[] = []
 const ranges = () => [...registry.values()].flatMap(value => [...value])
@@ -183,6 +186,62 @@ it('skips hidden/formula nodes and handles graphemes spanning nodes', () => {
     other.controller.update(true, true)
   }
   expect(ranges()).toHaveLength(1)
+})
+
+it('re-derives exclusion when a Text node is moved into an excluded ancestor', async () => {
+  const span = document.createElement('span')
+  const text = document.createTextNode('a')
+  span.append(text)
+  const code = document.createElement('code')
+  const { root, controller } = attach()
+  root.append(span, code)
+  controller.update(true, true, 200)
+  expect(ranges().map(range => range.toString())).toEqual(['a'])
+
+  // The same Text node re-parents into <code> and grows a character. Eligibility
+  // is inherited, so it has to be re-decided for the tree it lives in NOW: the
+  // still-fading 'a' is dropped and the new 'b' never enters the fade.
+  code.append(text)
+  text.data = 'ab'
+  await vi.advanceTimersByTimeAsync(0)
+  controller.update(true, true, 200)
+  expect(ranges()).toHaveLength(0)
+})
+
+it('re-derives exclusion when an ancestor stops being hidden', async () => {
+  const span = document.createElement('span')
+  span.setAttribute('hidden', '')
+  const text = document.createTextNode('a')
+  span.append(text)
+  const { root, controller } = attach()
+  root.append(span)
+  controller.update(true, true, 200)
+  expect(ranges()).toHaveLength(0)
+  tick(400)
+
+  // `hidden` is an exclusion attribute: dropping it re-opens the subtree even
+  // though the Text node itself only grew by one character.
+  span.removeAttribute('hidden')
+  text.data = 'ab'
+  await vi.advanceTimersByTimeAsync(0)
+  controller.update(true, true, 200)
+  expect(ranges().map(range => range.toString())).toEqual(['b'])
+})
+
+it('re-reads the fade colour when the document appearance changes', async () => {
+  const { root, controller } = attach('a')
+  root.style.color = 'rgb(20, 40, 60)'
+  controller.update(true, true, 200)
+  expect(root.style.getPropertyValue(FADE_COLOR)).toBe('rgb(20, 40, 60)')
+
+  // Theme switch while the tail is still live: the document flips its
+  // appearance attributes and the root resolves to a different ink.
+  root.style.color = 'rgb(230, 240, 250)'
+  document.documentElement.classList.add('dsh-appearance-probe')
+  await vi.advanceTimersByTimeAsync(0)
+  expect(root.style.getPropertyValue(FADE_COLOR)).toBe('rgb(230, 240, 250)')
+
+  document.documentElement.classList.remove('dsh-appearance-probe')
 })
 
 it('shares one frame loop and isolates other messages and highlights', () => {

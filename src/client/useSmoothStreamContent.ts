@@ -434,18 +434,9 @@ export function useSmoothStreamContent(
       let revealSpeedCps: number
       let nextQueueDebt = 0
       if (producerComplete) {
-        // Backpressure protects live layout. Once input has ended, retaining
-        // that scale only makes a completed response keep typing onscreen.
-        // Keep one TARGET velocity for the whole completion tail — recomputing
-        // it from the shrinking backlog creates an exponential slow tail —
-        // but RAMP the effective velocity up from the last reveal speed over
-        // ~3 frames: an instant jump from streaming pace to max flush is
-        // itself a visible jerk at exactly the moment the reader is watching
-        // the reply finish.
-        // The pre-drain reveal speed is the streaming EMA, not the debug seed.
-        // Seeding the ramp from the 35cps default when the reply ran at the
-        // max-flush ceiling stretched a 420ms tail past the 800ms announcer
-        // step and the visible Markdown mutated across it.
+        // Completion uses one bounded target velocity rather than the
+        // backlog-pressure curve. The latter changes speed as the queue
+        // shrinks and visibly kicks the final wrapped lines.
         const previousCps = lastDrainCpsRef.current > 0
           ? lastDrainCpsRef.current
           : Math.max(config.minCps, emaCpsRef.current)
@@ -495,7 +486,8 @@ export function useSmoothStreamContent(
         speedCps: revealSpeedCps,
         targetChars: targetCount,
         displayedChars: displayedCount,
-        active: !producerComplete,
+        active: !producerComplete || backlog > 0,
+        producerComplete,
       })
 
       // Performance guard: while degraded and the reply is offscreen, skip

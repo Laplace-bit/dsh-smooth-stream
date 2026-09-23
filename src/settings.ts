@@ -58,6 +58,11 @@ export type StreamMotionPreference =
   | 'force-reduced'
 
 /**
+ * Smoothing cadence and damping profile.
+ */
+export type StreamSmoothingPreset = 'realtime' | 'balanced' | 'silky'
+
+/**
  * Preferences a user may set. Deliberately separate from {@link StreamConfig}
  * because the two change at different times: composition-time values go
  * through the boot global, a live UI edit goes through the protected plugin RPC.
@@ -73,6 +78,10 @@ export interface StreamSettings {
    * scroll ownership to the Harness; text reveal still runs.
    */
   controlScroll: boolean
+  /**
+   * Smoothing preset for the reveal cadence and follow physics.
+   */
+  preset: StreamSmoothingPreset
   /**
    * How the reveal honors the OS reduced-motion preference. `auto` preserves
    * the accessibility-first default; `force-smooth` keeps the engine on
@@ -98,9 +107,11 @@ export interface StreamSettings {
 export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   enabled: true,
   controlScroll: true,
+  preset: 'silky',
   motionPreference: 'auto',
   thinkAutoExpand: true,
   logarithmicFade: true,
   debugEnabled: false,
   debugTuning: DEFAULT_STREAM_DEBUG_TUNING,
 }
+

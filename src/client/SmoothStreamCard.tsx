@@ -8,7 +8,7 @@
 import { useState } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
-import { IconChevronDownOutline14, IconRefreshOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronDown, IconRefresh } from './harnessIcons.ts'
 import type { SmoothStreamCardFace } from './smooth-stream-card-controller.ts'
 import css from './SmoothStreamCard.module.css'
 
@@ -43,7 +43,7 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
         </span>
         {versionLabel === null ? null : <span className={css.version}>{versionLabel}</span>}
         {state.dirty ? <span className={css.pending}>{t('unsaved')}</span> : null}
-        <IconChevronDownOutline14 className={open ? `${css.chevron} ${css.chevronOpen}` : css.chevron} />
+        <IconChevronDown className={open ? `${css.chevron} ${css.chevronOpen}` : css.chevron} />
       </button>
       {open
         ? (
@@ -126,6 +126,31 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
                     ))}
                   </span>
                 </div>
+                <div className={state.enabled ? css.field : `${css.field} ${css.fieldDisabled}`}>
+                  <span className={css.fieldHead}>
+                    <span className={css.label}>{t('preset')}</span>
+                  </span>
+                  <span className={css.hint}>{t('presetHint')}</span>
+                  <span className={css.choiceRow} role="radiogroup" aria-label={t('preset')}>
+                    {([
+                      ['realtime', 'presetRealtime', 'presetRealtimeHint'],
+                      ['balanced', 'presetBalanced', 'presetBalancedHint'],
+                      ['silky', 'presetSilky', 'presetSilkyHint'],
+                    ] as const).map(([value, label, hint]) => (
+                      <label key={value} className={css.choice} title={t(hint)}>
+                        <input
+                          type="radio"
+                          className={css.choiceInput}
+                          name="smooth-stream-preset"
+                          checked={state.preset === value}
+                          disabled={!state.writable || state.saving || !state.enabled}
+                          onChange={() => { props.edit({ preset: value }) }}
+                        />
+                        {t(label)}
+                      </label>
+                    ))}
+                  </span>
+                </div>
                 <label className={state.enabled ? css.field : `${css.field} ${css.fieldDisabled}`}>
                   <span className={css.fieldHead}>
                     <span className={css.label}>{t('thinkAutoExpand')}</span>
@@ -169,7 +194,7 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
                     title={state.canUpgrade ? undefined : t('updateUnavailable')}
                     onClick={props.upgrade}
                   >
-                    <span aria-hidden="true"><IconRefreshOutline14 /></span>
+                    <span aria-hidden="true"><IconRefresh /></span>
                     {t(state.upgrading ? 'updating' : 'update')}
                   </button>
                 </div>

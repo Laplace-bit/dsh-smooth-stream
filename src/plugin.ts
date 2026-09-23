@@ -57,6 +57,11 @@ export const Config: Schema<Config> = Schema.object({
 export const StreamSettingsSchema: Schema<StreamSettings> = Schema.object({
   enabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.enabled),
   controlScroll: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.controlScroll),
+  preset: Schema.union([
+    Schema.const('realtime'),
+    Schema.const('balanced'),
+    Schema.const('silky'),
+  ] as const).default(DEFAULT_STREAM_SETTINGS.preset),
   motionPreference: Schema.union([
     Schema.const('auto'),
     Schema.const('force-smooth'),
@@ -111,7 +116,15 @@ export function apply(ctx: Context, config: Config): void {
     const scope = settingsCtx.settings.register(
       settingsNamespace,
       StreamSettingsSchema,
-      { applies: 'live' },
+      {
+        // The install-time entry config is the composition base, so it resolves
+        // *below* the user layer: a stored pick still wins, while "the user
+        // never chose" keeps following the overlay (cordis.patch.yml / profile
+        // config). Keeping it out of the schema default is what makes those two
+        // states distinguishable at all.
+        base: { preset: config.preset },
+        applies: 'live',
+      },
     )
     settingsCtx.inject(['connection'], (connectionCtx) => {
       let upgrade: Promise<void> | undefined
@@ -125,6 +138,7 @@ export function apply(ctx: Context, config: Config): void {
           writable: connectionCtx.settings.writable,
           enabled: settings.enabled,
           controlScroll: settings.controlScroll,
+          preset: settings.preset ?? config.preset,
           motionPreference: settings.motionPreference,
           thinkAutoExpand: settings.thinkAutoExpand,
           logarithmicFade: settings.logarithmicFade,
@@ -194,11 +208,27 @@ export function apply(ctx: Context, config: Config): void {
             const next = payload as {
               enabled: boolean
               controlScroll: boolean
+              preset?: unknown
               motionPreference?: unknown
               thinkAutoExpand: boolean
               logarithmicFade?: unknown
               debugEnabled?: unknown
               debugTuning?: unknown
+            }
+            if (
+              next.preset !== undefined
+              && next.preset !== 'realtime'
+              && next.preset !== 'balanced'
+              && next.preset !== 'silky'
+            ) {
+              return {
+                ok: false,
+                error: {
+                  code: 'settings-rejected',
+                  message: 'preset must be one of realtime | balanced | silky',
+                  details: { ns: STREAM_SETTINGS_NS },
+                },
+              }
             }
             if (
               next.motionPreference !== undefined
@@ -239,6 +269,7 @@ export function apply(ctx: Context, config: Config): void {
             await scope.update({
               enabled: next.enabled,
               controlScroll: next.controlScroll,
+              ...(next.preset === undefined ? {} : { preset: next.preset }),
               ...(next.motionPreference === undefined ? {} : { motionPreference: next.motionPreference }),
               thinkAutoExpand: next.thinkAutoExpand,
               ...(next.logarithmicFade === undefined ? {} : { logarithmicFade: next.logarithmicFade }),

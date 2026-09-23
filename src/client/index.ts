@@ -63,6 +63,7 @@ const SKIP_WRAP = new Set([
   'command-input',
   'turn-process',
   'turn-tail',
+  'tool-call',
 ])
 
 /** React function/class or an exotic component such as memo/forwardRef/lazy. */
@@ -182,6 +183,7 @@ class SettingsCell {
       pending === this.pending
       && next.enabled === this.value.enabled
       && next.controlScroll === this.value.controlScroll
+      && next.preset === this.value.preset
       && next.motionPreference === this.value.motionPreference
       && next.thinkAutoExpand === this.value.thinkAutoExpand
       && next.logarithmicFade === this.value.logarithmicFade
@@ -196,6 +198,16 @@ class SettingsCell {
   /** False while an available settings service is resolving its authority. */
   takeoverEnabled(): boolean {
     return !this.pending && this.value.enabled
+  }
+
+  /**
+   * True only once an attached settings service has produced its loaded values.
+   * Until then — and when no settings service is composed at all — `value` is
+   * still the shared client default, so callers that must not let that default
+   * shadow the install-time config have to ask before trusting it.
+   */
+  ready(): boolean {
+    return this.card?.getSnapshot().status === 'ready'
   }
 
   readonly getSnapshot = (): StreamSettings => this.value
@@ -345,7 +357,12 @@ export function apply(ctx: ClientContext): void {
       // already had).
       ...(assistantT === undefined ? {} : { t: assistantT }),
       mode: config.mode,
-      preset: config.preset,
+      // Loaded settings hold the resolved preset (user layer over the install
+      // config), so they own the prop. Without them — no settings service, a
+      // failed load, or the frames before the first read lands — the shared
+      // client default is NOT an authority on the installed preset; the boot
+      // config is.
+      preset: settings.ready() ? preferences.preset ?? config.preset : config.preset,
       revealCharsPerSec: config.revealCharsPerSec,
       scrollSpeedPxPerSec: config.scrollSpeedPxPerSec,
       maxScrollSpeedPxPerSec: config.maxScrollSpeedPxPerSec,
