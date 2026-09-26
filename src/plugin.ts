@@ -1,9 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
-// Type-only: erased at runtime, so the host entry never link-fails on kernels
-// whose dsh-settings no longer ships the value-side helper (issue #17).
-import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import Schema from '@deepseek-ai/schemastery'
 import { DEFAULT_STREAM_CONFIG, type StreamConfig } from './config.ts'
 import { injectStreamConfig } from './boot-config.ts'
@@ -11,13 +8,18 @@ import { STREAM_PACKAGE_NAME, STREAM_PACKAGE_VERSION } from './package-meta.ts'
 import { inspectProfileInstallation, updateNpmProfilePackage } from './profile-installation.ts'
 import { registerSettingsChannel } from './settings-channel.ts'
 import {
+  createStreamSettingsScope,
+  streamSettingsSchema,
+  streamSettingsSectionSchema,
+  type ProfileConfigEditor,
+} from './settings-bridge.ts'
+import {
   STREAM_SETTINGS_RPC,
   STREAM_SETTINGS_RPC_CHANNEL,
   type StreamDebugSettingsView,
   type StreamSettingsView,
 } from './settings-api.ts'
 import {
-  DEFAULT_STREAM_SETTINGS,
   STREAM_SETTINGS_NS,
   type StreamDebugTuning,
   type StreamSettings,
@@ -30,8 +32,13 @@ export const name = 'dsh-smooth-stream'
  * Plugin configuration accepted from the overlay's `config` section. Cordis
  * validates the value against this schema at load and fills omitted fields
  * from the shared defaults, so an invalid value fails the load loudly.
+ *
+ * User-owned preferences ride the same flat entry config: kernels through
+ * `0.1.6` mirror them into a registered namespace, while `0.1.7` and later
+ * project them from this entry into the profile-patch form. Declaring them
+ * flat — not nested — is what the projection seam accepts.
  */
-export interface Config extends StreamConfig {}
+export interface Config extends StreamConfig, Partial<Omit<StreamSettings, 'preset'>> {}
 
 export const Config: Schema<Config> = Schema.object({
   mode: Schema.union(['typewriter', 'teleprompter'] as const).default(DEFAULT_STREAM_CONFIG.mode),
@@ -48,40 +55,18 @@ export const Config: Schema<Config> = Schema.object({
     .min(1)
     .max(2000)
     .default(DEFAULT_STREAM_CONFIG.maxScrollSpeedPxPerSec),
+  // User-owned fields for the projection seam, declared flat and volatile. The
+  // plugin's own bundle patch ships no value for them on purpose: an absent key
+  // is what keeps "the user never chose" apart from "the user chose".
+  ...streamSettingsSectionSchema.dict,
 })
 
 /**
- * Schema of the user-owned settings section. The Host keeps it in the durable
- * settings provider while the browser edits it through the plugin RPC below.
+ * Schema of the user-owned settings section as registered with a legacy
+ * settings *registry*. Shared with {@link Config}'s nested form so the two
+ * seams never drift.
  */
-export const StreamSettingsSchema: Schema<StreamSettings> = Schema.object({
-  enabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.enabled),
-  controlScroll: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.controlScroll),
-  preset: Schema.union([
-    Schema.const('realtime'),
-    Schema.const('balanced'),
-    Schema.const('silky'),
-  ] as const).default(DEFAULT_STREAM_SETTINGS.preset),
-  motionPreference: Schema.union([
-    Schema.const('auto'),
-    Schema.const('force-smooth'),
-    Schema.const('force-reduced'),
-  ] as const).default(DEFAULT_STREAM_SETTINGS.motionPreference),
-  thinkAutoExpand: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand),
-  logarithmicFade: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.logarithmicFade),
-  debugEnabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.debugEnabled),
-  debugTuning: Schema.object({
-    revealScale: Schema.number().min(0.25).max(2).default(DEFAULT_STREAM_SETTINGS.debugTuning.revealScale),
-    queuePressure: Schema.number().min(0).max(2).default(DEFAULT_STREAM_SETTINGS.debugTuning.queuePressure),
-    maxRevealCps: Schema.number().min(120).max(1000).default(DEFAULT_STREAM_SETTINGS.debugTuning.maxRevealCps),
-    springStiffness: Schema.number().min(40).max(320).default(DEFAULT_STREAM_SETTINGS.debugTuning.springStiffness),
-    springDamping: Schema.number().min(8).max(80).default(DEFAULT_STREAM_SETTINGS.debugTuning.springDamping),
-    springMass: Schema.number().min(0.5).max(3).default(DEFAULT_STREAM_SETTINGS.debugTuning.springMass),
-    runwayPx: Schema.number().min(0).max(120).default(DEFAULT_STREAM_SETTINGS.debugTuning.runwayPx),
-    reserveResponseMs: Schema.number().min(60).max(600).default(DEFAULT_STREAM_SETTINGS.debugTuning.reserveResponseMs),
-    backpressureMinScale: Schema.number().min(0.25).max(1).default(DEFAULT_STREAM_SETTINGS.debugTuning.backpressureMinScale),
-  }),
-})
+export const StreamSettingsSchema: Schema<StreamSettings> = streamSettingsSchema
 
 /**
  * Host half: log the resolved configuration and bridge it to the browser
@@ -104,53 +89,41 @@ export function apply(ctx: Context, config: Config): void {
     )
   })
   // The core settings RPC deliberately filters third-party namespaces. Keep
-  // the durable provider as the authority, but expose this one schema through
-  // the plugin's own loopback-only connection channel instead.
+  // the seam's own durable layer as the authority, but expose this one schema
+  // through the plugin's own loopback-only connection channel instead. The
+  // bridge adapts both seam generations: the `0.1.7` projection has no
+  // `register()`, and calling it there used to abort this whole apply.
   ctx.inject(['settings'], (settingsCtx) => {
-    // 0.1.2 kernels dropped the `settingsNamespace()` helper — a validating
-    // identity on ≤ 0.1.1 — and take the raw string, so the rc-era brand is
-    // reproduced locally instead of statically importing a removed symbol.
-    // The namespace is a compile-time constant matching the kernel's
-    // /^[a-z][a-z0-9-]*$/ pattern.
-    const settingsNamespace = STREAM_SETTINGS_NS as SettingsNamespace
-    const scope = settingsCtx.settings.register(
-      settingsNamespace,
-      StreamSettingsSchema,
-      {
-        // The install-time entry config is the composition base, so it resolves
-        // *below* the user layer: a stored pick still wins, while "the user
-        // never chose" keeps following the overlay (cordis.patch.yml / profile
-        // config). Keeping it out of the schema default is what makes those two
-        // states distinguishable at all.
-        base: { preset: config.preset },
-        applies: 'live',
-      },
-    )
+    // The profile editor is the modern seam's persistence layer. It is looked
+    // up lazily because kernels through `0.1.6` register the settings registry
+    // instead, where the editor plays no part.
+    const editor = settingsCtx.get('configEditor') as ProfileConfigEditor | undefined
+    const scope = createStreamSettingsScope(settingsCtx, config, editor)
     settingsCtx.inject(['connection'], (connectionCtx) => {
       let upgrade: Promise<void> | undefined
 
       const view = (): StreamSettingsView => {
         const installation = inspectProfileInstallation(connectionCtx.baseUrl, STREAM_PACKAGE_NAME)
-        const settings = scope.get()
+        const resolved = scope.get()
         return {
           version: STREAM_PACKAGE_VERSION,
           installation: installation.kind,
-          writable: connectionCtx.settings.writable,
-          enabled: settings.enabled,
-          controlScroll: settings.controlScroll,
-          preset: settings.preset ?? config.preset,
-          motionPreference: settings.motionPreference,
-          thinkAutoExpand: settings.thinkAutoExpand,
-          logarithmicFade: settings.logarithmicFade,
+          writable: connectionCtx.settings.writable && scope.writable(),
+          enabled: resolved.enabled,
+          controlScroll: resolved.controlScroll,
+          preset: resolved.preset ?? config.preset,
+          motionPreference: resolved.motionPreference,
+          thinkAutoExpand: resolved.thinkAutoExpand,
+          logarithmicFade: resolved.logarithmicFade,
           canUpgrade: installation.kind === 'npm',
         }
       }
 
       const debugView = (): StreamDebugSettingsView => {
-        const settings = scope.get()
+        const resolved = scope.get()
         return {
-          debugEnabled: settings.debugEnabled,
-          tuning: { ...settings.debugTuning },
+          debugEnabled: resolved.debugEnabled,
+          tuning: { ...resolved.debugTuning },
         }
       }
 
@@ -275,12 +248,15 @@ export function apply(ctx: Context, config: Config): void {
               ...(next.logarithmicFade === undefined ? {} : { logarithmicFade: next.logarithmicFade }),
               ...(hasDebug ? { debugEnabled: next.debugEnabled, debugTuning: next.debugTuning } : {}),
             })
-          } catch {
+          } catch (cause) {
+            // The seam's refusal text is the only signal a user can act on
+            // (read-only profile, unknown entry, stale revision), so it is
+            // carried through instead of a generic failure line.
             return {
               ok: false,
               error: {
                 code: 'settings-rejected',
-                message: 'smooth-stream settings update failed',
+                message: `smooth-stream settings update failed: ${cause instanceof Error ? cause.message : String(cause)}`,
                 details: { ns: STREAM_SETTINGS_NS },
               },
             }
