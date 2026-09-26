@@ -11,14 +11,60 @@ import { useEffect, useRef, useState } from 'react'
  *    and cannot have non-whitespace content after the fence characters.
  * 4. While inside a code block, all lines belong to the block until a matching closing fence is found.
  */
+interface FenceState {
+  inFence: boolean
+  fenceChar: string
+  fenceLen: number
+}
+
+/**
+ * Apply one logical line (already split at its `\n`) to the fence state.
+ * Shared by the one-shot scan and the incremental scanner below so both make
+ * exactly the same fence decision.
+ */
+function applyFenceLine(state: FenceState, line: string): void {
+  let text = line
+  if (text.endsWith('\r')) text = text.slice(0, -1)
+
+  let indent = 0
+  while (indent < text.length && text[indent] === ' ' && indent < 4) {
+    indent++
+  }
+  if (indent >= 4) return
+
+  const rest = text.slice(indent)
+  const firstChar = rest[0]
+  if (firstChar !== '`' && firstChar !== '~') return
+
+  let count = 0
+  while (count < rest.length && rest[count] === firstChar) {
+    count++
+  }
+  if (count < 3) return
+
+  const afterFence = rest.slice(count)
+
+  if (!state.inFence) {
+    if (firstChar !== '`' || !afterFence.includes('`')) {
+      state.inFence = true
+      state.fenceChar = firstChar
+      state.fenceLen = count
+    }
+  } else if (firstChar === state.fenceChar && count >= state.fenceLen) {
+    if (afterFence.trim() === '') {
+      state.inFence = false
+      state.fenceChar = ''
+      state.fenceLen = 0
+    }
+  }
+}
+
 export function hasUnclosedCodeFence(text: string): boolean {
   if (!text.includes('```') && !text.includes('~~~')) {
     return false
   }
 
-  let inFence = false
-  let fenceChar = ''
-  let fenceLen = 0
+  const state: FenceState = { inFence: false, fenceChar: '', fenceLen: 0 }
 
   let start = 0
   const len = text.length
@@ -27,48 +73,77 @@ export function hasUnclosedCodeFence(text: string): boolean {
     let end = text.indexOf('\n', start)
     if (end === -1) end = len
 
-    let line = text.slice(start, end)
-    if (line.endsWith('\r')) line = line.slice(0, -1)
-
-    let indent = 0
-    while (indent < line.length && line[indent] === ' ' && indent < 4) {
-      indent++
-    }
-
-    if (indent < 4) {
-      const rest = line.slice(indent)
-      const firstChar = rest[0]
-
-      if (firstChar === '`' || firstChar === '~') {
-        let count = 0
-        while (count < rest.length && rest[count] === firstChar) {
-          count++
-        }
-
-        if (count >= 3) {
-          const afterFence = rest.slice(count)
-
-          if (!inFence) {
-            if (firstChar !== '`' || !afterFence.includes('`')) {
-              inFence = true
-              fenceChar = firstChar
-              fenceLen = count
-            }
-          } else if (firstChar === fenceChar && count >= fenceLen) {
-            if (afterFence.trim() === '') {
-              inFence = false
-              fenceChar = ''
-              fenceLen = 0
-            }
-          }
-        }
-      }
-    }
-
+    applyFenceLine(state, text.slice(start, end))
     start = end + 1
   }
 
-  return inFence
+  return state.inFence
+}
+
+/**
+ * Cached scan state for a growing text. `consumed` always sits just past a
+ * `\n` (or at 0), so resuming never has to reason about a half-consumed line;
+ * the still-growing trailing line is re-applied per call from a copy.
+ */
+interface FenceScan extends FenceState {
+  /** Text this state was derived from; a mismatch means the text was replaced. */
+  source: string
+  consumed: number
+  /** A fence marker has been seen in `source`, so the cheap path is over. */
+  sawMarker: boolean
+}
+
+export function createFenceScan(): FenceScan {
+  return { inFence: false, fenceChar: '', fenceLen: 0, source: '', consumed: 0, sawMarker: false }
+}
+
+/** Whether a fence marker starts at or after `from`, looking 2 back for a split append. */
+function hasFenceMarkerFrom(text: string, from: number): boolean {
+  const start = Math.max(0, from - 2)
+  return text.indexOf('```', start) !== -1 || text.indexOf('~~~', start) !== -1
+}
+
+/**
+ * `hasUnclosedCodeFence` for a text that only ever grows. The reveal engine
+ * re-renders on every frame, and a full scan there costs time proportional to
+ * the reply's whole line count on every frame; this walks only the lines that
+ * arrived since the previous call.
+ */
+export function scanUnclosedFence(scan: FenceScan, text: string): boolean {
+  if (!text.startsWith(scan.source)) {
+    scan.inFence = false
+    scan.fenceChar = ''
+    scan.fenceLen = 0
+    scan.consumed = 0
+    scan.sawMarker = false
+  }
+
+  if (!scan.sawMarker) {
+    if (!hasFenceMarkerFrom(text, scan.consumed)) {
+      // No marker anywhere in the text, so no line can open a fence. Advance
+      // to the last line boundary, not to the end: `consumed` must keep
+      // sitting just past a `\n`.
+      scan.consumed = text.lastIndexOf('\n') + 1
+      scan.source = text
+      return false
+    }
+    scan.sawMarker = true
+  }
+
+  let start = scan.consumed
+  const len = text.length
+  while (start < len) {
+    const end = text.indexOf('\n', start)
+    if (end === -1) break
+    applyFenceLine(scan, text.slice(start, end))
+    start = end + 1
+  }
+  scan.consumed = start
+  scan.source = text
+
+  const tail: FenceState = { inFence: scan.inFence, fenceChar: scan.fenceChar, fenceLen: scan.fenceLen }
+  applyFenceLine(tail, text.slice(start))
+  return tail.inFence
 }
 
 export interface DecoupledMarkdownOptions {
@@ -90,7 +165,12 @@ export function useDecoupledMarkdown(
   options?: DecoupledMarkdownOptions
 ): string {
   const throttleMs = options?.throttleMs ?? 33
-  const [markdownShown, setMarkdownShown] = useState(shown)
+  // Incremental across renders: `shown` only ever grows during a stream, so
+  // only the lines appended since the previous render are walked.
+  const fenceScanRef = useRef<FenceScan | null>(null)
+  const fenceScan = fenceScanRef.current ?? (fenceScanRef.current = createFenceScan())
+  const unclosed = live && scanUnclosedFence(fenceScan, shown)
+  const [throttledShown, setThrottledShown] = useState(shown)
   const lastCommitTimeRef = useRef(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const shownRef = useRef(shown)
@@ -98,44 +178,25 @@ export function useDecoupledMarkdown(
   const wasUnclosedRef = useRef(false)
 
   useEffect(() => {
-    // If not live (settled / motion reduced / stream closed), sync immediately
-    if (!live) {
+    // If not in unclosed code block (plain text, tables, closed fences, settled):
+    // clear pending timers and reset the fence tracker.
+    // Crucially: DO NOT call setState here, avoiding double renders and 1-frame lag!
+    if (!unclosed) {
+      wasUnclosedRef.current = false
       if (timerRef.current !== null) {
         clearTimeout(timerRef.current)
         timerRef.current = null
       }
-      setMarkdownShown(shown)
-      lastCommitTimeRef.current = performance.now()
-      wasUnclosedRef.current = false
       return
     }
 
-    const unclosed = hasUnclosedCodeFence(shown)
     const now = performance.now()
 
-    // Edge case: Closing edge - code block just closed right now!
-    // Immediately sync so completed code block styles render cleanly without any lag
-    if (wasUnclosedRef.current && !unclosed) {
-      if (timerRef.current !== null) {
-        clearTimeout(timerRef.current)
-        timerRef.current = null
-      }
-      wasUnclosedRef.current = false
-      setMarkdownShown(shown)
+    // Rising edge: just entered unclosed code block
+    if (!wasUnclosedRef.current) {
+      wasUnclosedRef.current = true
       lastCommitTimeRef.current = now
-      return
-    }
-
-    wasUnclosedRef.current = unclosed
-
-    // Outside code blocks, keep instant 1:1 synchronization
-    if (!unclosed) {
-      if (timerRef.current !== null) {
-        clearTimeout(timerRef.current)
-        timerRef.current = null
-      }
-      setMarkdownShown(shown)
-      lastCommitTimeRef.current = now
+      setThrottledShown(shown)
       return
     }
 
@@ -146,19 +207,17 @@ export function useDecoupledMarkdown(
         clearTimeout(timerRef.current)
         timerRef.current = null
       }
-      setMarkdownShown(shown)
+      setThrottledShown(shown)
       lastCommitTimeRef.current = now
-    } else {
-      if (timerRef.current === null) {
-        const delay = Math.max(16, throttleMs - elapsed)
-        timerRef.current = setTimeout(() => {
-          timerRef.current = null
-          setMarkdownShown(shownRef.current)
-          lastCommitTimeRef.current = performance.now()
-        }, delay)
-      }
+    } else if (timerRef.current === null) {
+      const delay = Math.max(16, throttleMs - elapsed)
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null
+        setThrottledShown(shownRef.current)
+        lastCommitTimeRef.current = performance.now()
+      }, delay)
     }
-  }, [shown, live, throttleMs])
+  }, [shown, unclosed, throttleMs])
 
   useEffect(() => {
     return () => {
@@ -169,5 +228,16 @@ export function useDecoupledMarkdown(
     }
   }, [])
 
-  return live ? markdownShown : shown
+  // Outside unclosed code blocks (or when settled), return `shown` directly.
+  // 100% synchronous, zero 1-frame lag, zero double-renders, zero scheduling jitter!
+  if (!unclosed) {
+    return shown
+  }
+
+  // When unclosed, if this is the opening frame of the fence, show it immediately.
+  if (!wasUnclosedRef.current) {
+    return shown
+  }
+
+  return throttledShown
 }

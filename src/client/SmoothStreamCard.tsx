@@ -1,8 +1,17 @@
 /**
- * The smooth-stream plugin configuration card, rendered inside the Web
- * Settings "plugin configuration" page. Preferences are staged until the user
- * saves — the same shape as the Host-shipped cards, hand-drawn because the
+ * The smooth-stream plugin configuration card. Preferences are staged until the
+ * user saves — the same shape as the Host-shipped cards, hand-drawn because the
  * Host cards' chrome is not exported for reuse.
+ *
+ * Two faces, one implementation:
+ *
+ * - `card` (default) is the 0.1.5 shape: a collapsible card in Settings →
+ *   Plugins → Plugin configuration, registered on `settings.plugin.item`.
+ * - `page` is the 0.1.7 shape: the same rows as the whole body of the sidebar
+ *   Plugins page's entry, registered on `plugins.item`. That page host already
+ *   draws the title, icon and breadcrumb, so the card's own header and collapse
+ *   control are dropped and the rows start expanded — the switches are never a
+ *   second click away from the entry that opens them.
  */
 
 import { useState } from 'react'
@@ -17,11 +26,20 @@ export type SmoothStreamCardProps =
   PropsRuntime<'settings.plugin.item'>
   & PropsLocale<'settings.smoothStream'>
   & InjectFace<SmoothStreamCardFace>
+  & {
+    /**
+     * Which face to draw: the collapsible card (default) or the sidebar Plugins
+     * page's body, which arrives on the `plugins.item` slot's `view: 'page'`.
+     */
+    variant?: 'card' | 'page'
+  }
 
 /** Render the smooth-stream card independently of the core settings namespace allowlist. */
 export function SmoothStreamCard(props: SmoothStreamCardProps) {
   const { t } = props
-  const [open, setOpen] = useState(false)
+  // The page face has no header to open the card with, so it starts expanded.
+  const pageMode = props.variant === 'page'
+  const [open, setOpen] = useState(pageMode)
   const state = props.useSmoothStreamCard(snapshot => snapshot)
   const blocked = !state.dirty || state.saving || state.status !== 'ready'
   const versionLabel = state.version === undefined
@@ -30,24 +48,28 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
       .replace('{version}', state.version)
 
   return (
-    <li className={open ? `${css.card} ${css.cardOpen}` : css.card}>
-      <button
-        type="button"
-        className={css.header}
-        aria-expanded={open}
-        onClick={() => { setOpen(!open) }}
-      >
-        <span className={css.headText}>
-          <span className={css.name}>{t('title')}</span>
-          <span className={css.description}>{t('description')}</span>
-        </span>
-        {versionLabel === null ? null : <span className={css.version}>{versionLabel}</span>}
-        {state.dirty ? <span className={css.pending}>{t('unsaved')}</span> : null}
-        <IconChevronDown className={open ? `${css.chevron} ${css.chevronOpen}` : css.chevron} />
-      </button>
+    <li className={pageMode ? css.page : open ? `${css.card} ${css.cardOpen}` : css.card}>
+      {pageMode
+        ? null
+        : (
+          <button
+            type="button"
+            className={css.header}
+            aria-expanded={open}
+            onClick={() => { setOpen(!open) }}
+          >
+            <span className={css.headText}>
+              <span className={css.name}>{t('title')}</span>
+              <span className={css.description}>{t('description')}</span>
+            </span>
+            {versionLabel === null ? null : <span className={css.version}>{versionLabel}</span>}
+            {state.dirty ? <span className={css.pending}>{t('unsaved')}</span> : null}
+            <IconChevronDown className={open ? `${css.chevron} ${css.chevronOpen}` : css.chevron} />
+          </button>
+        )}
       {open
         ? (
-          <div className={css.body}>
+          <div className={pageMode ? `${css.body} ${css.pageBody}` : css.body}>
             {state.status === 'loading' ? <p className={css.readOnly} role="status">{t('loading')}</p> : null}
             {state.status === 'unavailable' ? (
               <div className={css.failure}>

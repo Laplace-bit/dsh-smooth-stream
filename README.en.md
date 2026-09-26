@@ -115,14 +115,16 @@ To uninstall: `pnpm dsh plugin --profile web remove dsh-smooth-stream`.
 
 | DSH kernel | This plugin |
 |---|---|
-| 0.1.0-rc.5 - 0.1.0-rc.7 | ✅ all versions |
-| 0.1.1-rc.2 | ✅ all versions |
-| 0.1.2-alpha.1 - 0.1.2-alpha.3 | ✅ 0.4.3+; 0.4.2 and earlier fail to load on 0.1.2 because they statically import the removed helper |
+| 0.1.7 (`@deepseek-ai/dsh-client-*` ≥ `0.1.7-rc.1`) | ✅ the declared range: this is the `peerDependencies` floor. The plugin configuration page moved to the sidebar Plugins panel (`plugins.item`), assistant steps arrive at two flow parts (`groupPart`), the icon exports were renamed, and the settings seam became a projection (`describe()` / `update()`) — all four are adapted |
+| ≤ 0.1.6 (including the 0.1.5-rc desktop kernel) | ⚠️ the code keeps the older seam's compatibility branches (settings registry, size-suffixed icon names), but the range is **no longer declared in `peerDependencies`** and was not exercised for this release |
+| 0.1.0-rc.5 - 0.1.0-rc.7 | ✅ older releases (≤ 0.6.1) |
+| 0.1.1-rc.2 | ✅ older releases (≤ 0.6.1) |
+| 0.1.2-alpha.1 - 0.1.2-alpha.3 | ✅ 0.4.3+ |
 
-- ✅ = compatible. `0.1.2-alpha.3` is the current host kernel and has been verified live (built-artifact import + test suites); the remaining kernels are covered by the dual-kernel-compatible design (one build, one API surface).
-- **Kernel 0.1.2 removed the `settingsNamespace()` runtime helper** (on ≤ 0.1.1 it was a validating identity function; 0.1.2 keeps only the same-named type). This plugin does not statically import that symbol any more — it inlines its namespace constant locally and asserts it as the `SettingsNamespace` type, which works on both old and new kernels.
-- Since 0.4.3 the plugin no longer statically imports `settingsNamespace()` (see the compat fix in git history); older versions only work on kernels ≤ 0.1.1.
-- **Never statically import runtime symbols from `@deepseek-ai/*` packages.** The host CLI starts via `node --import tsx/esm`, and tsx applies the host `tsconfig` `paths` mapping, so a bare `@deepseek-ai/*` import from an external plugin may be redirected into the host's own sources — any host-side rename or removal then explodes at boot as a module instantiation error. Type-only imports (`import type`) are unaffected.
+- ✅ = compatible; ⚠️ = still loads, but out of the declared range. The 0.1.7 line is this release's target kernel, adapted through one build with runtime probing; the 0.1.5-rc branches stay in the code so a rollback to an older kernel still loads.
+- **Kernel 0.1.7 moved plugin configuration out of Settings into the sidebar Plugins panel** (`plugins.item`), hands one assistant step two flow parts at once (`groupPart`), and renamed icon exports from size suffixes to weight suffixes. This release adapts all three at runtime: without the slot the old path stays live, a missing `groupPart` means "every block belongs to this render", and icons are probed name by name.
+- **Kernel 0.1.2 removed the `settingsNamespace()` runtime helper** (on ≤ 0.1.1 it was a validating identity function; 0.1.2 keeps only the same-named type). This plugin does not statically import that symbol — it inlines its namespace constant locally and asserts it as the `SettingsNamespace` type.
+- **Never statically import runtime symbols from `@deepseek-ai/*` packages.** The host CLI starts via `node --import tsx/esm`, and tsx applies the host `tsconfig` `paths` mapping, so a bare `@deepseek-ai/*` import from an external plugin may be redirected into the host's own sources — any host-side rename or removal then explodes at boot as a module instantiation error. Type-only imports (`import type`) are unaffected; this release therefore reads primitives out of the module table (`harnessIcons.ts` / `primitives-compat.tsx`).
 
 ## Presets & Configuration
 

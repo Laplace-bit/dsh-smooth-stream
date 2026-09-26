@@ -201,6 +201,27 @@ export function computeCompletionDrain(
 export const SETTLE_DRAIN_MULTIPLIER = 1.8
 /** Time constant for ramping the completion-drain velocity up from streaming pace. */
 export const SETTLE_RAMP_TAU_S = 0.09
+/**
+ * Hard ceiling on character reveal per frame during completion drain to
+ * prevent main-thread Long Tasks (React commit + markdown re-render spikes).
+ * At 60-120Hz, 400 chars/frame provides 24k-48k cps throughput, allowing
+ * backlogs to settle smoothly across 1-3 frames without UI freeze.
+ */
+export const MAX_COMPLETION_DRAIN_CHARS_PER_FRAME = 400
+
+/**
+ * Largest slice of elapsed time one frame's reveal may be paced by.
+ *
+ * Reveal volume is proportional to the frame's dt, which inverts into a
+ * feedback loop when a frame overruns its budget: a long task, a GC pause or a
+ * heavy paint makes dt large, that frame then reveals proportionally more text,
+ * and the next frame is heavier still — the visible catch-up lurch. One 32ms
+ * visual interval is the same clamp the follow spring already applies
+ * (`FOLLOW_MAX_FRAME_MS` in teleprompterGlide), so text growth and the scroll
+ * spring advance in the same units and a stall is repaid over the following
+ * frames instead of in one.
+ */
+export const REVEAL_MAX_GROWTH_MS = 32
 
 export interface RevealStepInput {
   readonly backlog: number
@@ -421,6 +442,10 @@ export function useSmoothStreamContent(
 
       const frameIntervalMs = Math.max(0, now - lastFrameTsRef.current)
       const dtSeconds = Math.max(0.001, Math.min(frameIntervalMs / 1000, 0.12))
+      // How much time this frame may reveal *for*: bounded by the visual
+      // interval so an overrun cannot compound. Ramps that genuinely depend on
+      // elapsed time keep the real dtSeconds.
+      const growthMs = Math.max(1, Math.min(frameIntervalMs, REVEAL_MAX_GROWTH_MS))
       lastFrameTsRef.current = now
 
       const idleMs = now - lastInputTsRef.current
@@ -447,8 +472,9 @@ export function useSmoothStreamContent(
           + (drainTargetCps - previousCps) * (1 - Math.exp(-dtSeconds / SETTLE_RAMP_TAU_S))
         const settleCps = Math.min(drainTargetCps, Math.max(previousCps, rampedCps))
         lastDrainCpsRef.current = Math.min(drainTargetCps, rampedCps)
-        const accumulated = Math.max(0, queueDebtRef.current) + settleCps * dtSeconds
-        revealChars = Math.min(backlog, Math.floor(accumulated))
+        const accumulated = Math.max(0, queueDebtRef.current) + settleCps * (growthMs / 1000)
+        const unclampedChars = Math.min(backlog, Math.floor(accumulated))
+        revealChars = Math.min(unclampedChars, MAX_COMPLETION_DRAIN_CHARS_PER_FRAME)
         revealSpeedCps = settleCps
         nextQueueDebt = revealChars >= backlog ? 0 : accumulated - revealChars
         if (revealChars >= backlog) lastDrainCpsRef.current = 0
@@ -464,14 +490,14 @@ export function useSmoothStreamContent(
             settling,
             steadyCps,
           },
-          dtSeconds,
+          growthMs / 1000,
         )
         revealChars = Math.min(Math.round(step.revealChars * debugTuning.revealScale), backlog)
         revealSpeedCps = frameIntervalMs > 0 ? (revealChars * 1000) / frameIntervalMs : 0
       } else {
         const step = computeAdaptiveQueueStep(
           backlog,
-          frameIntervalMs,
+          growthMs,
           queueDebtRef.current,
           revealScaleOutRef.current?.current ?? 1,
           debugTuning,
@@ -562,7 +588,13 @@ export function useSmoothStreamContent(
     const appendedCount = appendedChars.length
 
     targetContentRef.current = content
-    targetCharsRef.current.push(...appendedChars)
+    if (appendedCount > 10000) {
+      for (let i = 0; i < appendedCount; i += 10000) {
+        targetCharsRef.current.push(...appendedChars.slice(i, i + 10000))
+      }
+    } else {
+      targetCharsRef.current.push(...appendedChars)
+    }
     targetCountRef.current += appendedCount
     settleCpsRef.current = null
 

@@ -126,4 +126,48 @@ describe('useDecoupledMarkdown', () => {
     })
     expect(result.current).toBe('```ts\nconst a = 1')
   })
+
+  it('syncs plain text and tables synchronously with zero active timers', () => {
+    const { result, rerender } = renderHook(
+      ({ text, live }) => useDecoupledMarkdown(text, live),
+      { initialProps: { text: '| col1 | col2 |\n|---|---|\n', live: true } }
+    )
+
+    expect(result.current).toBe('| col1 | col2 |\n|---|---|\n')
+    // Outside unclosed code blocks, absolutely no timer should be scheduled
+    expect(vi.getTimerCount()).toBe(0)
+
+    rerender({
+      text: '| col1 | col2 |\n|---|---|\n| row1 | val1 |\n\nSome paragraph',
+      live: true,
+    })
+    expect(result.current).toBe('| col1 | col2 |\n|---|---|\n| row1 | val1 |\n\nSome paragraph')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('transitions from plain text into unclosed fence and preserves opening fence immediately', () => {
+    const { result, rerender } = renderHook(
+      ({ text, live }) => useDecoupledMarkdown(text, live, { throttleMs: 80 }),
+      { initialProps: { text: 'Paragraph before code block.\n\n', live: true } }
+    )
+
+    expect(result.current).toBe('Paragraph before code block.\n\n')
+
+    // Transition into unclosed fence: opening fence must render immediately
+    rerender({ text: 'Paragraph before code block.\n\n```python\n', live: true })
+    expect(result.current).toBe('Paragraph before code block.\n\n```python\n')
+
+    // Next update within throttle window is throttled
+    act(() => {
+      vi.advanceTimersByTime(30)
+    })
+    rerender({ text: 'Paragraph before code block.\n\n```python\nprint(123)', live: true })
+    expect(result.current).toBe('Paragraph before code block.\n\n```python\n')
+
+    // Advance to 80ms
+    act(() => {
+      vi.advanceTimersByTime(50)
+    })
+    expect(result.current).toBe('Paragraph before code block.\n\n```python\nprint(123)')
+  })
 })

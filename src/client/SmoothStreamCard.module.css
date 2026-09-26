@@ -293,3 +293,19 @@
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: 1px;
 }
+
+/* The page face (sidebar Plugins page, view: 'page'): the page host draws its
+   own card, title, icon and breadcrumb around this body, so the card chrome and
+   the body's card-specific inset are dropped rather than nested inside it. */
+.page,
+.page:hover {
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.pageBody {
+  margin: 0;
+  padding-bottom: 0;
+  border-top: 0;
+}

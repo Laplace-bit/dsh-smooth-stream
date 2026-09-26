@@ -69,12 +69,14 @@ export function useFpsGuard(active: boolean): {
     }
   }, [active])
 
+  const observerRef = useRef<IntersectionObserver | null>(null)
+
   const ref = useCallback((element: HTMLElement | null) => {
     elementRef.current = element
-  }, [])
-
-  useEffect(() => {
-    const element = elementRef.current
+    if (observerRef.current !== null) {
+      observerRef.current.disconnect()
+      observerRef.current = null
+    }
     if (element === null || typeof IntersectionObserver === 'undefined') return
     const observer = new IntersectionObserver(
       (entries) => {
@@ -83,8 +85,15 @@ export function useFpsGuard(active: boolean): {
       { rootMargin: '120px 0px' },
     )
     observer.observe(element)
-    return () => observer.disconnect()
-  })
+    observerRef.current = observer
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      observerRef.current?.disconnect()
+      observerRef.current = null
+    }
+  }, [])
 
   const shouldHoldBack = useCallback(() => {
     return active && fpsRef.current.degraded && !visibleRef.current

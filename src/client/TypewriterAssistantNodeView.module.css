@@ -330,8 +330,20 @@
   /* List-item line boxes must retain their full leading. A wrapped inline
    * code element is an inline-flex formatting context; Chromium's
    * text-box-trim can shrink the li's layout box below the code's painted
-   * second line, letting the following item start inside that line. */
-  .root :is(p, h1, h2, h3, h4, h5, h6, blockquote) {
+   * second line, letting the following item start inside that line.
+   *
+   * Blocks carrying replaced content are excluded for the same reason, only
+   * worse. The trim is measured from the block's *text* edges, so a paragraph
+   * whose entire inline content is one tall inline-block collapses to a single
+   * text line: the Harness renders a workspace image as
+   * `<p><button class="imageButton"><img class="image"></button></p>`, and
+   * `vertical-align: middle` (kernel `MarkdownText.module.css`) straddles that
+   * ~17px line with the full image box (540x360 for a 1200x800 source). The
+   * paragraph then contributes only its text line to the flow, so the heading
+   * and table below are laid out inside the image's painted area while the
+   * image covers the paragraphs above it. Keep the full line box whenever the
+   * block holds a replaced element. */
+  .root :is(p, h1, h2, h3, h4, h5, h6, blockquote):not(:has(img, video, canvas, iframe, object, embed)) {
     text-box-trim: trim-both;
     text-box-edge: text;
   }
