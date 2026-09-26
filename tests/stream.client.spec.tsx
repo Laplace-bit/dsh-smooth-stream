@@ -63,6 +63,10 @@ afterEach(() => {
 /** Long enough that 400ms of reveal cannot drain it. */
 const LONG_STREAM_TEXT = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ')
 
+/** Distinct bodies so a duplicated flow part is visible in `textContent`. */
+const REASONING_PART_TEXT = 'weighing the two candidate roots'
+const RESPONSE_PART_TEXT = 'the answer body belongs to the response seat'
+
 /**
  * Stand-in for the layered `t` the seat injects.
  *
@@ -822,6 +826,34 @@ describe('assistant renderer', () => {
     const block = { kind: 'text', text: 'hello' }
     const view = render(<TypewriterAssistantNodeView {...assistantProps('running', [block])} />)
     expect(view.container.textContent).not.toContain('▍')
+  })
+
+  it('paints only the blocks of the flow part the seat hands this render', () => {
+    const blocks = [
+      { kind: 'reasoning', text: REASONING_PART_TEXT },
+      { kind: 'text', text: RESPONSE_PART_TEXT },
+    ]
+    // Kernels from 0.1.7 place one assistant step at two parts at the same
+    // time — the reasoning member of the Turn's process disclosure stays open
+    // while the turn runs — and hand each seat a `groupPart`. A render that
+    // ignores it paints the reply twice: once inside the process fold, once as
+    // the answer.
+    const reasoningPart = render(
+      <TypewriterAssistantNodeView {...assistantProps('settled', blocks)} groupPart="reasoning" />,
+    )
+    expect(reasoningPart.container.textContent).toContain(chatZh['message.think'])
+    expect(reasoningPart.container.textContent).not.toContain(RESPONSE_PART_TEXT)
+
+    const responsePart = render(
+      <TypewriterAssistantNodeView
+        {...assistantProps('settled', blocks)}
+        groupPart="response"
+        motionPreference="force-reduced"
+      />,
+    )
+    const responseText = responsePart.container.textContent ?? ''
+    expect(responseText).toContain(RESPONSE_PART_TEXT)
+    expect(responseText).not.toContain(REASONING_PART_TEXT)
   })
 
   it('renders raw text immediately when the auto preference sees reduced motion', async () => {

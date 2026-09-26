@@ -6,9 +6,18 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { markdownAvailable } from './primitives-compat.tsx'
 import { TypewriterAssistantNodeView } from './TypewriterAssistantNodeView.tsx'
+import type { AssistantStepPart } from './flowPart.ts'
 import { wrapFollowNodeView, type FollowWrapProps } from './TypewriterToolNodeView.tsx'
 import { SmoothStreamCard } from './SmoothStreamCard.tsx'
+import { SmoothStreamPluginsPage } from './SmoothStreamPluginsPage.tsx'
+
+// Exported so the offline verifier can render the built bundle exactly as the
+// two hosts do — the components are the only carriers of the switches, and the
+// client specs cannot run against prebuilt bundles.
+export { SmoothStreamCard, type SmoothStreamCardProps } from './SmoothStreamCard.tsx'
+export { SmoothStreamPluginsPage, type SmoothStreamPluginsPageProps } from './SmoothStreamPluginsPage.tsx'
 import { SmoothStreamCardController } from './smooth-stream-card-controller.ts'
 import { createSmoothStreamSettingsApi } from './smooth-stream-settings-api.ts'
 import { DebugPanel } from './DebugPanel.tsx'
@@ -26,6 +35,19 @@ import { DEFAULT_STREAM_SETTINGS, STREAM_SETTINGS_NS, type StreamSettings } from
 export const inject = ['slots']
 
 type AssistantProps = ChatNodeViewProps<'assistant-step'>
+
+/**
+ * Structural view of the slot registry for the 0.1.7 sidebar Plugins page.
+ *
+ * The page's `plugins.item` list slot is absent from the client typings this
+ * package pins (`0.1.0-rc.6`), and one registration only ever needs `inject` and
+ * `register`, so those two methods are named here rather than widening the whole
+ * registry.
+ */
+interface PluginsPageSlots {
+  inject(slot: string, register: () => unknown): unknown
+  register(options: Record<string, unknown>, component: unknown): unknown
+}
 
 const STREAM_MODES: readonly string[] = ['typewriter', 'teleprompter']
 const STREAM_PRESETS: readonly string[] = ['realtime', 'balanced', 'silky']
@@ -318,6 +340,10 @@ export function apply(ctx: ClientContext): void {
     syncDebug()
     card.start()
     settingsCtx.effect(() => settingsCtx.locale.register(SETTINGS_NS, { zh, en }), 'dsh-smooth-stream: settings dictionaries')
+    // The Plugins page resolves an entry's title outside React — the host calls
+    // the slot's `label` whenever it draws the list — so that one string is read
+    // through the locale service instead of through slot props.
+    const pageT = settingsCtx.locale.bind(SETTINGS_NS) as unknown as (key: string) => string
     settingsCtx.slots.inject('settings.plugin.item', () => settingsCtx.slots.register({
       name: 'settings.plugin.item',
       id: 'smooth-stream',
@@ -328,6 +354,26 @@ export function apply(ctx: ClientContext): void {
     // Older Harness declares this slot as a list (`id`); newer Harness uses a
     // keyed slot filtered by the Host settings namespace (`key`).
     } as never, SmoothStreamCard))
+    // 0.1.7 moved plugin configuration out of Settings into the sidebar's
+    // Plugins panel. The same controller and the same card feed that page's two
+    // views, so a kernel whose page never declares `plugins.item` (0.1.5) leaves
+    // this registration pending and keeps showing the card in Settings. The
+    // registry is narrowed structurally because the pinned 0.1.5 client typings
+    // do not declare that slot at all.
+    const pageSlots = settingsCtx.slots as unknown as PluginsPageSlots
+    pageSlots.inject('plugins.item', () => pageSlots.register({
+      name: 'plugins.item',
+      // Identity of the entry within the list slot: the page filters its
+      // `view: 'summary' | 'page'` requests by it, so it must stay unique in the
+      // composition.
+      id: 'dsh-smooth-stream',
+      // The shipped configuration pages register at 10/20/30/40, so a
+      // third-party entry follows them rather than displacing a first-party one.
+      order: 100,
+      label: () => pageT('title'),
+      locale: SETTINGS_NS,
+      inject: () => card.inject(),
+    }, SmoothStreamPluginsPage))
     settingsCtx.slots.inject('conversation.session.header.utilities', () => settingsCtx.slots.register({
       name: 'conversation.session.header.utilities',
       id: 'smooth-stream-debug',
@@ -351,6 +397,13 @@ export function apply(ctx: ClientContext): void {
     )
     return createElement(TypewriterAssistantNodeView, {
       ...props,
+      // Kernels from 0.1.7 place one assistant step at two flow parts — the
+      // reasoning member of the Turn's process disclosure and the response
+      // node — and hand the seat a `groupPart` so the renderer paints only its
+      // own blocks. The pinned kernel version does not declare the field on the
+      // seat props, so it is narrowed here and stays undefined on older kernels
+      // (which render each step once and expect every block).
+      groupPart: (props as { groupPart?: AssistantStepPart }).groupPart,
       // Override the seat's single-namespace binding with the layered lookup
       // described above. Falls back to the seat's own binding only if the
       // locale service never arrived (renderer then receives the prop it
@@ -376,6 +429,17 @@ export function apply(ctx: ClientContext): void {
     let releaseTakeover: (() => void) | undefined
 
     const syncTakeover = (): void => {
+      // The takeover renders assistant text itself, so it needs the kernel's
+      // markdown renderer. Without it the plugin would have to fall back to
+      // plain text — worse than the kernel's own view — so it declines the
+      // slot instead. A kernel whose primitive package renamed its exports
+      // (0.1.7 dropped the size-suffixed icons) still streams through the
+      // kernel renderer, and `primitives-compat` keeps that from being a
+      // crash that silently abdicates this entry.
+      if (!markdownAvailable) {
+        console.warn('[dsh-smooth-stream] markdown primitive unavailable; leaving assistant rendering to the kernel')
+        return
+      }
       if (!settings.takeoverEnabled()) {
         releaseTakeover?.()
         releaseTakeover = undefined

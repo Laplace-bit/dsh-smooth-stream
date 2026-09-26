@@ -1,10 +1,14 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from 'react'
-import { JsonBlock, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
-import { ImageGallery, type ImageLoader, type MessageImageLabels } from '@deepseek-ai/dsh-client-ui-attachment'
+import type { ImageLoader, MessageImageLabels } from '@deepseek-ai/dsh-client-ui-attachment'
+import { ImageGallery, JsonBlock, MarkdownText } from './primitives-compat.tsx'
 import type { ChatNodeViewProps, TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { AnimatedDisclosure } from './AnimatedDisclosure.tsx'
 import { IconThink } from './harnessIcons.ts'
-import { notifyFollowCommit } from './teleprompterGlide.ts'
+import {
+  notifyFollowCommit,
+  FollowRevealPhaseTracker,
+  computeFollowTrajectoryStep,
+} from './teleprompterGlide.ts'
 import { useSmoothStreamContent, type StreamSmoothingPreset } from './useSmoothStreamContent.ts'
 import { useFpsGuard } from './useFpsGuard.ts'
 import { useLogarithmicFade } from './useLogarithmicFade.ts'
@@ -12,9 +16,11 @@ import { useDecoupledMarkdown } from './useDecoupledMarkdown.ts'
 import { FollowHost } from './FollowHost.tsx'
 import { DEFAULT_STREAM_CONFIG, type StreamMode } from '../config.ts'
 import { DEFAULT_STREAM_SETTINGS, type StreamMotionPreference } from '../settings.ts'
+import { belongsToFlowPart, isFlowPartActiveTail, type AssistantStepPart } from './flowPart.ts'
 import css from './TypewriterAssistantNodeView.module.css'
 
 type AssistantProps = ChatNodeViewProps<'assistant-step'>
+
 type MarkdownProps = Pick<ComponentProps<typeof MarkdownText>, 'labels' | 'fileMentions' | 'text'>
 
 function usePrefersReducedMotion(): boolean {
@@ -456,6 +462,8 @@ function AnimatedReasoning({
   shouldHoldBack,
   followSpeedCpsRef,
   followRevealScaleRef,
+  followRevealedCharsRef,
+  onPredictiveChange,
   t,
 }: {
   text: string
@@ -467,11 +475,17 @@ function AnimatedReasoning({
   shouldHoldBack: () => boolean
   followSpeedCpsRef?: { current: number } | undefined
   followRevealScaleRef?: { current: number } | undefined
+  followRevealedCharsRef?: { current: number } | undefined
+  onPredictiveChange?: ((predictive: boolean) => void) | undefined
   t: AssistantProps['t']
 }) {
   const reduced = motionReduced
   const [expanded, setExpanded] = useState(running && thinkAutoExpand)
   const [autoClosed, setAutoClosed] = useState(false)
+
+  useEffect(() => {
+    onPredictiveChange?.(running && expanded)
+  }, [running, expanded, onPredictiveChange])
   const summaryRef = useRef<HTMLSpanElement>(null)
   const fadeRootRef = useRef<HTMLDivElement>(null)
   // The custom thinking auto-scroll drives the SAME node as the logarithmic
@@ -480,6 +494,8 @@ function AnimatedReasoning({
   const thinkBodyRef = fadeRootRef
   const localFadeSpeedRef = useRef(35)
   const fadeSpeedRef = followSpeedCpsRef ?? localFadeSpeedRef
+  const localRevealedCharsRef = useRef(0)
+  const revealedCharsRef = followRevealedCharsRef ?? localRevealedCharsRef
   const userScrolledRef = useRef(false)
   const rafIdRef = useRef(0)
   // Latest "the live stream still owns this scroller" state. Tracked on every
@@ -497,6 +513,7 @@ function AnimatedReasoning({
     shouldHoldBack,
     speedCpsRef: fadeSpeedRef,
     revealScaleRef: followRevealScaleRef,
+    revealedCharsRef,
     onRevealCommit: () => { notifyFollowCommit(commitAnchorRef.current) },
   })
   const shown = running && !reduced ? displayed : text
@@ -519,6 +536,123 @@ function AnimatedReasoning({
     notifyFollowCommit(commitAnchorRef.current)
   }, [running, thinkAutoExpand])
 
+  const phaseTrackerRef = useRef<FollowRevealPhaseTracker | null>(null)
+  if (phaseTrackerRef.current === null) {
+    phaseTrackerRef.current = new FollowRevealPhaseTracker({
+      seedCharsPerLine: 35,
+      seedLineHeightPx: 24,
+    })
+  }
+
+  const thinkRunwayRef = useRef<HTMLDivElement>(null)
+  const currentRunwayHeightRef = useRef(0)
+  const trajectoryPositionRef = useRef<number | null>(null)
+  const trajectoryVelocityRef = useRef(0)
+  const lastGlideTimeRef = useRef(0)
+  const isGlidingRef = useRef(false)
+
+  const RUNWAY_BASE_PX = 16
+
+  const stepGlide = useCallback(() => {
+    rafIdRef.current = 0
+    const el = thinkBodyRef.current
+    if (!followActiveRef.current || userScrolledRef.current || el === null) {
+      isGlidingRef.current = false
+      lastGlideTimeRef.current = 0
+      trajectoryPositionRef.current = null
+      trajectoryVelocityRef.current = 0
+      if (thinkRunwayRef.current !== null && currentRunwayHeightRef.current !== 0) {
+        currentRunwayHeightRef.current = 0
+        thinkRunwayRef.current.style.height = '0px'
+      }
+      return
+    }
+
+    const now = performance.now()
+    const dt = lastGlideTimeRef.current > 0 ? Math.min(32, Math.max(1, now - lastGlideTimeRef.current)) : 16.7
+    lastGlideTimeRef.current = now
+
+    // Measure the raw text floor by deducting the currently applied dynamic runway
+    const measuredScrollExtent = Math.max(0, el.scrollHeight - el.clientHeight)
+    const textFloor = Math.max(0, measuredScrollExtent - currentRunwayHeightRef.current)
+
+    if (textFloor <= 0 && measuredScrollExtent <= 0) {
+      el.scrollTop = 0
+      trajectoryPositionRef.current = 0
+      trajectoryVelocityRef.current = 0
+      if (thinkRunwayRef.current !== null && currentRunwayHeightRef.current !== 0) {
+        currentRunwayHeightRef.current = 0
+        thinkRunwayRef.current.style.height = '0px'
+      }
+      if (running && expanded) {
+        isGlidingRef.current = true
+        rafIdRef.current = requestAnimationFrame(stepGlide)
+      } else {
+        isGlidingRef.current = false
+      }
+      return
+    }
+
+    // Phase progression tracking: advances smoothly per revealed character
+    const charCount = revealedCharsRef.current || shown.length
+    const phase = phaseTrackerRef.current!.advance(textFloor, charCount)
+    const lineHeight = phase.lineHeightPx || 24
+
+    // JITTER-FREE RUNWAY COMPENSATOR:
+    // When text wraps to a new line, DOM scrollHeight increases by lineHeight (~24px).
+    // By growing the runway by (phase * lineHeight) during character reveal and resetting
+    // it on wrap, the combined (textHeight + runwayHeight) stays perfectly continuous across
+    // wrap boundaries with ZERO jump in the denominator (scrollHeight - clientHeight).
+    // This completely eliminates the sawtooth oscillation of the scrollbar thumb.
+    const dynamicRunway = running && expanded ? RUNWAY_BASE_PX + phase.phase * lineHeight : 0
+    if (thinkRunwayRef.current !== null && Math.abs(currentRunwayHeightRef.current - dynamicRunway) >= 0.25) {
+      currentRunwayHeightRef.current = dynamicRunway
+      thinkRunwayRef.current.style.height = `${dynamicRunway}px`
+    }
+
+    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight)
+    if (reduced) {
+      el.scrollTop = maxScroll
+      trajectoryPositionRef.current = maxScroll
+      isGlidingRef.current = false
+      return
+    }
+
+    const targetPx = Math.min(maxScroll, phase.targetPx)
+
+    if (trajectoryPositionRef.current === null || Math.abs(trajectoryPositionRef.current - el.scrollTop) > 3) {
+      trajectoryPositionRef.current = el.scrollTop
+    }
+    const currentPos = trajectoryPositionRef.current
+    const cps = fadeSpeedRef.current || 35
+    const targetVelocityPxPerMs = Math.max(0, cps) * (lineHeight / Math.max(10, phase.charsPerLine)) / 1000
+
+    const trajectoryStep = computeFollowTrajectoryStep(dt, {
+      positionPx: currentPos,
+      velocityPxPerMs: trajectoryVelocityRef.current,
+      targetPx,
+      targetVelocityPxPerMs,
+      minLagPx: 1,
+      maxLagPx: 24,
+      paintFloorPx: maxScroll,
+    })
+
+    trajectoryPositionRef.current = trajectoryStep.positionPx
+    trajectoryVelocityRef.current = trajectoryStep.velocityPxPerMs
+    el.scrollTop = trajectoryStep.positionPx
+
+    if (running && expanded && !userScrolledRef.current) {
+      isGlidingRef.current = true
+      rafIdRef.current = requestAnimationFrame(stepGlide)
+    } else if (targetPx - trajectoryStep.positionPx > 0.5) {
+      isGlidingRef.current = true
+      rafIdRef.current = requestAnimationFrame(stepGlide)
+    } else {
+      isGlidingRef.current = false
+      lastGlideTimeRef.current = 0
+    }
+  }, [reduced, running, expanded, shown, fadeSpeedRef, revealedCharsRef])
+
   useEffect(() => {
     // Only the live stream owns the reading position. A settled block is
     // something to read from the top, so expanding a finished reasoning card
@@ -526,20 +660,12 @@ function AnimatedReasoning({
     if (!running || !expanded || userScrolledRef.current) return
     const el = thinkBodyRef.current
     if (el === null) return
-    if (rafIdRef.current === 0) {
-      rafIdRef.current = requestAnimationFrame(() => {
-        rafIdRef.current = 0
-        // Re-checked at frame time: the stream may have stopped, the block may
-        // have collapsed, or the user may have scrolled since scheduling. A
-        // queued frame never steals the position back.
-        if (!followActiveRef.current || userScrolledRef.current || el === null) return
-        const delta = el.scrollHeight - el.scrollTop - el.clientHeight
-        if (delta > 2) {
-          el.scrollTop = Number.MAX_SAFE_INTEGER
-        }
-      })
+    if (!isGlidingRef.current) {
+      isGlidingRef.current = true
+      lastGlideTimeRef.current = performance.now()
+      rafIdRef.current = requestAnimationFrame(stepGlide)
     }
-  }, [running, expanded, shown])
+  }, [running, expanded, shown, stepGlide])
 
   useEffect(() => {
     return () => {
@@ -547,8 +673,25 @@ function AnimatedReasoning({
         cancelAnimationFrame(rafIdRef.current)
         rafIdRef.current = 0
       }
+      isGlidingRef.current = false
+      lastGlideTimeRef.current = 0
+      trajectoryPositionRef.current = null
+      trajectoryVelocityRef.current = 0
+      if (thinkRunwayRef.current !== null && currentRunwayHeightRef.current !== 0) {
+        currentRunwayHeightRef.current = 0
+        thinkRunwayRef.current.style.height = '0px'
+      }
     }
   }, [])
+
+  useEffect(() => {
+    if (!running) {
+      if (thinkRunwayRef.current !== null && currentRunwayHeightRef.current !== 0) {
+        currentRunwayHeightRef.current = 0
+        thinkRunwayRef.current.style.height = '0px'
+      }
+    }
+  }, [running])
 
   useEffect(() => {
     const el = thinkBodyRef.current
@@ -557,9 +700,18 @@ function AnimatedReasoning({
     const onWheel = (e: WheelEvent) => {
       if (e.deltaY < 0) {
         userScrolledRef.current = true
+        if (rafIdRef.current !== 0) {
+          cancelAnimationFrame(rafIdRef.current)
+          rafIdRef.current = 0
+        }
+        isGlidingRef.current = false
+        lastGlideTimeRef.current = 0
+        trajectoryPositionRef.current = el.scrollTop
+        trajectoryVelocityRef.current = 0
       } else if (e.deltaY > 0) {
         if (el.scrollHeight - el.scrollTop - el.clientHeight <= 30) {
           userScrolledRef.current = false
+          trajectoryPositionRef.current = el.scrollTop
         }
       }
     }
@@ -575,7 +727,9 @@ function AnimatedReasoning({
         userScrolledRef.current = false
       } else if (isPointerDown) {
         userScrolledRef.current = true
+        trajectoryVelocityRef.current = 0
       }
+      trajectoryPositionRef.current = el.scrollTop
     }
     el.addEventListener('wheel', onWheel, { passive: true })
     el.addEventListener('pointerdown', onPointerDown, { passive: true })
@@ -634,7 +788,19 @@ function AnimatedReasoning({
             </>
           )}
         >
-          <div ref={fadeRootRef} className={css.thinkBody}>{shown}</div>
+          <div ref={fadeRootRef} className={css.thinkBody}>
+            {shown}
+            <div
+              ref={thinkRunwayRef}
+              aria-hidden="true"
+              style={{
+                height: 0,
+                minHeight: 0,
+                flexShrink: 0,
+                pointerEvents: 'none',
+              }}
+            />
+          </div>
         </AnimatedDisclosure>
       </div>
     </div>
@@ -662,6 +828,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   logarithmicFade = DEFAULT_STREAM_SETTINGS.logarithmicFade,
   controlScroll = true,
   motionPreference = DEFAULT_STREAM_SETTINGS.motionPreference,
+  groupPart,
   node,
   useTurnData,
   openFile,
@@ -679,6 +846,15 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   logarithmicFade?: boolean
   controlScroll?: boolean
   motionPreference?: StreamMotionPreference
+  /**
+   * Flow part this render owns; absent on kernels that render a step once.
+   *
+   * Declared with an explicit `undefined` because the seat passes the field
+   * through unvalidated: `index.ts` narrows it structurally off older seat
+   * props, and `exactOptionalPropertyTypes` rejects handing an absent key an
+   * `undefined` value.
+   */
+  groupPart?: AssistantStepPart | undefined
 }) {
   const data = node.data
   const streaming = data.status === 'running'
@@ -693,6 +869,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
     && turnProcess.spec.inlineReasoning
     && !turnProcess.open
   const revealProcess = useCallback(() => { turnProcess?.setOpen(true) }, [turnProcess])
+  const belongsToPart = (block: (typeof data.blocks)[number]): boolean => belongsToFlowPart(block, groupPart)
   const { ref: guardRef, shouldHoldBack } = useFpsGuard(streaming)
   const rootSpeedRef = useRef(35)
   const rootRevealedCharsRef = useRef(0)
@@ -701,26 +878,32 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   const [textRevealActive, setTextRevealActive] = useState(false)
   const completionCandidate = !streaming
     && previousStreamingRef.current
-    && data.blocks.some(block => block.kind === 'text' && block.text.trim() !== '')
+    && data.blocks.some(block => belongsToPart(block) && block.kind === 'text' && block.text.trim() !== '')
   useLayoutEffect(() => {
     previousStreamingRef.current = streaming
   }, [streaming])
   const updateTextRevealActivity = useCallback((active: boolean): void => {
     setTextRevealActive(previous => previous === active ? previous : active)
   }, [])
-  const reasoningTailIndex = streaming && data.blocks[data.blocks.length - 1]?.kind === 'reasoning'
-    ? data.blocks.length - 1
+  /** Last block this render owns; `blocks.length - 1` on kernels without parts. */
+  let lastPartIndex = -1
+  for (let index = data.blocks.length - 1; index >= 0; index -= 1) {
+    const block = data.blocks[index]
+    if (block !== undefined && belongsToPart(block)) {
+      lastPartIndex = index
+      break
+    }
+  }
+  const reasoningTailIndex = streaming && lastPartIndex !== -1 && data.blocks[lastPartIndex]?.kind === 'reasoning'
+    ? lastPartIndex
     : -1
   const reasoningOwnsSpeed = reasoningTailIndex !== -1
   const rootPredictiveRef = useRef(false)
+  if (reasoningOwnsSpeed) {
+    rootPredictiveRef.current = true
+  }
   const previousReasoningTailRef = useRef(-1)
   if (reasoningTailIndex !== previousReasoningTailRef.current) {
-    // Think growth is already paced by its own text reveal. Opening additional
-    // speculative runway here exposes that runway as an empty gap above the
-    // fixed turn status, especially when reasoning arrives in fast bursts.
-    // The follower still smooths real height growth within the measured gap
-    // and catches up any unsafe remainder in the same frame.
-    rootPredictiveRef.current = false
     if (!reasoningOwnsSpeed) rootSpeedRef.current = 35
     previousReasoningTailRef.current = reasoningTailIndex
   }
@@ -748,27 +931,32 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   const imageLoader: ImageLoader = loadImage ?? (async () => {
     throw new Error(t('image.serviceUnavailable'))
   })
-  const hasVisible = streaming
-    || data.status === 'interrupted'
-    || data.blocks.some(block => block.kind !== 'tool-call')
+  const ownsAnyBlock = data.blocks.some(block => belongsToPart(block) && block.kind !== 'tool-call')
+  const isPartActiveTail = isFlowPartActiveTail(data.blocks, groupPart)
+  const hasVisible = groupPart === undefined
+    ? streaming || data.status === 'interrupted' || ownsAnyBlock
+    : ownsAnyBlock || (isPartActiveTail && (streaming || data.status === 'interrupted'))
   if (!hasVisible) return null
   const announcementText = data.blocks
-    .filter(block => block.kind === 'text')
+    .filter((block): block is Extract<(typeof data.blocks)[number], { kind: 'text' }> =>
+      belongsToPart(block) && block.kind === 'text')
     .map(block => block.text)
     .join('\n')
 
   const rendered: ReactNode[] = []
-  const last = data.blocks.length - 1
   let lastFollow = -1
   let lastText = -1
   for (let index = 0; index < data.blocks.length; index += 1) {
-    const kind = data.blocks[index]?.kind
+    const block = data.blocks[index]
+    if (block === undefined || !belongsToPart(block)) continue
+    const kind = block.kind
     if (kind === 'text' || kind === 'reasoning') lastFollow = index
     if (kind === 'text') lastText = index
   }
   for (let index = 0; index < data.blocks.length; index += 1) {
     const block = data.blocks[index]
     if (block === undefined) continue
+    if (!belongsToPart(block)) continue
     switch (block.kind) {
       case 'text':
         if (!streaming && block.text.trim() === '') break
@@ -796,14 +984,16 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
           <FoldableReasoning key={index} hidden={reasoningHidden} reveal={revealProcess}>
             <AnimatedReasoning
               text={block.text}
-              running={streaming && index === last}
+              running={streaming && isPartActiveTail && index === lastPartIndex}
               preset={preset}
               thinkAutoExpand={thinkAutoExpand}
               logarithmicFade={logarithmicFade && data.status !== 'interrupted'}
               motionReduced={reduced}
               shouldHoldBack={shouldHoldBack}
-              followSpeedCpsRef={reasoningOwnsSpeed && index === last ? rootSpeedRef : undefined}
-              followRevealScaleRef={reasoningOwnsSpeed && index === last ? rootRevealScaleRef : undefined}
+              followSpeedCpsRef={reasoningOwnsSpeed && index === lastPartIndex ? rootSpeedRef : undefined}
+              followRevealScaleRef={reasoningOwnsSpeed && index === lastPartIndex ? rootRevealScaleRef : undefined}
+              followRevealedCharsRef={reasoningOwnsSpeed && index === lastPartIndex ? rootRevealedCharsRef : undefined}
+              onPredictiveChange={reasoningOwnsSpeed && index === lastPartIndex ? updateTextPrediction : undefined}
               t={t}
             />
           </FoldableReasoning>,
@@ -845,7 +1035,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
         // The status can close before its final text arm drains. Retain this
         // same owner across that boundary; the candidate bridges the one
         // layout commit before the child reports its live reveal state.
-        active={!reduced && (streaming || completionCandidate || textRevealActive)}
+        active={!reduced && ((streaming && isPartActiveTail) || completionCandidate || textRevealActive)}
         speedCpsRef={rootSpeedRef}
         revealedCharsRef={rootRevealedCharsRef}
         revealScaleRef={rootRevealScaleRef}
@@ -854,7 +1044,11 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
       >
         <div className={css.body}>
           {rendered}
-          {data.status === 'interrupted' && <span className={css.stopped}>{t('message.stopped')}</span>}
+          {data.status === 'interrupted'
+            && (groupPart === undefined
+              || groupPart === 'response'
+              || !data.blocks.some(block => block.kind !== 'reasoning' && block.kind !== 'tool-call'))
+            && <span className={css.stopped}>{t('message.stopped')}</span>}
         </div>
       </FollowHost>
     </div>
