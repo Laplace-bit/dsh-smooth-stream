@@ -70,4 +70,26 @@ describe('shiftSurfacesOf', () => {
     port.appendChild(transcript)
     expect(shiftSurfacesOf(port)).toEqual([transcript])
   })
+
+  it('reuses cached surfaces across repeated calls and updates on structural mutation', () => {
+    const port = buildPort(false)
+    const firstSurfaces = shiftSurfacesOf(port)
+    const secondSurfaces = shiftSurfacesOf(port)
+    // Same array reference on cache hit
+    expect(secondSurfaces).toBe(firstSurfaces)
+
+    // Append a new row to flow: cache should invalidate and reflect new child
+    const flow = port.querySelector('[data-chat-flow]') as HTMLElement
+    const third = document.createElement('div')
+    third.setAttribute('data-chat-anchor-key', '3:user')
+    flow.appendChild(third)
+
+    const updatedSurfaces = shiftSurfacesOf(port)
+    expect(updatedSurfaces).not.toBe(firstSurfaces)
+    expect(updatedSurfaces.map(el => el.getAttribute('data-chat-anchor-key'))).toEqual([
+      '1:user',
+      '2:assistant',
+      '3:user',
+    ])
+  })
 })

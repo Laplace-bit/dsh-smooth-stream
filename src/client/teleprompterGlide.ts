@@ -148,9 +148,6 @@ export const FOLLOW_CATCHUP_MAX_STEP_PX = 8
  */
 export const FOLLOW_PAINT_SHIFT_MAX_STEP_PX = 8
 
-/** Runway size emitted by bundles before the 72px predictive runway. */
-const LEGACY_RUNWAY_PX = 48
-
 /** Lowest reveal rate retained while the spring is short on paint room. */
 export const FOLLOW_REVEAL_MIN_SCALE = 0.55
 
@@ -423,9 +420,62 @@ function resizeProxyOf(port: HTMLElement): HTMLElement | null {
  * child therefore rides the same transform, keeping the visual order of the
  * column intact.
  */
+interface SurfaceCacheRecord {
+  flow: HTMLElement | null
+  childCount: number
+  firstElement: Element | null
+  lastElement: Element | null
+  surfaces: HTMLElement[]
+  status: HTMLElement | null
+  revision: number
+}
+
+const surfaceCache = new WeakMap<HTMLElement, SurfaceCacheRecord>()
+const portRevisions = new WeakMap<HTMLElement, number>()
+
+export function invalidateSurfaceCache(port?: HTMLElement | null): void {
+  if (!port) return
+  portRevisions.set(port, (portRevisions.get(port) ?? 0) + 1)
+}
+
+function isSurfaceCacheValid(port: HTMLElement, cache: SurfaceCacheRecord): boolean {
+  const currentRev = portRevisions.get(port) ?? 0
+  if (cache.revision !== currentRev) return false
+
+  const flow = flowElementOf(port)
+  if (flow !== cache.flow) return false
+  if (flow === null) return false
+
+  if (flow.children.length !== cache.childCount) return false
+  if (flow.firstElementChild !== cache.firstElement) return false
+  if (flow.lastElementChild !== cache.lastElement) return false
+
+  return true
+}
+
 export function shiftSurfacesOf(port: HTMLElement): HTMLElement[] {
+  const cached = surfaceCache.get(port)
+  if (cached && isSurfaceCacheValid(port, cached)) {
+    return cached.surfaces
+  }
+
   const transcript = port.querySelector<HTMLElement>('[data-chat-transcript]')
-  if (transcript !== null) return [transcript]
+  if (transcript !== null) {
+    const flow = flowElementOf(port)
+    const status = turnStatusOf(port)
+    const entry: SurfaceCacheRecord = {
+      flow,
+      childCount: flow?.children.length ?? 0,
+      firstElement: flow?.firstElementChild ?? null,
+      lastElement: flow?.lastElementChild ?? null,
+      surfaces: [transcript],
+      status,
+      revision: portRevisions.get(port) ?? 0,
+    }
+    surfaceCache.set(port, entry)
+    return [transcript]
+  }
+
   const anchored = [...port.querySelectorAll<HTMLElement>('[data-chat-anchor-key]')]
     .filter(row => row.parentElement?.closest('[data-chat-anchor-key]') === null)
   const flow = port.querySelector<HTMLElement>('[data-chat-flow]')
@@ -435,13 +485,26 @@ export function shiftSurfacesOf(port: HTMLElement): HTMLElement[] {
   // One document-order pass: an anchored row, or a foreign child that contains
   // no anchored row of its own (a wrapper around real rows would double-shift
   // the rows inside it).
-  return [...flow.children].filter((child): child is HTMLElement =>
+  const surfaces = [...flow.children].filter((child): child is HTMLElement =>
     child instanceof HTMLElement
     && child !== status
     && (anchoredSet.has(child) || child.querySelector('[data-chat-anchor-key]') === null))
+
+  const entry: SurfaceCacheRecord = {
+    flow,
+    childCount: flow.children.length,
+    firstElement: flow.firstElementChild,
+    lastElement: flow.lastElementChild,
+    surfaces,
+    status,
+    revision: portRevisions.get(port) ?? 0,
+  }
+  surfaceCache.set(port, entry)
+  return surfaces
 }
 
-function currentShiftOf(element: HTMLElement): number {
+function currentShiftOf(element: HTMLElement | null | undefined): number {
+  if (!element || !element.style) return 0
   return Number(
     /translate3d\(0(?:px)?,\s*(-?[\d.]+)px,\s*0(?:px)?\)/.exec(element.style.transform)?.[1] ?? 0,
   )
@@ -457,7 +520,8 @@ function currentShiftOf(element: HTMLElement): number {
  * and matches the release 0.4.0 feel; the shift resumes on the next frame once
  * it closes. */
 
-function setDirectShift(element: HTMLElement, px: number): void {
+function setDirectShift(element: HTMLElement | null | undefined, px: number): void {
+  if (!element || !element.style) return
   if (Math.abs(px) > 0.01) {
     if (
       Math.abs(currentShiftOf(element) - px) <= 0.01
@@ -474,18 +538,32 @@ function setDirectShift(element: HTMLElement, px: number): void {
   element.style.clipPath = ''
 }
 
-function setShift(element: HTMLElement, px: number): void {
+function setShift(
+  element: HTMLElement | null | undefined,
+  px: number,
+  tooltipSurface?: HTMLElement | null,
+): void {
+  if (!element || !element.style) return
   // Guard: while an open fixed tooltip lives on the surface, hold it
   // untransformed (see the comment above). When the shift is zero the tooltip
   // cannot detach, so skip the subtree scan entirely and keep the fast path.
-  if (Math.abs(px) > 0.01 && element.querySelector('[role="tooltip"]') !== null) {
-    setDirectShift(element, 0)
-    return
+  if (Math.abs(px) > 0.01) {
+    const hasTooltip = tooltipSurface !== undefined
+      ? element === tooltipSurface
+      : element.querySelector('[role="tooltip"]') !== null
+    if (hasTooltip) {
+      setDirectShift(element, 0)
+      return
+    }
   }
   setDirectShift(element, px)
 }
 
 function turnStatusOf(port: HTMLElement): HTMLElement | null {
+  const cached = surfaceCache.get(port)
+  if (cached && isSurfaceCacheValid(port, cached)) {
+    return cached.status
+  }
   return port.querySelector<HTMLElement>(
     '[data-chat-turn-status], [data-chat-flow] > [role="status"]',
   )
@@ -734,14 +812,18 @@ function completionSettleGuardsPort(port: HTMLElement): boolean {
 function readingAnchorOf(port: HTMLElement): HTMLElement | null {
   const flow = flowElementOf(port)
   if (flow === null) return null
-  let anchor: HTMLElement | null = null
-  for (const child of flow.children) {
+  const children = flow.children
+  for (let i = children.length - 1; i >= 0; i--) {
+    const child = children[i]
     if (!(child instanceof HTMLElement)) continue
-    if (child.getAttribute('data-chat-flow-kind') === 'assistant' || child.querySelector('[data-variant="think"]') !== null) {
-      anchor = child
+    if (child.getAttribute('data-chat-flow-kind') === 'assistant') {
+      return child
+    }
+    if (child.querySelector('[data-variant="think"]') !== null) {
+      return child
     }
   }
-  return anchor ?? shiftSurfacesOf(port).at(-1) ?? null
+  return shiftSurfacesOf(port).at(-1) ?? null
 }
 
 /**
@@ -769,7 +851,7 @@ function measureReadingAnchor(port: HTMLElement): { anchor: HTMLElement; index: 
   const scrollTop = port.scrollTop
   const scrollHeight = port.scrollHeight
   const flow = flowElementOf(port)
-  const index = flow === null ? -1 : [...flow.children].indexOf(anchor)
+  const index = flow === null ? -1 : Array.prototype.indexOf.call(flow.children, anchor)
   const stored = followGuardAnchors.get(port)
   if (stored === undefined) {
     followGuardAnchors.set(port, { element: anchor, top, index, shift, pad, scrollTop, scrollHeight })
@@ -1068,11 +1150,30 @@ function subscribeFollowCommit(port: HTMLElement, fn: () => void): () => void {
   return () => { listeners!.delete(fn) }
 }
 
-function restoreRunway(port: HTMLElement): void {
+/**
+ * Release every space this engine owns on one port.
+ *
+ * Exported for the residue spec: the inline-margin sweep is the part that
+ * cleans up after older bundles, and it is only observable through a DOM
+ * fixture.
+ * @param port - The conversation scrollport to clean.
+ */
+export function restoreRunway(port: HTMLElement): void {
   const runway = followRunways.get(port)
-  if (runway === undefined) return
-  runway.element.style[runway.property] = runway.original
-  followRunways.delete(port)
+  if (runway !== undefined) {
+    runway.element.style[runway.property] = runway.original
+    followRunways.delete(port)
+  }
+  const surfaces = shiftSurfacesOf(port)
+  for (const surface of surfaces) {
+    if (isOwnedRunwayMargin(surface.style.marginBottom)) {
+      surface.style.marginBottom = ''
+    }
+  }
+  const status = turnStatusOf(port)
+  if (status !== null && isOwnedRunwayMargin(status.style.marginTop)) {
+    status.style.marginTop = ''
+  }
   invalidatePaintLimit(port)
 }
 
@@ -1082,37 +1183,40 @@ function isLegacyRunway(value: string): boolean {
   if (terms.length === 0 || value.replaceAll(/calc|px|[\d.+()\s]/g, '') !== '') return false
   const values = terms.map(([, raw]) => Number(raw))
   if (values.some(px => !Number.isFinite(px))) return false
-  return [LEGACY_RUNWAY_PX, FOLLOW_STATUS_RUNWAY_PX].some(unit => values.every(px => (
-    px >= unit && Math.abs(px % unit) <= Number.EPSILON
-  )))
+  return values.some(px => px > 0)
 }
 
-/** Remove unowned runway residue written by v0.3.3 and earlier bundles. */
+/**
+ * Whether an inline margin value is one this engine, or a bundle before it,
+ * wrote as a completion runway.
+ *
+ * The owned writer emits absolute px (`72px`) or a `calc()` over one, so px is
+ * the marker that separates its residue from a host-authored or relative
+ * margin. Sweeping everything non-empty would delete layout the plugin does not
+ * own.
+ */
+function isOwnedRunwayMargin(value: string): boolean {
+  return value !== '' && (isLegacyRunway(value) || value.includes('px'))
+}
+
+/** Remove unowned runway residue written by older bundles or prior steps. */
 function migrateLegacyRunway(
   port: HTMLElement,
   surfaces: readonly HTMLElement[],
   status: HTMLElement | null,
-  composer: HTMLElement | null,
 ): boolean {
   if (followRunways.has(port)) return false
   let migrated = false
   if (status !== null && isLegacyRunway(status.style.marginTop)) {
-    // Harness TurnStatus has no inline margin; exact 48px multiples here are
-    // values emitted by the old runway writer, including reload accumulation.
     status.style.marginTop = ''
     migrated = true
   }
-  const last = surfaces.at(-1)
-  if (
-    status === null
-    && composer !== null
-    && last !== undefined
-    && isLegacyRunway(last.style.marginBottom)
-  ) {
-    // Without TurnStatus the old writer used the current final message as its
-    // completion runway. Limit migration to that same target topology.
-    last.style.marginBottom = ''
-    migrated = true
+  const currentTarget = followRunways.get(port)?.element
+  for (const surface of surfaces) {
+    if (surface !== currentTarget && isOwnedRunwayMargin(surface.style.marginBottom)) {
+      surface.style.marginBottom = ''
+      migrated = true
+    }
   }
   if (migrated) invalidatePaintLimit(port)
   return migrated
@@ -1127,7 +1231,7 @@ function ensureRunway(
   const composer = port.querySelector<HTMLElement>('[data-composer-seat]')
   // Adopt one exact current runway before migration. Larger exact multiples
   // are accumulated residue from older bundles and must be stripped.
-  if (status !== null && followRunways.get(port) === undefined) {
+  if (runwayPx > 0 && status !== null && followRunways.get(port) === undefined) {
     const inlinePx = Number.parseFloat(status.style.marginTop ?? '') || 0
     if (Math.abs(inlinePx - FOLLOW_STATUS_RUNWAY_PX) <= 0.5) {
       followRunways.set(port, {
@@ -1140,28 +1244,37 @@ function ensureRunway(
       invalidatePaintLimit(port)
     }
   }
-  const migratedLegacy = migrateLegacyRunway(port, surfaces, status, composer)
+  const migratedLegacy = migrateLegacyRunway(port, surfaces, status)
   // A runway is useful only after the natural conversation already has a
   // scroll floor for its equal message transform to ride. Before that point
   // applyVisual keeps every surface in normal flow, so adding status margin
   // would expose the whole runway as empty space below a short/early Think.
   const naturalHeight = Math.max(0, port.scrollHeight - runwayOffsetOf(port))
   const existing = followRunways.get(port)
-  const requestedRunwayPx = migratedLegacy || existing?.normalizedLegacy === true
-    ? FOLLOW_STATUS_RUNWAY_PX
-    : runwayPx
+  const requestedRunwayPx = runwayPx <= 0
+    ? 0
+    : (migratedLegacy || existing?.normalizedLegacy === true
+      ? FOLLOW_STATUS_RUNWAY_PX
+      : runwayPx)
+  const target = status === null
+    ? { element: composer === null ? undefined : surfaces.at(-1), property: 'marginBottom' as const }
+    : { element: status, property: 'marginTop' as const }
   if (requestedRunwayPx <= 0 || port.clientHeight <= 0 || naturalHeight <= port.clientHeight) {
     restoreRunway(port)
     return
   }
-  const target = status === null
-    ? { element: composer === null ? undefined : surfaces.at(-1), property: 'marginBottom' as const }
-    : { element: status, property: 'marginTop' as const }
   if (target.element === undefined) {
     restoreRunway(port)
     return
   }
   const element = target.element
+
+  for (const surface of surfaces) {
+    if (surface !== element && isOwnedRunwayMargin(surface.style.marginBottom)) {
+      surface.style.marginBottom = ''
+    }
+  }
+
   const current = followRunways.get(port)
   if (current?.element === element
     && current.property === target.property
@@ -1169,7 +1282,8 @@ function ensureRunway(
 
   restoreRunway(port)
   const beforeHeight = port.scrollHeight
-  const original = element.style[target.property]
+  const rawOriginal = element.style[target.property]
+  const original = isLegacyRunway(rawOriginal) || rawOriginal.includes('px') ? '' : rawOriginal
   element.style[target.property] = original === ''
     ? `${requestedRunwayPx}px`
     : `calc(${original} + ${requestedRunwayPx}px)`
@@ -1195,7 +1309,11 @@ function runwayOffsetOf(port: HTMLElement): number {
  */
 function transferRunwayToFlowPad(port: HTMLElement, requestedPx: number): number {
   const runway = followRunways.get(port)
-  if (runway === undefined || requestedPx <= 0 || !runway.element.isConnected) return 0
+  if (runway === undefined || requestedPx <= 0) return 0
+  if (!runway.element.isConnected) {
+    followRunways.delete(port)
+    return 0
+  }
   const nextRequestedPx = Math.max(0, runway.requestedPx - requestedPx)
   const beforeOffset = runway.offset
   const beforeHeight = port.scrollHeight
@@ -1493,7 +1611,7 @@ function applyVisual(
   // shift glide with it. The spring still closes below the fold, and backpressure
   // reads the untranslated requestedLag so reveal pacing is unchanged.
   const availableShift = Math.min(
-    Math.max(0, limit),
+    Math.max(runwayOffset, limit),
     Math.max(0, shiftCeilingPx),
   )
   const motionShift = Math.min(
@@ -1585,7 +1703,10 @@ function applyVisual(
     anchorDeltaPx: followTerminalPhases.has(port) ? measureAnchorDeltaForTelemetry(port) : null,
     remainingRevealChars: followRemainingRevealChars,
   })
-  for (const surface of surfaces) setShift(surface, shift)
+  const tooltipSurface = Math.abs(shift) > 0.01
+    ? port.querySelector('[role="tooltip"]')?.closest<HTMLElement>('[data-chat-anchor-key]') ?? null
+    : null
+  for (const surface of surfaces) setShift(surface, shift, tooltipSurface)
   const status = turnStatusOf(port)
   if (status !== null) setShift(status, 0)
   // This pass wrote layout-affecting state (padding, min-height, an owned
@@ -1614,7 +1735,8 @@ function clearVisual(port: HTMLElement): void {
 }
 
 /** Keep an already-promoted surface at zero until one stable final paint lands. */
-function holdCompositorAtRest(element: HTMLElement): void {
+function holdCompositorAtRest(element: HTMLElement | null | undefined): void {
+  if (!element || !element.style) return
   element.style.transform = 'translate3d(0, 0px, 0)'
   element.style.willChange = 'transform'
   element.style.clipPath = ''
@@ -1638,15 +1760,17 @@ function finishAtNaturalFloor(
   followTrace('finish-enter', { sh: hostShOf(port), st: Math.round(port.scrollTop), pad: Math.round(flowPadOf(port)), retain: retainCompositor })
   const surfaces = shiftSurfacesOf(port)
   const status = turnStatusOf(port)
+  restoreRunway(port)
+  setFlowPad(port, 0)
   if (!retainCompositor) {
-    restoreRunway(port)
     if (writeScrollTop) settleAtFloor(port)
     clearMotion(port)
     followMotionStates.delete(port)
     return
   }
-  const promoted = [...surfaces, ...(status === null ? [] : [status])]
-    .filter(element => element.style.transform !== '' || element.style.willChange === 'transform')
+  const candidateElements: Array<HTMLElement | null> = [...surfaces, status]
+  const promoted = candidateElements
+    .filter((element): element is HTMLElement => Boolean(element && element.style && (element.style.transform !== '' || element.style.willChange === 'transform')))
   const promotedSet = new Set(promoted)
   if (writeScrollTop) settleAtFloor(port)
   port.removeAttribute(FOLLOW_OWNED_ATTR)
@@ -1802,6 +1926,7 @@ export function useConversationFollow(
     }
 
     const reportFollow = (next: HTMLElement, isActive: boolean): void => {
+      if (!debugRuntime.isEnabled()) return
       const state = followMotionStates.get(next)
       const phase: FollowTerminalPhase = followTerminalPhases.get(next) ?? (isActive ? 'live' : 'natural')
       const runwayPx = state?.runwayPx ?? runwayOffsetOf(next)
@@ -2127,9 +2252,7 @@ export function useConversationFollow(
       // natural tail clearance. Re-measure that boundary; same-floor glyph
       // commits can continue using the cached chrome geometry.
       if (followFloorHistory.get(port) !== floor) invalidatePaintLimit(port)
-      const isReasoningSurface = rootRef.current?.querySelector('[data-variant="think"]') !== null
       const trajectoryShift = predictive
-        && !isReasoningSurface
         && runwayOffsetOf(port) > 0
         && trajectoryPositionPx !== null
         ? floor - trajectoryPositionPx
@@ -2185,7 +2308,10 @@ export function useConversationFollow(
         port.addEventListener(name, markGesture, { passive: true })
       }
       if (typeof ResizeObserver !== 'undefined') {
-        resize = new ResizeObserver(() => restoreBeforePaint())
+        resize = new ResizeObserver(() => {
+          invalidateSurfaceCache(port)
+          restoreBeforePaint()
+        })
         resize.observe(port)
         const proxy = resizeProxyOf(port)
         if (proxy !== null) resize.observe(proxy)
@@ -2198,7 +2324,10 @@ export function useConversationFollow(
       if (typeof MutationObserver !== 'undefined') {
         const flow = flowElementOf(port)
         if (flow !== null) {
-          mutations = new MutationObserver(() => { restoreBeforePaint() })
+          mutations = new MutationObserver(() => {
+            invalidateSurfaceCache(port)
+            restoreBeforePaint()
+          })
           mutations.observe(flow, { childList: true, subtree: true })
         }
       }
@@ -2359,7 +2488,6 @@ export function useConversationFollow(
             )
             if (
               predictive
-              && root.querySelector('[data-variant="think"]') === null
               && runwayOffsetOf(nextPort) > 0
             ) {
               const floor = Math.max(0, nextPort.scrollHeight - nextPort.clientHeight)
@@ -2527,7 +2655,6 @@ export function useConversationFollow(
         : 0
       lastObservedContentHeight = contentHeight
       const trajectoryActive = predictive
-        && root.querySelector('[data-variant="think"]') === null
         && runwayOffset > 0
       let trajectoryShift: number | undefined
       if (trajectoryActive) {
@@ -2603,15 +2730,15 @@ export function useConversationFollow(
           trajectoryWasActive = false
         }
         const lag = Math.max(0, contentHeight - animatedH - runwayOffset)
-        const step = computeFollowStep(dt, {
-          lag,
-          speedEma: speedCpsRef.current,
-          velocityPxPerSec,
-        }, tuning)
         if (lag <= 0.1) {
           animatedH = contentHeight - runwayOffset
           velocityPxPerSec = 0
         } else {
+          const step = computeFollowStep(dt, {
+            lag,
+            speedEma: speedCpsRef.current,
+            velocityPxPerSec,
+          }, tuning)
           // ZERO-DOWNWARD-REBOUND: the reservation is NOT real lag. With the
           // steady-state tail pin it already rides as baseline-canceled gap
           // (shift = margin − reservation + reveal lag), so forcing the spring
@@ -2914,7 +3041,10 @@ export function useConversationFollow(
       // active effect's observers were disconnected above, but status/tail
       // commits continue while the detached settle loop owns the port.
       if (typeof ResizeObserver !== 'undefined') {
-        resize = new ResizeObserver(() => restoreBeforePaint())
+        resize = new ResizeObserver(() => {
+          invalidateSurfaceCache(host)
+          restoreBeforePaint()
+        })
         resize.observe(host)
         const proxy = resizeProxyOf(host)
         if (proxy !== null) resize.observe(proxy)
@@ -2922,7 +3052,10 @@ export function useConversationFollow(
       if (typeof MutationObserver !== 'undefined') {
         const flow = flowElementOf(host)
         if (flow !== null) {
-          mutations = new MutationObserver(() => { restoreBeforePaint() })
+          mutations = new MutationObserver(() => {
+            invalidateSurfaceCache(host)
+            restoreBeforePaint()
+          })
           mutations.observe(flow, { childList: true, subtree: true })
         }
       }
