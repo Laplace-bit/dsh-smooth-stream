@@ -107,13 +107,57 @@ export function apply(ctx: Context, config: Config): void {
   // the durable provider as the authority, but expose this one schema through
   // the plugin's own loopback-only connection channel instead.
   ctx.inject(['settings'], (settingsCtx) => {
-    // 0.1.2 kernels dropped the `settingsNamespace()` helper — a validating
-    // identity on ≤ 0.1.1 — and take the raw string, so the rc-era brand is
-    // reproduced locally instead of statically importing a removed symbol.
-    // The namespace is a compile-time constant matching the kernel's
-    // /^[a-z][a-z0-9-]*$/ pattern.
-    const settingsNamespace = STREAM_SETTINGS_NS as SettingsNamespace
-    const scope = settingsCtx.settings.register(
+  // dsh 0.1.x: durable plugin-owned namespace registered on the settings
+  // service. dsh 0.2.x: `register` is gone — SettingsForms owns persistence
+  // through profile entry config — so serve the card read-only from the
+  // composition config until that migration lands, and keep the channel
+  // reachable so the card renders instead of dying as a 405.
+  const settingsSvc = settingsCtx.settings
+  const legacyRegister = (settingsSvc as { register?: unknown }).register
+  if (typeof legacyRegister !== 'function') {
+    const view02 = (): StreamSettingsView => ({
+      version: STREAM_PACKAGE_VERSION,
+      installation: inspectProfileInstallation(ctx.baseUrl, STREAM_PACKAGE_NAME).kind,
+      writable: false,
+      enabled: DEFAULT_STREAM_SETTINGS.enabled,
+      controlScroll: DEFAULT_STREAM_SETTINGS.controlScroll,
+      preset: config.preset,
+      motionPreference: DEFAULT_STREAM_SETTINGS.motionPreference,
+      thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+      logarithmicFade: DEFAULT_STREAM_SETTINGS.logarithmicFade,
+      canUpgrade: false,
+    })
+    const handle02: ConnectionRpcHandler = async (endpoint) => {
+      if (endpoint === STREAM_SETTINGS_RPC.read) return { ok: true, value: view02() }
+      if (endpoint === STREAM_SETTINGS_RPC.debugRead) {
+        return { ok: true, value: { debugEnabled: DEFAULT_STREAM_SETTINGS.debugEnabled, tuning: DEFAULT_STREAM_SETTINGS.debugTuning } }
+      }
+      if (endpoint === STREAM_SETTINGS_RPC.upgrade) {
+        const installation = inspectProfileInstallation(ctx.baseUrl, STREAM_PACKAGE_NAME)
+        if (installation.kind !== 'npm') {
+          return { ok: false, error: { code: 'internal', message: 'smooth-stream is not an npm profile dependency', details: {} } }
+        }
+        return { ok: false, error: { code: 'internal', message: 'upgrade is unavailable until the 0.2.x settings migration lands', details: {} } }
+      }
+      return {
+        ok: false,
+        error: {
+          code: 'settings-rejected',
+          message: 'smooth-stream settings are read-only on dsh 0.2.x; durable storage moved to profile entry config',
+          details: { ns: STREAM_SETTINGS_NS },
+        },
+      }
+    }
+    // The connection service is not injectable from a plugin scope on 0.2.x,
+    // so mount through the web server fiber. registerSettingsChannel serves
+    // the route unfenced there (loopback + app token gate remain).
+    ctx.inject(['webServer'], (webCtx) => {
+      registerSettingsChannel(webCtx, STREAM_SETTINGS_RPC_CHANNEL, handle02)
+    })
+    return
+  }
+  const settingsNamespace = STREAM_SETTINGS_NS as SettingsNamespace
+  const scope = settingsCtx.settings.register(
       settingsNamespace,
       StreamSettingsSchema,
       {
