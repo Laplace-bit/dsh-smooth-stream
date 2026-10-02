@@ -374,6 +374,7 @@ export function apply(ctx: ClientContext): void {
   }
   ctx.slots.inject('conversation.chat.node', () => {
     let releaseTakeover: (() => void) | undefined
+    let usedSwap = false
 
     const syncTakeover = (): void => {
       if (!settings.takeoverEnabled()) {
@@ -383,29 +384,67 @@ export function apply(ctx: ClientContext): void {
       }
       if (releaseTakeover !== undefined) return
       const unwrap = wrapAgentChatRows(ctx, useControlScroll)
-      const unshadow = ctx.slots.register({
-        name: 'conversation.chat.node',
-        key: 'assistant-step',
-        priority: -100,
-        // `conversation` (not `chat`): it is the namespace the pinned Harness
-        // actually registers, so it is the one whose keys must keep resolving.
-        // The layered `t` handed to the renderer covers what this namespace
-        // does not own. A namespace the composition does not declare would
-        // degrade every `t()` call to its raw key.
-        locale: 'conversation',
-        registrant: 'dsh-smooth-stream',
-      }, configured)
+      // dsh 0.2.x renders every keyed entry of `conversation.chat.node` as
+      // its own seat, so a lower-priority registration no longer shadows the
+      // built-in assistant row — the same assistant step then renders twice
+      // (built-in + takeover), duplicating every reasoning block in the
+      // transcript. Swap the built-in entry's component in place instead,
+      // exactly like the other keyed rows below; this keeps the original
+      // children, locale, and inject seats on every kernel generation. The
+      // shadow registration survives only as a fallback for compositions
+      // that declare no built-in assistant row to swap.
+      const builtin = ctx.slots.entries('conversation.chat.node').find(
+        entry => entry.options.key === 'assistant-step'
+          // The pinned SlotOptions type predates `registrant`; every current
+          // runtime carries it (see the register spread in the slots package).
+          && (entry.options as { registrant?: string }).registrant !== 'dsh-smooth-stream'
+          && entry.component !== configured,
+      )
+      let unshadow: () => void
+      if (builtin !== undefined && isWrappableComponent(builtin.component)) {
+        usedSwap = true
+        const inner = builtin.component as ComponentType<FollowWrapProps>
+        builtin.component = configured
+        unshadow = () => {
+          if (builtin.component === configured) builtin.component = inner
+        }
+      } else {
+        unshadow = ctx.slots.register({
+          name: 'conversation.chat.node',
+          key: 'assistant-step',
+          priority: -100,
+          // `conversation` (not `chat`): it is the namespace the pinned Harness
+          // actually registers, so it is the one whose keys must keep resolving.
+          // The layered `t` handed to the renderer covers what this namespace
+          // does not own. A namespace the composition does not declare would
+          // degrade every `t()` call to its raw key.
+          locale: 'conversation',
+          registrant: 'dsh-smooth-stream',
+        }, configured)
+      }
       releaseTakeover = () => {
-        // Stop observing slot changes before the shadow entry is removed.
+        // Stop observing slot changes before the takeover is removed.
         unwrap()
         unshadow()
       }
     }
 
+    // If the shadow fallback was taken because the built-in assistant row
+    // had not registered yet, re-take through the in-place swap as soon as
+    // it appears, so 0.2.x never renders the row twice.
+    const offSlotChange = ctx.on('slots/changed', (key: string) => {
+      if (key !== 'conversation.chat.node' || usedSwap || releaseTakeover === undefined) return
+      if (!settings.takeoverEnabled()) return
+      releaseTakeover()
+      releaseTakeover = undefined
+      syncTakeover()
+    })
+
     const unsubscribe = settings.subscribe(syncTakeover)
     syncTakeover()
     return () => {
       unsubscribe()
+      offSlotChange()
       releaseTakeover?.()
     }
   })

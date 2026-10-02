@@ -372,7 +372,7 @@ function imageLabels(t: AssistantProps['t']): MessageImageLabels {
 }
 
 /**
- * Apply searchable hidden state without unmounting a stable subtree — the
+ * Apply searchable hidden state without unmounting a stable subtree 鈥?the
  * Host's completion fold hides the answer-inline reasoning this way, so the
  * takeover renderer must reproduce it to stay inside the contract: the row
  * disappears into the Host's process summary and comes back on find-in-page.
@@ -442,8 +442,8 @@ function latestLine(text: string): string {
  * click stay on the disclosure chrome, which the plugin's AnimatedDisclosure
  * renders with a height-animated body (the harness primitive would mount and
  * unmount it, which cannot glide). The row opens only while this block is
- * the streaming tail and closes as soon as thinking ends — a later block,
- * or the assistant node settling — not when the rest of the reply is
+ * the streaming tail and closes as soon as thinking ends 鈥?a later block,
+ * or the assistant node settling 鈥?not when the rest of the reply is
  * still streaming.
  */
 function AnimatedReasoning({
@@ -488,7 +488,7 @@ function AnimatedReasoning({
   const followActiveRef = useRef(false)
   followActiveRef.current = running && expanded
   const commitAnchorRef = useRef<HTMLDivElement>(null)
-  // The running→false flip is the AUTO-close: it collapses instantly and the
+  // The running鈫抐alse flip is the AUTO-close: it collapses instantly and the
   // follower's settle spring absorbs the height step. A later manual toggle
   // keeps the CSS glide.
   const displayed = useSmoothStreamContent(text, {
@@ -522,7 +522,7 @@ function AnimatedReasoning({
   useEffect(() => {
     // Only the live stream owns the reading position. A settled block is
     // something to read from the top, so expanding a finished reasoning card
-    // must not scroll it — that would make its first lines unreachable.
+    // must not scroll it 鈥?that would make its first lines unreachable.
     if (!running || !expanded || userScrolledRef.current) return
     const el = thinkBodyRef.current
     if (el === null) return
@@ -663,6 +663,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   controlScroll = true,
   motionPreference = DEFAULT_STREAM_SETTINGS.motionPreference,
   node,
+  groupPart,
   useTurnData,
   openFile,
   loadImage,
@@ -670,6 +671,14 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   turnProcess,
   t,
 }: AssistantProps & {
+  /**
+   * dsh 0.2.x row split for one assistant step: the flow mounts the node
+   * twice — once with `groupPart: 'reasoning'` (reasoning blocks only) and
+   * once with `groupPart: 'response'` (everything else). Absent on 0.1.x,
+   * where the step renders as a single row; the pinned type predates the
+   * field, so it is declared here and erased at compile time.
+   */
+  groupPart?: 'reasoning' | 'response' | undefined
   mode?: StreamMode
   preset?: StreamSmoothingPreset
   revealCharsPerSec?: number
@@ -682,6 +691,16 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
 }) {
   const data = node.data
   const streaming = data.status === 'running'
+  // dsh 0.2.x mounts the assistant step twice with a `groupPart` split: the
+  // `reasoning` row carries the reasoning blocks and the `response` row the
+  // rest. Mirrors the built-in AssistantMarkdown filter so the takeover does
+  // not render every block in both rows (which duplicated each reasoning
+  // paragraph in the transcript on 0.2.x).
+  const blocks = groupPart === 'reasoning'
+    ? data.blocks.filter(block => block.kind === 'reasoning')
+    : groupPart === 'response'
+      ? data.blocks.filter(block => block.kind !== 'reasoning')
+      : data.blocks
   const reduced = useMotionReduced(motionPreference)
   // The Host's completion-fold decision for THIS node's inline reasoning:
   // only the answer step folds, only in compact-transcript mode, and only
@@ -701,15 +720,15 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   const [textRevealActive, setTextRevealActive] = useState(false)
   const completionCandidate = !streaming
     && previousStreamingRef.current
-    && data.blocks.some(block => block.kind === 'text' && block.text.trim() !== '')
+    && blocks.some(block => block.kind === 'text' && block.text.trim() !== '')
   useLayoutEffect(() => {
     previousStreamingRef.current = streaming
   }, [streaming])
   const updateTextRevealActivity = useCallback((active: boolean): void => {
     setTextRevealActive(previous => previous === active ? previous : active)
   }, [])
-  const reasoningTailIndex = streaming && data.blocks[data.blocks.length - 1]?.kind === 'reasoning'
-    ? data.blocks.length - 1
+  const reasoningTailIndex = streaming && blocks[blocks.length - 1]?.kind === 'reasoning'
+    ? blocks.length - 1
     : -1
   const reasoningOwnsSpeed = reasoningTailIndex !== -1
   const rootPredictiveRef = useRef(false)
@@ -750,24 +769,24 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   })
   const hasVisible = streaming
     || data.status === 'interrupted'
-    || data.blocks.some(block => block.kind !== 'tool-call')
+    || blocks.some(block => block.kind !== 'tool-call')
   if (!hasVisible) return null
-  const announcementText = data.blocks
+  const announcementText = blocks
     .filter(block => block.kind === 'text')
     .map(block => block.text)
     .join('\n')
 
   const rendered: ReactNode[] = []
-  const last = data.blocks.length - 1
+  const last = blocks.length - 1
   let lastFollow = -1
   let lastText = -1
-  for (let index = 0; index < data.blocks.length; index += 1) {
-    const kind = data.blocks[index]?.kind
+  for (let index = 0; index < blocks.length; index += 1) {
+    const kind = blocks[index]?.kind
     if (kind === 'text' || kind === 'reasoning') lastFollow = index
     if (kind === 'text') lastText = index
   }
-  for (let index = 0; index < data.blocks.length; index += 1) {
-    const block = data.blocks[index]
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index]
     if (block === undefined) continue
     switch (block.kind) {
       case 'text':
@@ -812,8 +831,8 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
       case 'image': {
         const start = index
         const group = [block]
-        while (index + 1 < data.blocks.length) {
-          const next = data.blocks[index + 1]
+        while (index + 1 < blocks.length) {
+          const next = blocks[index + 1]
           if (next === undefined || next.kind !== 'image') break
           group.push(next)
           index += 1
