@@ -456,6 +456,7 @@ function AnimatedReasoning({
   shouldHoldBack,
   followSpeedCpsRef,
   followRevealScaleRef,
+  snapAutoCollapse,
   t,
 }: {
   text: string
@@ -467,6 +468,8 @@ function AnimatedReasoning({
   shouldHoldBack: () => boolean
   followSpeedCpsRef?: { current: number } | undefined
   followRevealScaleRef?: { current: number } | undefined
+  /** 0.1.x single rows snap the auto-close and let their follower absorb the step; on 0.2.x the collapse lands exactly at the ownership handoff, so it must glide. */
+  snapAutoCollapse: boolean
   t: AssistantProps['t']
 }) {
   const reduced = motionReduced
@@ -622,11 +625,14 @@ function AnimatedReasoning({
             setAutoClosed(false)
             setExpanded(value => !value)
           }}
-          // The auto-close at stream end snaps (no grid-track animation): the
-          // follower's settle spring absorbs the height step through the
-          // compositor, so animating the track too would double-animate the
-          // collapse. Manual toggles while streaming keep the glide.
-          bodyTransition={!autoClosed}
+          // The auto-close at stream end snaps on 0.1.x (no grid-track
+          // animation): the single row's follower absorbs the height step
+          // through the compositor, so animating the track too would
+          // double-animate the collapse. On 0.2.x the collapse lands exactly
+          // at the ownership handoff with nothing left to absorb it, so the
+          // track itself glides and the floor retreats gradually instead of
+          // teleporting. Manual toggles while streaming keep the glide.
+          bodyTransition={!autoClosed || !snapAutoCollapse}
           collapsedContent={(
             <>
               <span className={css.thinkSeparator} aria-hidden />
@@ -790,6 +796,14 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
     .filter(block => block.kind === 'text')
     .map(block => block.text)
     .join('\n')
+  // 0.2.x reasoning rows see a blocks array filtered to reasoning only, so
+  // `index === last` stays true while a later tool-call or text block runs in
+  // the same step — the disclosure then waits for the whole step to settle
+  // before snapping shut, and that late full-height collapse jumps the page.
+  // Tail-ness must be judged against the ORIGINAL step blocks: any later
+  // block of any kind closes the think box promptly, exactly as the 0.1.x
+  // single-row layout did by construction.
+  const stepTailIsReasoning = data.blocks[data.blocks.length - 1]?.kind === 'reasoning'
 
   const rendered: ReactNode[] = []
   const last = blocks.length - 1
@@ -830,7 +844,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
           <FoldableReasoning key={index} hidden={reasoningHidden} reveal={revealProcess}>
             <AnimatedReasoning
               text={block.text}
-              running={streaming && index === last}
+              running={streaming && index === last && (groupPart !== 'reasoning' || stepTailIsReasoning)}
               preset={preset}
               thinkAutoExpand={thinkAutoExpand}
               logarithmicFade={logarithmicFade && data.status !== 'interrupted'}
@@ -838,6 +852,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
               shouldHoldBack={shouldHoldBack}
               followSpeedCpsRef={reasoningOwnsSpeed && index === last ? rootSpeedRef : undefined}
               followRevealScaleRef={reasoningOwnsSpeed && index === last ? rootRevealScaleRef : undefined}
+              snapAutoCollapse={groupPart === undefined}
               t={t}
             />
           </FoldableReasoning>,
