@@ -487,7 +487,14 @@ function setShift(element: HTMLElement, px: number): void {
 
 function turnStatusOf(port: HTMLElement): HTMLElement | null {
   return port.querySelector<HTMLElement>(
-    '[data-chat-turn-status], [data-chat-flow] > [role="status"]',
+    // dsh 0.2.x replaced the per-turn status row with RunningStatus — the
+    // whale tail row `[data-chat-running]`, a persistent last child of the
+    // flow column for the whole running session. Its inner `role="status"`
+    // span is visually-hidden and not a direct flow child, so the old
+    // selector misses it and every status-aware path (shift exclusion,
+    // runway hosting, paint ceiling, unmount compensation, completion
+    // cascade) silently no-ops on 0.2.x.
+    '[data-chat-turn-status], [data-chat-flow] > [role="status"], [data-chat-flow] > [data-chat-running]',
   )
 }
 
