@@ -701,6 +701,21 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
     : groupPart === 'response'
       ? data.blocks.filter(block => block.kind !== 'reasoning')
       : data.blocks
+  // dsh 0.2.x mounts this view twice on the same conversation scrollport —
+  // the reasoning row above and the response row below. Handing the port to
+  // whichever row carries the streaming tail still left the think phase
+  // jumpy: while reasoning streamed, the reasoning-row host owned the port
+  // from a mid-transcript anchor (the empty response row and the turn status
+  // render below it), and the viewport hopped upward as the glide steered
+  // toward positions its bottom-row tuning does not describe. The response
+  // row is the geometric bottom row for the whole turn, so owning it from
+  // the first streamed block reproduces the 0.1.x single-row configuration
+  // the glide was tuned for: think growth happens above the anchor, the
+  // text reveal grows inside it, and ownership never flips mid-turn. The
+  // reasoning row never touches the port — its think box paces its own
+  // reveal and auto-scrolls internally. 0.1.x mounts a single row
+  // (groupPart undefined) and keeps the previous behavior.
+  const rowOwnsPort = groupPart !== 'reasoning'
   const reduced = useMotionReduced(motionPreference)
   // The Host's completion-fold decision for THIS node's inline reasoning:
   // only the answer step folds, only in compact-transcript mode, and only
@@ -869,7 +884,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
         revealedCharsRef={rootRevealedCharsRef}
         revealScaleRef={rootRevealScaleRef}
         predictiveRef={rootPredictiveRef}
-        controlScroll={controlScroll}
+        controlScroll={controlScroll && rowOwnsPort}
       >
         <div className={css.body}>
           {rendered}
