@@ -48,6 +48,7 @@ export const Config: Schema<Config> = Schema.object({
     .min(1)
     .max(2000)
     .default(DEFAULT_STREAM_CONFIG.maxScrollSpeedPxPerSec),
+  controlScroll: Schema.boolean().default(DEFAULT_STREAM_CONFIG.controlScroll),
 })
 
 /**
@@ -120,7 +121,11 @@ export function apply(ctx: Context, config: Config): void {
       installation: inspectProfileInstallation(ctx.baseUrl, STREAM_PACKAGE_NAME).kind,
       writable: false,
       enabled: DEFAULT_STREAM_SETTINGS.enabled,
-      controlScroll: DEFAULT_STREAM_SETTINGS.controlScroll,
+      // 0.2.x has no durable settings storage, so the composition config owns
+      // the takeover choice: native bottom-follow by default (the kernel's
+      // own follow is smooth on this generation), with `controlScroll: true`
+      // in the overlay restoring the engine.
+      controlScroll: config.controlScroll,
       preset: config.preset,
       motionPreference: DEFAULT_STREAM_SETTINGS.motionPreference,
       thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,

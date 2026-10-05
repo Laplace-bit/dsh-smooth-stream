@@ -8,3 +8,5 @@
         revealCharsPerSec: 80
         scrollSpeedPxPerSec: 48
         maxScrollSpeedPxPerSec: 1000
+        # dsh 0.2.x only: leave bottom-follow to the kernel by default; set true to restore the engine.
+        controlScroll: false

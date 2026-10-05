@@ -28,6 +28,16 @@ export interface StreamConfig {
   readonly scrollSpeedPxPerSec: number
   /** Unused at runtime; retained so existing overlays continue to load. */
   readonly maxScrollSpeedPxPerSec: number
+  /**
+   * Whether the follow engine writes the conversation scroll position on
+   * dsh 0.2.x. Defaults to false: the 0.2.x kernel's native bottom-follow is
+   * already smooth, while the engine — tuned for the 0.1.x bottom-anchored
+   * flow and its turn-status-row geometry — adds entrance-window jumps on
+   * the 0.2.x DOM during reply streaming. Set `controlScroll: true` in the
+   * overlay config to restore the takeover. dsh 0.1.x ignores this key; its
+   * user-owned toggle (default on) stays the authority there.
+   */
+  readonly controlScroll: boolean
 }
 
 /** Defaults shared by the Host schema and the client-side fallback. */
@@ -37,6 +47,7 @@ export const DEFAULT_STREAM_CONFIG: StreamConfig = {
   revealCharsPerSec: 80,
   scrollSpeedPxPerSec: 48,
   maxScrollSpeedPxPerSec: 1000,
+  controlScroll: false,
 }
 
 /**
