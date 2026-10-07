@@ -423,9 +423,63 @@ function resizeProxyOf(port: HTMLElement): HTMLElement | null {
  * child therefore rides the same transform, keeping the visual order of the
  * column intact.
  */
+interface SurfaceCacheRecord {
+  flow: HTMLElement | null
+  childCount: number
+  firstElement: Element | null
+  lastElement: Element | null
+  surfaces: HTMLElement[]
+  status: HTMLElement | null
+  revision: number
+}
+
+const surfaceCache = new WeakMap<HTMLElement, SurfaceCacheRecord>()
+const portRevisions = new WeakMap<HTMLElement, number>()
+
+export function invalidateSurfaceCache(port?: HTMLElement | null): void {
+  if (!port) return
+  portRevisions.set(port, (portRevisions.get(port) ?? 0) + 1)
+}
+
+function isSurfaceCacheValid(port: HTMLElement, cache: SurfaceCacheRecord): boolean {
+  const currentRev = portRevisions.get(port) ?? 0
+  if (cache.revision !== currentRev) return false
+
+  const flow = flowElementOf(port)
+  if (flow !== cache.flow) return false
+  if (flow === null) return false
+
+  if (flow.children.length !== cache.childCount) return false
+  if (flow.firstElementChild !== cache.firstElement) return false
+  if (flow.lastElementChild !== cache.lastElement) return false
+  if (cache.surfaces.some(surface => !port.contains(surface))) return false
+
+  return true
+}
+
 export function shiftSurfacesOf(port: HTMLElement): HTMLElement[] {
+  const cached = surfaceCache.get(port)
+  if (cached && isSurfaceCacheValid(port, cached)) {
+    return cached.surfaces
+  }
+
   const transcript = port.querySelector<HTMLElement>('[data-chat-transcript]')
-  if (transcript !== null) return [transcript]
+  if (transcript !== null) {
+    const flow = flowElementOf(port)
+    const status = turnStatusOf(port)
+    const entry: SurfaceCacheRecord = {
+      flow,
+      childCount: flow?.children.length ?? 0,
+      firstElement: flow?.firstElementChild ?? null,
+      lastElement: flow?.lastElementChild ?? null,
+      surfaces: [transcript],
+      status,
+      revision: portRevisions.get(port) ?? 0,
+    }
+    surfaceCache.set(port, entry)
+    return entry.surfaces
+  }
+
   const anchored = [...port.querySelectorAll<HTMLElement>('[data-chat-anchor-key]')]
     .filter(row => row.parentElement?.closest('[data-chat-anchor-key]') === null)
   const flow = port.querySelector<HTMLElement>('[data-chat-flow]')
@@ -435,13 +489,26 @@ export function shiftSurfacesOf(port: HTMLElement): HTMLElement[] {
   // One document-order pass: an anchored row, or a foreign child that contains
   // no anchored row of its own (a wrapper around real rows would double-shift
   // the rows inside it).
-  return [...flow.children].filter((child): child is HTMLElement =>
+  const surfaces = [...flow.children].filter((child): child is HTMLElement =>
     child instanceof HTMLElement
     && child !== status
     && (anchoredSet.has(child) || child.querySelector('[data-chat-anchor-key]') === null))
+
+  const entry: SurfaceCacheRecord = {
+    flow,
+    childCount: flow.children.length,
+    firstElement: flow.firstElementChild,
+    lastElement: flow.lastElementChild,
+    surfaces,
+    status,
+    revision: portRevisions.get(port) ?? 0,
+  }
+  surfaceCache.set(port, entry)
+  return surfaces
 }
 
-function currentShiftOf(element: HTMLElement): number {
+function currentShiftOf(element: HTMLElement | null | undefined): number {
+  if (!element || !element.style) return 0
   return Number(
     /translate3d\(0(?:px)?,\s*(-?[\d.]+)px,\s*0(?:px)?\)/.exec(element.style.transform)?.[1] ?? 0,
   )
@@ -1075,11 +1142,17 @@ function subscribeFollowCommit(port: HTMLElement, fn: () => void): () => void {
   return () => { listeners!.delete(fn) }
 }
 
-function restoreRunway(port: HTMLElement): void {
+export function restoreRunway(port: HTMLElement): void {
   const runway = followRunways.get(port)
-  if (runway === undefined) return
-  runway.element.style[runway.property] = runway.original
-  followRunways.delete(port)
+  for (const surface of shiftSurfacesOf(port)) {
+    if (surface !== runway?.element && isLegacyRunway(surface.style.marginBottom)) surface.style.marginBottom = ''
+  }
+  const status = turnStatusOf(port)
+  if (status !== null && status !== runway?.element && isLegacyRunway(status.style.marginTop)) status.style.marginTop = ''
+  if (runway !== undefined) {
+    runway.element.style[runway.property] = runway.original
+    followRunways.delete(port)
+  }
   invalidatePaintLimit(port)
 }
 
@@ -1843,6 +1916,7 @@ export function useConversationFollow(
     }
 
     const reportFollow = (next: HTMLElement, isActive: boolean): void => {
+      if (!debugRuntime.isEnabled()) return
       const state = followMotionStates.get(next)
       const phase: FollowTerminalPhase = followTerminalPhases.get(next) ?? (isActive ? 'live' : 'natural')
       const runwayPx = state?.runwayPx ?? runwayOffsetOf(next)
@@ -2226,7 +2300,10 @@ export function useConversationFollow(
         port.addEventListener(name, markGesture, { passive: true })
       }
       if (typeof ResizeObserver !== 'undefined') {
-        resize = new ResizeObserver(() => restoreBeforePaint())
+        resize = new ResizeObserver(() => {
+          invalidateSurfaceCache(port)
+          restoreBeforePaint()
+        })
         resize.observe(port)
         const proxy = resizeProxyOf(port)
         if (proxy !== null) resize.observe(proxy)
@@ -2239,7 +2316,10 @@ export function useConversationFollow(
       if (typeof MutationObserver !== 'undefined') {
         const flow = flowElementOf(port)
         if (flow !== null) {
-          mutations = new MutationObserver(() => { restoreBeforePaint() })
+          mutations = new MutationObserver(() => {
+            invalidateSurfaceCache(port)
+            restoreBeforePaint()
+          })
           mutations.observe(flow, { childList: true, subtree: true })
         }
       }
@@ -3013,7 +3093,10 @@ export function useConversationFollow(
       // active effect's observers were disconnected above, but status/tail
       // commits continue while the detached settle loop owns the port.
       if (typeof ResizeObserver !== 'undefined') {
-        resize = new ResizeObserver(() => restoreBeforePaint())
+        resize = new ResizeObserver(() => {
+          invalidateSurfaceCache(host)
+          restoreBeforePaint()
+        })
         resize.observe(host)
         const proxy = resizeProxyOf(host)
         if (proxy !== null) resize.observe(proxy)
@@ -3021,7 +3104,10 @@ export function useConversationFollow(
       if (typeof MutationObserver !== 'undefined') {
         const flow = flowElementOf(host)
         if (flow !== null) {
-          mutations = new MutationObserver(() => { restoreBeforePaint() })
+          mutations = new MutationObserver(() => {
+            invalidateSurfaceCache(host)
+            restoreBeforePaint()
+          })
           mutations.observe(flow, { childList: true, subtree: true })
         }
       }

@@ -6,9 +6,18 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { markdownAvailable } from './primitives-compat.tsx'
 import { TypewriterAssistantNodeView } from './TypewriterAssistantNodeView.tsx'
+import type { AssistantStepPart } from './flowPart.ts'
 import { wrapFollowNodeView, type FollowWrapProps } from './TypewriterToolNodeView.tsx'
 import { SmoothStreamCard } from './SmoothStreamCard.tsx'
+import { SmoothStreamPluginsPage } from './SmoothStreamPluginsPage.tsx'
+
+// Exported so the offline verifier can render the built bundle exactly as the
+// two hosts do — the components are the only carriers of the switches, and the
+// client specs cannot run against prebuilt bundles.
+export { SmoothStreamCard, type SmoothStreamCardProps } from './SmoothStreamCard.tsx'
+export { SmoothStreamPluginsPage, type SmoothStreamPluginsPageProps } from './SmoothStreamPluginsPage.tsx'
 import { SmoothStreamCardController } from './smooth-stream-card-controller.ts'
 import { createSmoothStreamSettingsApi } from './smooth-stream-settings-api.ts'
 import { DebugPanel } from './DebugPanel.tsx'
@@ -26,6 +35,19 @@ import { DEFAULT_STREAM_SETTINGS, STREAM_SETTINGS_NS, type StreamSettings } from
 export const inject = ['slots']
 
 type AssistantProps = ChatNodeViewProps<'assistant-step'>
+
+/**
+ * Structural view of the slot registry for the 0.1.7 sidebar Plugins page.
+ *
+ * The page's `plugins.bundle.config` keyed slot is absent from the client typings this
+ * package pins (`0.1.0-rc.6`), and one registration only ever needs `inject` and
+ * `register`, so those two methods are named here rather than widening the whole
+ * registry.
+ */
+interface PluginsPageSlots {
+  inject(slot: string, register: () => unknown): unknown
+  register(options: Record<string, unknown>, component: unknown): unknown
+}
 
 const STREAM_MODES: readonly string[] = ['typewriter', 'teleprompter']
 const STREAM_PRESETS: readonly string[] = ['realtime', 'balanced', 'silky']
@@ -328,6 +350,19 @@ export function apply(ctx: ClientContext): void {
     // Older Harness declares this slot as a list (`id`); newer Harness uses a
     // keyed slot filtered by the Host settings namespace (`key`).
     } as never, SmoothStreamCard))
+    // 0.1.7 moved plugin configuration out of Settings into the sidebar's
+    // Plugins panel. The same controller feeds its bundle configuration.
+    // On 0.1.5 the bundle slot is absent, leaving registration pending, and
+    // this registration pending and keeps showing the card in Settings. The
+    // registry is narrowed structurally because the pinned 0.1.5 client typings
+    // do not declare that slot at all.
+    const pageSlots = settingsCtx.slots as unknown as PluginsPageSlots
+    pageSlots.inject('plugins.bundle.config', () => pageSlots.register({
+      name: 'plugins.bundle.config',
+      key: 'dsh-smooth-stream',
+      locale: SETTINGS_NS,
+      inject: () => card.inject(),
+    }, SmoothStreamPluginsPage))
     settingsCtx.slots.inject('conversation.session.header.utilities', () => settingsCtx.slots.register({
       name: 'conversation.session.header.utilities',
       id: 'smooth-stream-debug',
@@ -351,6 +386,13 @@ export function apply(ctx: ClientContext): void {
     )
     return createElement(TypewriterAssistantNodeView, {
       ...props,
+      // Kernels from 0.1.7 place one assistant step at two flow parts — the
+      // reasoning member of the Turn's process disclosure and the response
+      // node — and hand the seat a `groupPart` so the renderer paints only its
+      // own blocks. The pinned kernel version does not declare the field on the
+      // seat props, so it is narrowed here and stays undefined on older kernels
+      // (which render each step once and expect every block).
+      groupPart: (props as { groupPart?: AssistantStepPart }).groupPart,
       // Override the seat's single-namespace binding with the layered lookup
       // described above. Falls back to the seat's own binding only if the
       // locale service never arrived (renderer then receives the prop it
@@ -377,9 +419,21 @@ export function apply(ctx: ClientContext): void {
     let usedSwap = false
 
     const syncTakeover = (): void => {
+      // The takeover renders assistant text itself, so it needs the kernel's
+      // markdown renderer. Without it the plugin would have to fall back to
+      // plain text — worse than the kernel's own view — so it declines the
+      // slot instead. A kernel whose primitive package renamed its exports
+      // (0.1.7 dropped the size-suffixed icons) still streams through the
+      // kernel renderer, and `primitives-compat` keeps that from being a
+      // crash that silently abdicates this entry.
+      if (!markdownAvailable) {
+        console.warn('[dsh-smooth-stream] markdown primitive unavailable; leaving assistant rendering to the kernel')
+        return
+      }
       if (!settings.takeoverEnabled()) {
-        releaseTakeover?.()
+        const release = releaseTakeover
         releaseTakeover = undefined
+        release?.()
         return
       }
       if (releaseTakeover !== undefined) return
@@ -434,18 +488,23 @@ export function apply(ctx: ClientContext): void {
     // it appears, so 0.2.x never renders the row twice.
     const offSlotChange = ctx.on('slots/changed', (key: string) => {
       if (key !== 'conversation.chat.node' || usedSwap || releaseTakeover === undefined) return
+      if (!ctx.slots.entries('conversation.chat.node').some(entry => entry.options.key === 'assistant-step'
+        && (entry.options as { registrant?: string }).registrant !== 'dsh-smooth-stream')) return
       if (!settings.takeoverEnabled()) return
-      releaseTakeover()
+      const release = releaseTakeover
       releaseTakeover = undefined
+      release()
       syncTakeover()
     })
 
     const unsubscribe = settings.subscribe(syncTakeover)
     syncTakeover()
     return () => {
-      unsubscribe()
       offSlotChange()
-      releaseTakeover?.()
+      unsubscribe()
+      const release = releaseTakeover
+      releaseTakeover = undefined
+      release?.()
     }
   })
 }

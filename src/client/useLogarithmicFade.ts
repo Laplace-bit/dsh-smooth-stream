@@ -428,18 +428,25 @@ export class LogarithmicFadeController {
   }
 
   private rootColorSet = false
+  private originalRootColor: PreservedColor | undefined
 
   private ensureRootColor(): void {
     if (this.rootColorSet) return
     const win = this.scheduler.window
     const color = win.getComputedStyle(this.root).color || 'currentColor'
+    this.originalRootColor = {
+      value: this.root.style.getPropertyValue(COLOR_PROPERTY),
+      priority: this.root.style.getPropertyPriority(COLOR_PROPERTY),
+      generation: this.colorGeneration,
+    }
     this.root.style.setProperty(COLOR_PROPERTY, color)
     this.rootColorSet = true
   }
 
   private restoreColors(): void {
     if (this.rootColorSet) {
-      this.root.style.removeProperty(COLOR_PROPERTY)
+      if (this.originalRootColor) this.restoreColor(this.root, this.originalRootColor)
+      this.originalRootColor = undefined
       this.rootColorSet = false
     }
     for (const [element, preserved] of this.colors) this.restoreColor(element, preserved)

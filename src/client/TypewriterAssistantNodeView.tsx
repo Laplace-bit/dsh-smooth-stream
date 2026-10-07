@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from 'react'
-import { JsonBlock, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
-import { ImageGallery, type ImageLoader, type MessageImageLabels } from '@deepseek-ai/dsh-client-ui-attachment'
+import { JsonBlock, MarkdownText, ImageGallery } from './primitives-compat.tsx'
+import type { ImageLoader, MessageImageLabels } from '@deepseek-ai/dsh-client-ui-attachment'
 import type { ChatNodeViewProps, TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { belongsToFlowPart } from './flowPart.ts'
 import { AnimatedDisclosure } from './AnimatedDisclosure.tsx'
 import { IconThink } from './harnessIcons.ts'
 import { notifyFollowCommit } from './teleprompterGlide.ts'
@@ -702,11 +703,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   // rest. Mirrors the built-in AssistantMarkdown filter so the takeover does
   // not render every block in both rows (which duplicated each reasoning
   // paragraph in the transcript on 0.2.x).
-  const blocks = groupPart === 'reasoning'
-    ? data.blocks.filter(block => block.kind === 'reasoning')
-    : groupPart === 'response'
-      ? data.blocks.filter(block => block.kind !== 'reasoning')
-      : data.blocks
+  const blocks = data.blocks.filter(block => belongsToFlowPart(block, groupPart))
   // dsh 0.2.x mounts this view twice on the same conversation scrollport —
   // the reasoning row above and the response row below. Handing the port to
   // whichever row carries the streaming tail still left the think phase

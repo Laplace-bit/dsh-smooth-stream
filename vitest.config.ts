@@ -99,7 +99,8 @@ function harnessPathsPlugin(): Plugin | null {
   return {
     name: 'harness-src-paths',
     enforce: 'pre',
-    resolveId(source) {
+    resolveId(source, importer) {
+      if (source === '@deepseek-ai/dsh-settings' && importer?.includes('.host.spec.')) return null
       if (!source.startsWith('@deepseek-ai/')) return null
       return resolveSource(source)
     },
@@ -108,7 +109,7 @@ function harnessPathsPlugin(): Plugin | null {
 
 export default defineConfig({
   root,
-  plugins: [harnessPathsPlugin()].filter((plugin): plugin is Plugin => plugin !== null),
+
   resolve: {
     alias: {
       react: resolve(root, 'node_modules/react'),
@@ -123,6 +124,13 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    include: ['tests/**/*.spec.tsx'],
+    projects: [
+      { extends: true, test: { name: 'host', environment: 'jsdom', include: ['tests/**/*.host.spec.tsx'] } },
+      {
+        extends: true,
+        plugins: [harnessPathsPlugin()].filter((plugin): plugin is Plugin => plugin !== null),
+        test: { name: 'client', environment: 'jsdom', include: ['tests/**/*.spec.tsx'], exclude: ['tests/**/*.host.spec.tsx'], setupFiles: ['./tests/setup.ts'] },
+      },
+    ],
   },
 })

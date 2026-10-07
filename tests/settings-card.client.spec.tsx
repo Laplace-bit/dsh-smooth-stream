@@ -2,7 +2,7 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { Context } from '@deepseek-ai/cordis'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
@@ -217,6 +217,23 @@ describe('smooth-stream settings card', () => {
     expect(inject).toEqual(['slots'])
   })
 
+  it('registers and removes its configuration on the real bundle slot', async () => {
+    const { ctx, slots } = await bench()
+    slots.register({ name: 'root', children: {
+      'plugins.bundle.config': { kind: 'keyed', scope: 'root' },
+      'plugins.item': { kind: 'list', scope: 'root' },
+    } } as never, () => null)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    const entries = slots.entries('plugins.bundle.config' as never)
+    expect(entries.map(entry => entry.options.key)).toEqual(['dsh-smooth-stream'])
+    expect(slots.entries('plugins.item' as never)).toHaveLength(0)
+    const face = (entries[0]!.inject as unknown as () => SmoothStreamCardFace)()
+    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
+    await fiber.dispose()
+    expect(slots.entries('plugins.bundle.config' as never)).toHaveLength(0)
+  })
+
   it('registers the namespace as the keyed slot key for the configurable tab', async () => {
     const { ctx, slots } = await bench()
     slots.register({
@@ -304,6 +321,7 @@ describe('smooth-stream settings card', () => {
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
       enabled: true,
       controlScroll: true,
+      preset: 'silky',
       motionPreference: 'auto',
       thinkAutoExpand: false,
       logarithmicFade: true,
@@ -319,7 +337,7 @@ describe('smooth-stream settings card', () => {
     render(<SmoothStreamCard {...cardProps(face)} />)
 
     fireEvent.click(screen.getByRole('button', { name: /smooth stream/i }))
-    const radios = screen.getAllByRole('radio')
+    const radios = within(screen.getByRole('radiogroup', { name: en.motionPreference })).getAllByRole('radio')
     expect(radios).toHaveLength(3)
     expect(radios.map(radio => (radio as HTMLInputElement).checked)).toEqual([true, false, false])
     fireEvent.click(radios[1]!)
@@ -381,6 +399,7 @@ describe('smooth-stream settings card', () => {
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
       enabled: false,
       controlScroll: true,
+      preset: 'silky',
       motionPreference: 'auto',
       thinkAutoExpand: true,
       logarithmicFade: true,
@@ -526,12 +545,13 @@ describe('smooth-stream settings card', () => {
       .toBe(BuiltInTool)
 
     face.edit({ enabled: true })
-    expect(slots.entries('conversation.chat.node').some(entry => entry.options.priority === -100))
-      .toBe(true)
+    expect(slots.entries('conversation.chat.node').filter(entry => entry.options.key === 'assistant-step')).toHaveLength(1)
+    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'assistant-step')?.component).not.toBe(BuiltInAssistant)
     expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'context')?.component)
       .not.toBe(BuiltInTool)
 
     face.discard()
+    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'assistant-step')?.component).toBe(BuiltInAssistant)
     expect(slots.entries('conversation.chat.node').filter(entry => entry.options.priority === -100))
       .toHaveLength(0)
     expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'context')?.component)

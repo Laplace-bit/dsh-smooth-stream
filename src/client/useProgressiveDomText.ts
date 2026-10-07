@@ -253,7 +253,10 @@ export function useProgressiveDomText(
         // that actually owns the completion signal.
         producerComplete: false,
       })
-      if (pending.size === 0) announceSettled()
+      if (pending.size === 0) {
+        stopFrameTask()
+        announceSettled()
+      }
       return pending.size > 0
     }
 

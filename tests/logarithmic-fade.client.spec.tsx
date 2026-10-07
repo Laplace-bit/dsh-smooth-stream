@@ -65,11 +65,12 @@ it('keeps high-speed text translucent through a completion speed reset', () => {
   expect(ranges()).toHaveLength(0)
 })
 
-it('does not cut off the old tail when slowing down while appending', () => {
+it('does not cut off the old tail when slowing down while appending', async () => {
   const { root, controller } = attach('文'.repeat(48))
   controller.update(true, true, 200)
   tick(64)
   root.append('字'.repeat(10))
+  await act(async () => { await Promise.resolve() })
   controller.update(true, true, 35)
   expect(ranges()).toHaveLength(58)
   tick(192)
@@ -97,11 +98,12 @@ it('keeps a 24-grapheme burst tail without changing DOM or selection text', () =
   expect(vi.getTimerCount()).toBe(0)
 })
 
-it('retains birth times through repeat commits, DOM replacement and append', () => {
+it('retains birth times through repeat commits, DOM replacement and append', async () => {
   const { root, controller } = attach('a')
   controller.update(true, true)
   tick(128)
   root.replaceChildren(document.createTextNode('ab'))
+  await act(async () => { await Promise.resolve() })
   controller.update(true, true)
   controller.update(true, true)
   tick(128)
@@ -123,6 +125,7 @@ it('lingers after completion and clears immediately when disabled', () => {
   const second = attach('world')
   second.controller.update(true, true)
   second.controller.update(false, false)
+  tick(32) // Flush the shared coordinator's final pending layout read.
   expect(ranges()).toHaveLength(0)
   expect(vi.getTimerCount()).toBe(0)
 })
@@ -142,18 +145,21 @@ it('freezes opacity while paused and resumes from the same progress', () => {
   expect(ranges()).toHaveLength(0)
 })
 
-it('does not replay replacement, history or content revealed while disabled', () => {
+it('does not replay replacement, history or content revealed while disabled', async () => {
   const { root, controller } = attach('history')
   controller.update(true, false)
   expect(ranges()).toHaveLength(0)
   root.textContent = 'replacement'
+  await act(async () => { await Promise.resolve() })
   controller.update(true, true)
   expect(ranges()).toHaveLength(0)
   root.textContent += '!'
+  await act(async () => { await Promise.resolve() })
   controller.update(true, true)
   expect(ranges().map(range => range.toString())).toEqual(['!'])
   controller.update(false, true)
   root.textContent += '?'
+  await act(async () => { await Promise.resolve() })
   controller.update(false, true)
   controller.update(true, true)
   expect(ranges()).toHaveLength(0)
@@ -317,10 +323,10 @@ function assistantProps(blocks: unknown[], status = 'running') {
   } as unknown as Parameters<typeof TypewriterAssistantNodeView>[0]
 }
 
-it.each(['text', 'reasoning'])('integrates with real %s and clears on interruption', (kind) => {
+it.each(['text', 'reasoning'])('integrates with real %s and clears on interruption', async (kind) => {
   const blocks = [{ kind, text: '测试流式文字效果正在逐字出现。'.repeat(12) }]
   const view = render(<TypewriterAssistantNodeView {...assistantProps(blocks)} />)
-  tick(96)
+  await act(() => vi.advanceTimersByTimeAsync(96))
   expect(ranges().length).toBeGreaterThan(0)
   expect(ranges().every(range => !range.startContainer.parentElement?.closest('[aria-live]'))).toBe(true)
   view.rerender(<TypewriterAssistantNodeView {...assistantProps(blocks, 'interrupted')} />)

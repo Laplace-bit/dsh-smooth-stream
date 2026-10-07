@@ -1,3 +1,4 @@
+import { resolveStreamSettings } from '../src/settings-bridge.ts'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { Context } from '@deepseek-ai/cordis'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
@@ -62,6 +63,10 @@ afterEach(() => {
 
 /** Long enough that 400ms of reveal cannot drain it. */
 const LONG_STREAM_TEXT = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ')
+
+/** Distinct bodies so a duplicated flow part is visible in `textContent`. */
+const REASONING_PART_TEXT = 'weighing the two candidate roots'
+const RESPONSE_PART_TEXT = 'the answer body belongs to the response seat'
 
 /**
  * Stand-in for the layered `t` the seat injects.
@@ -824,6 +829,34 @@ describe('assistant renderer', () => {
     expect(view.container.textContent).not.toContain('▍')
   })
 
+  it('paints only the blocks of the flow part the seat hands this render', () => {
+    const blocks = [
+      { kind: 'reasoning', text: REASONING_PART_TEXT },
+      { kind: 'text', text: RESPONSE_PART_TEXT },
+    ]
+    // Kernels from 0.1.7 place one assistant step at two parts at the same
+    // time — the reasoning member of the Turn's process disclosure stays open
+    // while the turn runs — and hand each seat a `groupPart`. A render that
+    // ignores it paints the reply twice: once inside the process fold, once as
+    // the answer.
+    const reasoningPart = render(
+      <TypewriterAssistantNodeView {...assistantProps('settled', blocks)} groupPart="reasoning" />,
+    )
+    expect(reasoningPart.container.textContent).toContain(chatZh['message.think'])
+    expect(reasoningPart.container.textContent).not.toContain(RESPONSE_PART_TEXT)
+
+    const responsePart = render(
+      <TypewriterAssistantNodeView
+        {...assistantProps('settled', blocks)}
+        groupPart="response"
+        motionPreference="force-reduced"
+      />,
+    )
+    const responseText = responsePart.container.textContent ?? ''
+    expect(responseText).toContain(RESPONSE_PART_TEXT)
+    expect(responseText).not.toContain(REASONING_PART_TEXT)
+  })
+
   it('renders raw text immediately when the auto preference sees reduced motion', async () => {
     vi.stubGlobal('matchMedia', () => ({
       matches: true,
@@ -1111,8 +1144,9 @@ describe('assistant renderer', () => {
     vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({ top: 160, bottom: 240 } as DOMRect)
     port.scrollTop = 390
 
-    await act(() => vi.advanceTimersByTimeAsync(16))
+    await act(() => vi.advanceTimersByTimeAsync(32))
     expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('false')
+    expect(port.scrollTop).toBe(port.scrollHeight - port.clientHeight)
     const visualPositions = [-port.scrollTop + currentTranslate(transcript)]
     for (let chunk = 0; chunk < 6; chunk += 1) {
       text += ` more reasoning ${String(chunk)}`
@@ -1843,7 +1877,8 @@ describe('assistant renderer', () => {
     view.rerender(renderText('one two'))
     view.rerender(renderText('one two three'))
 
-    expect(treeWalker).toHaveBeenCalledTimes(1)
+    // Prediction uses cached approximate widths; source commits need no DOM walk.
+    expect(treeWalker).not.toHaveBeenCalled()
   })
 
   it('pins the growing conversation port at the floor while streaming', async () => {
@@ -2661,10 +2696,8 @@ describe('assistant renderer', () => {
         <div data-composer-seat="">Composer</div>
       </div>,
     )
-    // A stable terminal without a status surface is positioned from the
-    // natural floor in the same frame. There is no compositor drain left for
-    // a later reader gesture to interrupt.
-    expect(currentTranslate(transcript)).toBe(0)
+    // Completion can still be revealing buffered text. A reader gesture must
+    // release that drain as well as an already stable terminal.
 
     fireEvent.wheel(port, { deltaY: -60 })
     port.scrollTop = 460
@@ -3365,7 +3398,7 @@ describe('client plugin lifecycle', () => {
 describe('plugin Config schema', () => {
   it('fills defaults when the overlay config is omitted', () => {
     const resolved = Config({} as never)
-    expect(resolved).toEqual(DEFAULT_STREAM_CONFIG)
+    expect({ ...resolved, ...resolveStreamSettings(resolved) }).toMatchObject(DEFAULT_STREAM_CONFIG)
   })
 
   it('accepts a full override and rejects invalid values', () => {
@@ -3377,7 +3410,7 @@ describe('plugin Config schema', () => {
       maxScrollSpeedPxPerSec: 400,
       controlScroll: true,
     })
-    expect(resolved).toEqual({
+    expect({ ...resolved, ...resolveStreamSettings(resolved) }).toMatchObject({
       mode: 'teleprompter',
       preset: 'realtime',
       revealCharsPerSec: 60,
@@ -3745,7 +3778,8 @@ describe('isGrowingChatNode', () => {
     try {
       render(<ProgressiveDomProbe text={'x'.repeat(400)} />)
       await act(async () => { frames.shift()?.(0) })
-      await act(async () => { frames.shift()?.(100) })
+      await act(async () => { frames.shift()?.(16) })
+      await act(async () => { frames.shift()?.(32) })
 
       expect(debugRuntime.getSnapshot().metrics).toMatchObject({
         streamTargetChars: 400,
@@ -3927,7 +3961,7 @@ describe('isGrowingChatNode', () => {
       ], {} as ResizeObserver)
     }
     act(() => { notify() })
-    await act(() => vi.advanceTimersByTimeAsync(32))
+    await act(() => vi.advanceTimersByTimeAsync(48))
     const initialText = view.container.querySelector(`.${css.follow}`)?.textContent ?? ''
     expect(initialText.length).toBeGreaterThan(0)
     expect(initialText.length).toBeLessThan('future tool output'.length)

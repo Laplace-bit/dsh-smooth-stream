@@ -29,13 +29,10 @@ export interface StreamConfig {
   /** Unused at runtime; retained so existing overlays continue to load. */
   readonly maxScrollSpeedPxPerSec: number
   /**
-   * Whether the follow engine writes the conversation scroll position on
-   * dsh 0.2.x. Defaults to false: the 0.2.x kernel's native bottom-follow is
-   * already smooth, while the engine — tuned for the 0.1.x bottom-anchored
-   * flow and its turn-status-row geometry — adds entrance-window jumps on
-   * the 0.2.x DOM during reply streaming. Set `controlScroll: true` in the
-   * overlay config to restore the takeover. dsh 0.1.x ignores this key; its
-   * user-owned toggle (default on) stays the authority there.
+   * Whether the follow engine writes the conversation scroll position.
+   * Projection-based kernels (0.1.7 and later) default to native Harness
+   * scrolling. Set this field to true in the profile or settings page to
+   * restore takeover. The older settings registry keeps its default-on toggle.
    */
   readonly controlScroll: boolean
 }

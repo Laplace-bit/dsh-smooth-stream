@@ -1,9 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
-// Type-only: erased at runtime, so the host entry never link-fails on kernels
-// whose dsh-settings no longer ships the value-side helper (issue #17).
-import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import Schema from '@deepseek-ai/schemastery'
 import { DEFAULT_STREAM_CONFIG, type StreamConfig } from './config.ts'
 import { injectStreamConfig } from './boot-config.ts'
@@ -11,13 +8,18 @@ import { STREAM_PACKAGE_NAME, STREAM_PACKAGE_VERSION } from './package-meta.ts'
 import { inspectProfileInstallation, updateNpmProfilePackage } from './profile-installation.ts'
 import { registerSettingsChannel } from './settings-channel.ts'
 import {
+  createStreamSettingsScope,
+  streamSettingsSchema,
+  streamSettingsFields,
+  resolveStreamSettings,
+} from './settings-bridge.ts'
+import {
   STREAM_SETTINGS_RPC,
   STREAM_SETTINGS_RPC_CHANNEL,
   type StreamDebugSettingsView,
   type StreamSettingsView,
 } from './settings-api.ts'
 import {
-  DEFAULT_STREAM_SETTINGS,
   STREAM_SETTINGS_NS,
   type StreamDebugTuning,
   type StreamSettings,
@@ -30,12 +32,16 @@ export const name = 'dsh-smooth-stream'
  * Plugin configuration accepted from the overlay's `config` section. Cordis
  * validates the value against this schema at load and fills omitted fields
  * from the shared defaults, so an invalid value fails the load loudly.
+ *
+ * User-owned preferences ride the same flat entry config: kernels through
+ * `0.1.6` mirror them into a registered namespace, while `0.1.7` and later
+ * project them from this entry into the profile-patch form. Declaring them
+ * flat — not nested — is what the projection seam accepts.
  */
-export interface Config extends StreamConfig {}
+export interface Config extends StreamConfig, Partial<Omit<StreamSettings, 'preset' | 'controlScroll'>> {}
 
 export const Config: Schema<Config> = Schema.object({
   mode: Schema.union(['typewriter', 'teleprompter'] as const).default(DEFAULT_STREAM_CONFIG.mode),
-  preset: Schema.union(['realtime', 'balanced', 'silky'] as const).default(DEFAULT_STREAM_CONFIG.preset),
   revealCharsPerSec: Schema.number()
     .min(5)
     .max(200)
@@ -48,41 +54,18 @@ export const Config: Schema<Config> = Schema.object({
     .min(1)
     .max(2000)
     .default(DEFAULT_STREAM_CONFIG.maxScrollSpeedPxPerSec),
-  controlScroll: Schema.boolean().default(DEFAULT_STREAM_CONFIG.controlScroll),
+  // User-owned fields for the projection seam, declared flat and volatile. The
+  // plugin's own bundle patch ships no value for them on purpose: an absent key
+  // is what keeps "the user never chose" apart from "the user chose".
+  ...streamSettingsFields,
 })
 
 /**
- * Schema of the user-owned settings section. The Host keeps it in the durable
- * settings provider while the browser edits it through the plugin RPC below.
+ * Schema of the user-owned settings section as registered with a legacy
+ * settings *registry*. Shared with {@link Config}'s flat fields so the two
+ * seams never drift.
  */
-export const StreamSettingsSchema: Schema<StreamSettings> = Schema.object({
-  enabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.enabled),
-  controlScroll: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.controlScroll),
-  preset: Schema.union([
-    Schema.const('realtime'),
-    Schema.const('balanced'),
-    Schema.const('silky'),
-  ] as const).default(DEFAULT_STREAM_SETTINGS.preset),
-  motionPreference: Schema.union([
-    Schema.const('auto'),
-    Schema.const('force-smooth'),
-    Schema.const('force-reduced'),
-  ] as const).default(DEFAULT_STREAM_SETTINGS.motionPreference),
-  thinkAutoExpand: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand),
-  logarithmicFade: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.logarithmicFade),
-  debugEnabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.debugEnabled),
-  debugTuning: Schema.object({
-    revealScale: Schema.number().min(0.25).max(2).default(DEFAULT_STREAM_SETTINGS.debugTuning.revealScale),
-    queuePressure: Schema.number().min(0).max(2).default(DEFAULT_STREAM_SETTINGS.debugTuning.queuePressure),
-    maxRevealCps: Schema.number().min(120).max(1000).default(DEFAULT_STREAM_SETTINGS.debugTuning.maxRevealCps),
-    springStiffness: Schema.number().min(40).max(320).default(DEFAULT_STREAM_SETTINGS.debugTuning.springStiffness),
-    springDamping: Schema.number().min(8).max(80).default(DEFAULT_STREAM_SETTINGS.debugTuning.springDamping),
-    springMass: Schema.number().min(0.5).max(3).default(DEFAULT_STREAM_SETTINGS.debugTuning.springMass),
-    runwayPx: Schema.number().min(0).max(120).default(DEFAULT_STREAM_SETTINGS.debugTuning.runwayPx),
-    reserveResponseMs: Schema.number().min(60).max(600).default(DEFAULT_STREAM_SETTINGS.debugTuning.reserveResponseMs),
-    backpressureMinScale: Schema.number().min(0.25).max(1).default(DEFAULT_STREAM_SETTINGS.debugTuning.backpressureMinScale),
-  }),
-})
+export const StreamSettingsSchema: Schema<StreamSettings> = streamSettingsSchema
 
 /**
  * Host half: log the resolved configuration and bridge it to the browser
@@ -94,112 +77,48 @@ export const StreamSettingsSchema: Schema<StreamSettings> = Schema.object({
  */
 export function apply(ctx: Context, config: Config): void {
   console.log(
-    `[dsh-smooth-stream] plugin loaded! mode=${config.mode} preset=${config.preset} `
+    `[dsh-smooth-stream] plugin loaded! mode=${config.mode} preset=${resolveStreamSettings(config).preset} `
     + `seed=${config.revealCharsPerSec}cps scroll=${config.scrollSpeedPxPerSec}px/s `
     + `maxScroll=${config.maxScrollSpeedPxPerSec}px/s`,
   )
   ctx.inject(['webServer'], (httpCtx) => {
     httpCtx.effect(
-      () => httpCtx.webServer.tapIndex(html => injectStreamConfig(html, config)),
+      () => httpCtx.webServer.tapIndex(html => injectStreamConfig(html, { ...config, ...resolveStreamSettings(config) })),
       'dsh-smooth-stream: boot config bridge',
     )
   })
   // The core settings RPC deliberately filters third-party namespaces. Keep
-  // the durable provider as the authority, but expose this one schema through
-  // the plugin's own loopback-only connection channel instead.
+  // the seam's own durable layer as the authority, but expose this one schema
+  // through the plugin's own loopback-only connection channel instead. The
+  // bridge adapts both seam generations: the `0.1.7` projection has no
+  // `register()`, and calling it there used to abort this whole apply.
   ctx.inject(['settings'], (settingsCtx) => {
-  // dsh 0.1.x: durable plugin-owned namespace registered on the settings
-  // service. dsh 0.2.x: `register` is gone — SettingsForms owns persistence
-  // through profile entry config — so serve the card read-only from the
-  // composition config until that migration lands, and keep the channel
-  // reachable so the card renders instead of dying as a 405.
-  const settingsSvc = settingsCtx.settings
-  const legacyRegister = (settingsSvc as { register?: unknown }).register
-  if (typeof legacyRegister !== 'function') {
-    const view02 = (): StreamSettingsView => ({
-      version: STREAM_PACKAGE_VERSION,
-      installation: inspectProfileInstallation(ctx.baseUrl, STREAM_PACKAGE_NAME).kind,
-      writable: false,
-      enabled: DEFAULT_STREAM_SETTINGS.enabled,
-      // 0.2.x has no durable settings storage, so the composition config owns
-      // the takeover choice: native bottom-follow by default (the kernel's
-      // own follow is smooth on this generation), with `controlScroll: true`
-      // in the overlay restoring the engine.
-      controlScroll: config.controlScroll,
-      preset: config.preset,
-      motionPreference: DEFAULT_STREAM_SETTINGS.motionPreference,
-      thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
-      logarithmicFade: DEFAULT_STREAM_SETTINGS.logarithmicFade,
-      canUpgrade: false,
-    })
-    const handle02: ConnectionRpcHandler = async (endpoint) => {
-      if (endpoint === STREAM_SETTINGS_RPC.read) return { ok: true, value: view02() }
-      if (endpoint === STREAM_SETTINGS_RPC.debugRead) {
-        return { ok: true, value: { debugEnabled: DEFAULT_STREAM_SETTINGS.debugEnabled, tuning: DEFAULT_STREAM_SETTINGS.debugTuning } }
-      }
-      if (endpoint === STREAM_SETTINGS_RPC.upgrade) {
-        const installation = inspectProfileInstallation(ctx.baseUrl, STREAM_PACKAGE_NAME)
-        if (installation.kind !== 'npm') {
-          return { ok: false, error: { code: 'internal', message: 'smooth-stream is not an npm profile dependency', details: {} } }
-        }
-        return { ok: false, error: { code: 'internal', message: 'upgrade is unavailable until the 0.2.x settings migration lands', details: {} } }
-      }
-      return {
-        ok: false,
-        error: {
-          code: 'settings-rejected',
-          message: 'smooth-stream settings are read-only on dsh 0.2.x; durable storage moved to profile entry config',
-          details: { ns: STREAM_SETTINGS_NS },
-        },
-      }
-    }
-    // The connection service is not injectable from a plugin scope on 0.2.x,
-    // so mount through the web server fiber. registerSettingsChannel serves
-    // the route unfenced there (loopback + app token gate remain).
-    ctx.inject(['webServer'], (webCtx) => {
-      registerSettingsChannel(webCtx, STREAM_SETTINGS_RPC_CHANNEL, handle02)
-    })
-    return
-  }
-  const settingsNamespace = STREAM_SETTINGS_NS as SettingsNamespace
-  const scope = settingsCtx.settings.register(
-      settingsNamespace,
-      StreamSettingsSchema,
-      {
-        // The install-time entry config is the composition base, so it resolves
-        // *below* the user layer: a stored pick still wins, while "the user
-        // never chose" keeps following the overlay (cordis.patch.yml / profile
-        // config). Keeping it out of the schema default is what makes those two
-        // states distinguishable at all.
-        base: { preset: config.preset },
-        applies: 'live',
-      },
-    )
-    settingsCtx.inject(['connection'], (connectionCtx) => {
+    const scope = createStreamSettingsScope(settingsCtx, config)
+    const mountChannel = (channelCtx: Context): void => {
       let upgrade: Promise<void> | undefined
 
       const view = (): StreamSettingsView => {
-        const installation = inspectProfileInstallation(connectionCtx.baseUrl, STREAM_PACKAGE_NAME)
-        const settings = scope.get()
+        const installation = inspectProfileInstallation(settingsCtx.baseUrl, STREAM_PACKAGE_NAME)
+        const resolved = scope.get()
         return {
           version: STREAM_PACKAGE_VERSION,
           installation: installation.kind,
-          writable: connectionCtx.settings.writable,
-          enabled: settings.enabled,
-          controlScroll: settings.controlScroll,
-          preset: settings.preset ?? config.preset,
-          motionPreference: settings.motionPreference,
-          thinkAutoExpand: settings.thinkAutoExpand,
-          logarithmicFade: settings.logarithmicFade,
+          writable: scope.writable(),
+          enabled: resolved.enabled,
+          controlScroll: resolved.controlScroll,
+          preset: resolved.preset ?? config.preset,
+          motionPreference: resolved.motionPreference,
+          thinkAutoExpand: resolved.thinkAutoExpand,
+          logarithmicFade: resolved.logarithmicFade,
           canUpgrade: installation.kind === 'npm',
         }
       }
 
       const debugView = (): StreamDebugSettingsView => {
-        const settings = scope.get()
+        const resolved = scope.get()
         return {
-          debugEnabled: settings.debugEnabled,
-          tuning: { ...settings.debugTuning },
+          debugEnabled: resolved.debugEnabled,
+          tuning: { ...resolved.debugTuning },
         }
       }
 
@@ -243,7 +162,7 @@ export function apply(ctx: Context, config: Config): void {
               },
             }
           }
-          if (!connectionCtx.settings.writable) {
+          if (!scope.writable()) {
             return {
               ok: false,
               error: {
@@ -324,12 +243,15 @@ export function apply(ctx: Context, config: Config): void {
               ...(next.logarithmicFade === undefined ? {} : { logarithmicFade: next.logarithmicFade }),
               ...(hasDebug ? { debugEnabled: next.debugEnabled, debugTuning: next.debugTuning } : {}),
             })
-          } catch {
+          } catch (cause) {
+            // The seam's refusal text is the only signal a user can act on
+            // (read-only profile, unknown entry, stale revision), so it is
+            // carried through instead of a generic failure line.
             return {
               ok: false,
               error: {
                 code: 'settings-rejected',
-                message: 'smooth-stream settings update failed',
+                message: `smooth-stream settings update failed: ${cause instanceof Error ? cause.message : String(cause)}`,
                 details: { ns: STREAM_SETTINGS_NS },
               },
             }
@@ -359,7 +281,7 @@ export function apply(ctx: Context, config: Config): void {
               },
             }
           }
-          if (!connectionCtx.settings.writable) {
+          if (!scope.writable()) {
             return {
               ok: false,
               error: {
@@ -384,7 +306,7 @@ export function apply(ctx: Context, config: Config): void {
           return { ok: true, value: debugView() }
         }
         if (endpoint === STREAM_SETTINGS_RPC.upgrade) {
-          const installation = inspectProfileInstallation(connectionCtx.baseUrl, STREAM_PACKAGE_NAME)
+          const installation = inspectProfileInstallation(settingsCtx.baseUrl, STREAM_PACKAGE_NAME)
           if (installation.kind !== 'npm') {
             return { ok: false, error: { code: 'internal', message: 'smooth-stream is not an npm profile dependency', details: {} } }
           }
@@ -403,7 +325,12 @@ export function apply(ctx: Context, config: Config): void {
         }
         return { ok: false, error: { code: 'internal', message: `unknown smooth-stream endpoint ${JSON.stringify(endpoint)}`, details: {} } }
       }
-      registerSettingsChannel(connectionCtx, STREAM_SETTINGS_RPC_CHANNEL, handle)
-    })
+      registerSettingsChannel(channelCtx, STREAM_SETTINGS_RPC_CHANNEL, handle)
+    }
+    if (typeof (settingsCtx.settings as { register?: unknown }).register === 'function') {
+      settingsCtx.inject(['connection'], mountChannel)
+    } else {
+      settingsCtx.inject(['webServer'], mountChannel)
+    }
   })
 }

@@ -155,12 +155,12 @@ describe('render diagnostics panel', () => {
     expect(face.save).toHaveBeenCalledOnce()
   })
 
-  it('explains each tuning control and disables diagnostics when the panel is closed', () => {
+  it('explains each tuning control and disables diagnostics when the panel is closed', async () => {
     const { face, setState } = setup()
     const info = screen.getAllByRole('button', { name: en.debugRevealMultiplier })[0]
     if (info === undefined) throw new Error('reveal multiplier info button was not rendered')
     fireEvent.mouseEnter(info)
-    expect(screen.getByRole('tooltip').textContent).toContain(en.debugTipRevealMultiplier)
+    expect((await screen.findByRole('tooltip', { hidden: true })).textContent).toContain(en.debugTipRevealMultiplier)
 
     fireEvent.click(screen.getByRole('button', { name: en.debugPanelClose }))
     expect(face.edit).toHaveBeenCalledWith({ debugEnabled: false })
