@@ -3375,6 +3375,7 @@ describe('plugin Config schema', () => {
       revealCharsPerSec: 60,
       scrollSpeedPxPerSec: 100,
       maxScrollSpeedPxPerSec: 400,
+      controlScroll: true,
     })
     expect(resolved).toEqual({
       mode: 'teleprompter',
@@ -3382,6 +3383,7 @@ describe('plugin Config schema', () => {
       revealCharsPerSec: 60,
       scrollSpeedPxPerSec: 100,
       maxScrollSpeedPxPerSec: 400,
+      controlScroll: true,
     })
     expect(() => Config({ mode: 'diagonal' } as never)).toThrow()
     expect(() => Config({ scrollSpeedPxPerSec: 0 } as never)).toThrow()

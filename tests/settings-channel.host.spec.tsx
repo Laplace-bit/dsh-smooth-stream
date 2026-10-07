@@ -199,3 +199,49 @@ describe('smooth-stream settings channel fallback', () => {
     expect(host.ctx.settings.get(STREAM_SETTINGS_NS as SettingsNamespace)).toEqual(DEFAULT_STREAM_SETTINGS)
   })
 })
+
+describe('smooth-stream settings channel on dsh 0.2.x', () => {
+  /**
+   * Mount the Host half over a 0.2.x-shaped settings service — present, but
+   * without the legacy `register` capability — so the read-only branch serves
+   * the card from the composition config.
+   */
+  async function mountHost02(config?: { controlScroll?: boolean }): Promise<{ dispose: () => Promise<void>; routes: WebRoute[] }> {
+    const ctx = new Context()
+    ctx.baseUrl = `${pathToFileURL(process.cwd()).href}/`
+    const routes: WebRoute[] = []
+    ctx.provide('webServer', fakeWebServer(routes) as never)
+    ctx.provide('settings', { settings: {} } as never)
+    // The schema fills omitted fields, so a partial overlay-style config is
+    // valid at runtime; the cast only widens cordis's fully-resolved type.
+    const fiber = ctx.plugin({ apply, Config }, config as never)
+    await fiber.await()
+    return { routes, dispose: () => fiber.dispose() }
+  }
+
+  afterEach(async () => {
+    for (const dispose of mounted.splice(0)) await dispose()
+  })
+
+  const readView = async (routes: WebRoute[]): Promise<Record<string, unknown>> => {
+    const route = routes.find(candidate => candidate.path === STREAM_SETTINGS_RPC_CHANNEL)
+    expect(route).toMatchObject({ kind: 'prefix', path: STREAM_SETTINGS_RPC_CHANNEL })
+    const read = await call(route as WebRoute, STREAM_SETTINGS_RPC.read, {})
+    expect(read.status).toBe(200)
+    return (JSON.parse(read.body) as { result: { value: Record<string, unknown> } }).result.value
+  }
+
+  it('defaults the takeover off — native bottom-follow — on the read-only branch', async () => {
+    const host = await mountHost02()
+    mounted.push(host.dispose)
+    const view = await readView(host.routes)
+    expect(view).toMatchObject({ writable: false, controlScroll: false, enabled: true })
+  })
+
+  it('restores the takeover when the overlay config asks for it', async () => {
+    const host = await mountHost02({ controlScroll: true })
+    mounted.push(host.dispose)
+    const view = await readView(host.routes)
+    expect(view).toMatchObject({ writable: false, controlScroll: true })
+  })
+})
