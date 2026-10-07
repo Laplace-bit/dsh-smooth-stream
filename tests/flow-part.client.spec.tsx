@@ -65,4 +65,3 @@ describe('assistant flow-part routing', () => {
     expect(isFlowPartActiveTail(answerBlocks, 'response')).toBe(true)
   })
 })
-

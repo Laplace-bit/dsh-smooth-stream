@@ -53,4 +53,3 @@ export function isFlowPartActiveTail(
   const lastBlock = blocks[blocks.length - 1]
   return lastBlock !== undefined && belongsToFlowPart(lastBlock, part)
 }
-
