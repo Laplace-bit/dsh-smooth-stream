@@ -30,11 +30,12 @@ export const CHAT_NS = 'smoothStream.chat'
  * dependable Harness owner belong here; anything the Harness already provides
  * must keep coming from the Harness so a language pack can override it.
  */
-export type SmoothStreamChatKey = 'message.think' | 'image.serviceUnavailable'
+export type SmoothStreamChatKey = 'message.think' | 'message.original' | 'image.serviceUnavailable'
 
 /** English fallback for {@link SmoothStreamChatKey}. */
 export const chatEn: Record<SmoothStreamChatKey, string> = {
   'message.think': 'Think',
+  'message.original': 'Original',
   // Removed from the Harness dictionaries in 0.1.5 (rc.6 had it under
   // `conversation`), and the plugin interpolates it into a thrown Error, so
   // the raw key must never reach a reader.
@@ -44,6 +45,7 @@ export const chatEn: Record<SmoothStreamChatKey, string> = {
 /** Simplified Chinese fallback for {@link SmoothStreamChatKey}. */
 export const chatZh: Record<SmoothStreamChatKey, string> = {
   'message.think': '思考',
+  'message.original': '原文',
   'image.serviceUnavailable': '图片服务不可用',
 }
 

@@ -504,7 +504,58 @@ function AnimatedReasoning({
     onRevealCommit: () => { notifyFollowCommit(commitAnchorRef.current) },
   })
   const shown = running && !reduced ? displayed : text
-  const summary = running ? latestLine(shown) : firstLine(text)
+  const [translation, setTranslation] = useState<string | null>(null)
+  const translationKeyRef = useRef<string>('')
+
+  useEffect(() => {
+    if (running && !expanded) return
+    if (!text || !text.trim()) {
+      setTranslation(null)
+      return
+    }
+    let enabled = true
+    let lang = 'zh-CN'
+    try {
+      if (typeof localStorage !== 'undefined') {
+        enabled = localStorage.getItem('dsh-think-translate:think') !== 'false'
+        lang = localStorage.getItem('dsh-think-translate:lang') || 'zh-CN'
+      }
+    } catch {
+      // Storage read errors fall back to defaults.
+    }
+    if (!enabled) {
+      setTranslation(null)
+      return
+    }
+    const cacheKey = `${lang}|${text}`
+    if (translationKeyRef.current === cacheKey) return
+    translationKeyRef.current = cacheKey
+
+    let alive = true
+    fetch('/_xlate/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, target: lang }),
+    })
+      .then(async res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (!alive) return
+        if (data && data.ok && !data.skipped && typeof data.text === 'string' && data.text.trim() && data.text !== text) {
+          setTranslation(data.text)
+        }
+      })
+      .catch(() => {
+        // Fall back gracefully when the endpoint is inactive or unreachable.
+      })
+
+    return () => {
+      alive = false
+    }
+  }, [text, running, expanded])
+
+  const summary = running
+    ? latestLine(shown)
+    : (translation ? firstLine(translation) : firstLine(text))
   useLogarithmicFade(fadeRootRef, logarithmicFade && !reduced && expanded, running, fadeSpeedRef)
 
   useLayoutEffect(() => {
@@ -641,7 +692,21 @@ function AnimatedReasoning({
             </>
           )}
         >
-          <div ref={fadeRootRef} className={css.thinkBody}>{shown}</div>
+          <div ref={fadeRootRef} className={css.thinkBody}>
+            {translation ? (
+              <>
+                <div className={css.thinkTranslation}>{translation}</div>
+                <details className={css.thinkOriginal}>
+                  <summary className={css.thinkOriginalSummary}>
+                    {(t as unknown as (key: string) => string)('message.original')}
+                  </summary>
+                  <div className={css.thinkOriginalBody}>{shown}</div>
+                </details>
+              </>
+            ) : (
+              shown
+            )}
+          </div>
         </AnimatedDisclosure>
       </div>
     </div>

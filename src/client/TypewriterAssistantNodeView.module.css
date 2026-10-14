@@ -144,6 +144,33 @@
   background-color: var(--dsw-alias-border-l3, rgba(128, 128, 128, 0.6));
 }
 
+.thinkTranslation {
+  margin-bottom: 10px;
+  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 4px));
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.thinkOriginal {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--dsw-alias-border-l3, rgba(128, 128, 128, 0.25));
+  opacity: 0.85;
+}
+
+.thinkOriginalSummary {
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--dsh-content-font-size-secondary, 12px);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.thinkOriginalBody {
+  margin-top: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /*
  * AnimatedDisclosure chrome: mirrors the harness DisclosureRow geometry
  * ([16px leading] gap 6 [title 14/24]) plus the hover icon->chevron preview.
