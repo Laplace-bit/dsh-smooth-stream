@@ -506,56 +506,91 @@ function AnimatedReasoning({
   const shown = running && !reduced ? displayed : text
   const [translation, setTranslation] = useState<string | null>(null)
   const translationKeyRef = useRef<string>('')
+  const inFlightRef = useRef<{ controller: AbortController; key: string } | null>(null)
 
   useEffect(() => {
-    if (running && !expanded) return
+    // 1. Defer translation until the block settles to keep typewriter motion pure
+    // and avoid flooding the backend with partial streaming text snapshots.
+    if (running) {
+      setTranslation(null)
+      inFlightRef.current?.controller.abort()
+      inFlightRef.current = null
+      return
+    }
     if (!text || !text.trim()) {
       setTranslation(null)
+      inFlightRef.current?.controller.abort()
+      inFlightRef.current = null
       return
     }
     let enabled = true
     let lang = 'zh-CN'
+    let mode = 'lazy'
     try {
       if (typeof localStorage !== 'undefined') {
         enabled = localStorage.getItem('dsh-think-translate:think') !== 'false'
         lang = localStorage.getItem('dsh-think-translate:lang') || 'zh-CN'
+        mode = localStorage.getItem('dsh-think-translate:mode') || 'lazy'
       }
     } catch {
       // Storage read errors fall back to defaults.
     }
     if (!enabled) {
       setTranslation(null)
+      inFlightRef.current?.controller.abort()
+      inFlightRef.current = null
       return
     }
-    const cacheKey = `${lang}|${text}`
-    if (translationKeyRef.current === cacheKey) return
-    translationKeyRef.current = cacheKey
 
-    let alive = true
+    // 2. Honor sibling plugin's expand-only mode: do not translate collapsed history rows
+    if (mode === 'expand' && !expanded) {
+      return
+    }
+
+    const cacheKey = `${lang}|${text}`
+    // Request ownership is independent of disclosure toggling: if already translated
+    // or currently fetching the exact text, do not duplicate or abort in flight.
+    if (translationKeyRef.current === cacheKey || inFlightRef.current?.key === cacheKey) return
+
+    inFlightRef.current?.controller.abort()
+    const controller = new AbortController()
+    inFlightRef.current = { controller, key: cacheKey }
+
+    // 3. Only commit the cache key once the request succeeds.
     fetch('/_xlate/translate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, target: lang }),
+      signal: controller.signal,
     })
       .then(async res => (res.ok ? res.json() : null))
       .then(data => {
-        if (!alive) return
+        if (controller.signal.aborted) return
         if (data && data.ok && !data.skipped && typeof data.text === 'string' && data.text.trim() && data.text !== text) {
+          translationKeyRef.current = cacheKey
           setTranslation(data.text)
         }
       })
       .catch(() => {
         // Fall back gracefully when the endpoint is inactive or unreachable.
       })
-
-    return () => {
-      alive = false
-    }
+      .finally(() => {
+        if (inFlightRef.current?.controller === controller) {
+          inFlightRef.current = null
+        }
+      })
   }, [text, running, expanded])
+
+  useEffect(() => {
+    return () => {
+      inFlightRef.current?.controller.abort()
+      inFlightRef.current = null
+    }
+  }, [])
 
   const summary = running
     ? latestLine(shown)
-    : (translation ? firstLine(translation) : firstLine(text))
+    : (!running && translation ? firstLine(translation) : firstLine(text))
   useLogarithmicFade(fadeRootRef, logarithmicFade && !reduced && expanded, running, fadeSpeedRef)
 
   useLayoutEffect(() => {
@@ -693,7 +728,7 @@ function AnimatedReasoning({
           )}
         >
           <div ref={fadeRootRef} className={css.thinkBody}>
-            {translation ? (
+            {!running && translation ? (
               <>
                 <div className={css.thinkTranslation}>{translation}</div>
                 <details className={css.thinkOriginal}>
