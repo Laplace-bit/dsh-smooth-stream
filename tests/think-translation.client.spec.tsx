@@ -7,23 +7,40 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function createReasoningProps(options: { text: string; status?: 'running' | 'settled'; thinkAutoExpand?: boolean }) {
-  const { text, status = 'settled', thinkAutoExpand = false } = options
+function createReasoningProps(options: {
+  text: string
+  status?: 'running' | 'settled'
+  thinkAutoExpand?: boolean
+  isLatest?: boolean
+}) {
+  const { text, status = 'settled', thinkAutoExpand = false, isLatest = true } = options
+  const finalSeq = 10
+  const tailClosingSeq = isLatest ? 10 : 20
   return {
     node: {
       kind: 'assistant-step',
-      location: { kind: 'unresolved' },
+      location: { kind: 'step' },
       data: {
         status,
         blocks: [{ kind: 'reasoning', text }],
         turn: 1,
         step: 1,
         time: 0,
+        finalNode: { seq: finalSeq },
       },
     },
     thinkAutoExpand,
     loadImage: async () => new Blob(),
-    useTurnData: () => undefined,
+    useTurnData: (key: string) => {
+      if (key === 'turn-tail') {
+        return {
+          closing: {
+            finalNode: { seq: tailClosingSeq },
+          },
+        }
+      }
+      return undefined
+    },
     openFile: () => {},
     fileMentions: () => undefined,
     t: (key: string) => {
@@ -89,7 +106,7 @@ describe('think translation integration', () => {
     expect(fetchMock).not.toHaveBeenCalled()
     expect(view.container.textContent).not.toContain('原文')
 
-    // 2. Once settled, translation is triggered
+    // 2. Once settled, translation is triggered for the active/latest row
     view.rerender(
       <TypewriterAssistantNodeView
         {...createReasoningProps({ text: settledText, status: 'settled', thinkAutoExpand: true })}
@@ -102,10 +119,10 @@ describe('think translation integration', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('honors mode=expand preference for collapsed history and triggers on user expansion', async () => {
-    localStorage.setItem('dsh-think-translate:mode', 'expand')
-    const originalText = 'Historical reasoning from earlier turn.'
-    const translatedText = '来自更早轮次的历史思考过程。'
+  it('waits for collapsed historical reasoning to expand under default lazy mode', async () => {
+    // Default mode is 'lazy'
+    const historicalText = 'Historical reasoning from earlier conversation turn.'
+    const translatedText = '来自早期会话轮次的历史思考过程。'
 
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -113,7 +130,42 @@ describe('think translation integration', () => {
     })
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
-    // Render collapsed history row
+    // Render collapsed historical row (isLatest: false)
+    const view = render(
+      <TypewriterAssistantNodeView
+        {...createReasoningProps({ text: historicalText, status: 'settled', isLatest: false, thinkAutoExpand: false })}
+      />,
+    )
+
+    // Under default lazy mode, collapsed historical rows must NOT trigger fetch
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(view.container.textContent).not.toContain(translatedText)
+
+    // User expands historical Think disclosure
+    const toggleButton = view.container.querySelector('[class*="thinkRow"]') || view.container.querySelector('button')
+    expect(toggleButton).not.toBeNull()
+    fireEvent.click(toggleButton!)
+
+    // Now that it is expanded, translation is fetched and rendered
+    await waitFor(() => {
+      expect(view.container.textContent).toContain(translatedText)
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('honors mode=expand preference for collapsed rows and triggers on user expansion', async () => {
+    localStorage.setItem('dsh-think-translate:mode', 'expand')
+    const originalText = 'Reasoning under expand-only mode.'
+    const translatedText = '仅展开模式下的思考过程。'
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, text: translatedText }),
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    // Render collapsed row in expand-only mode
     const view = render(
       <TypewriterAssistantNodeView
         {...createReasoningProps({ text: originalText, status: 'settled', thinkAutoExpand: false })}

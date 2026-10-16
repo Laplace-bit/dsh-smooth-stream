@@ -458,6 +458,7 @@ function AnimatedReasoning({
   followSpeedCpsRef,
   followRevealScaleRef,
   snapAutoCollapse,
+  eager = false,
   t,
 }: {
   text: string
@@ -471,6 +472,8 @@ function AnimatedReasoning({
   followRevealScaleRef?: { current: number } | undefined
   /** 0.1.x single rows snap the auto-close and let their follower absorb the step; on 0.2.x the collapse lands exactly at the ownership handoff, so it must glide. */
   snapAutoCollapse: boolean
+  /** Whether this reasoning block belongs to the active or latest turn (for lazy translation gating). */
+  eager?: boolean | undefined
   t: AssistantProps['t']
 }) {
   const reduced = motionReduced
@@ -542,8 +545,12 @@ function AnimatedReasoning({
       return
     }
 
-    // 2. Honor sibling plugin's expand-only mode: do not translate collapsed history rows
-    if (mode === 'expand' && !expanded) {
+    // 2. Honor sibling plugin's translation timing modes:
+    // - 'eager': translates all rows
+    // - 'lazy' (default): translates latest/active row eagerly, waits for historical rows to expand
+    // - 'expand': waits for any row to expand
+    const shouldTranslate = mode === 'eager' || (mode === 'lazy' && eager) || expanded
+    if (!shouldTranslate) {
       return
     }
 
@@ -579,7 +586,7 @@ function AnimatedReasoning({
           inFlightRef.current = null
         }
       })
-  }, [text, running, expanded])
+  }, [text, running, expanded, eager])
 
   useEffect(() => {
     return () => {
@@ -874,6 +881,10 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
     if (tail?.closing?.finalNode.seq !== data.finalNode.seq) return undefined
     return { turn, seq: data.finalNode.seq, openFile }
   }, [data.finalNode, openFile, tail, turn])
+  const isLatest = !streaming
+    && data.finalNode !== undefined
+    && tail?.closing?.finalNode.seq === data.finalNode.seq
+  const eager = streaming || isLatest
   const mentions = useMemo(
     () => owner === undefined ? undefined : fileMentions(owner),
     [fileMentions, owner],
@@ -950,6 +961,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
               followSpeedCpsRef={reasoningOwnsSpeed && index === last ? rootSpeedRef : undefined}
               followRevealScaleRef={reasoningOwnsSpeed && index === last ? rootRevealScaleRef : undefined}
               snapAutoCollapse={groupPart === undefined}
+              eager={eager}
               t={t}
             />
           </FoldableReasoning>,
