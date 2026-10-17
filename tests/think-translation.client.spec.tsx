@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TypewriterAssistantNodeView } from '../src/client/TypewriterAssistantNodeView.tsx'
 
@@ -51,6 +51,12 @@ function createReasoningProps(options: {
   } as unknown as Parameters<typeof TypewriterAssistantNodeView>[0]
 }
 
+function translatedResponse(text: string): Response {
+  return new Response(JSON.stringify({ ok: true, text }), {
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
 describe('think translation integration', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -60,11 +66,7 @@ describe('think translation integration', () => {
     const originalText = 'Evaluating the candidates for database indexing.'
     const translatedText = '评估数据库索引的候选方案。'
 
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ ok: true, text: translatedText }),
-    })
-    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(translatedResponse(translatedText))
 
     const view = render(<TypewriterAssistantNodeView {...createReasoningProps({ text: originalText })} />)
 
@@ -84,16 +86,49 @@ describe('think translation integration', () => {
     )
   })
 
+  it('drops a stale translation when settled reasoning changes and the new request fails', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(translatedResponse('旧译文'))
+      .mockRejectedValueOnce(new Error('Translation unavailable'))
+    const view = render(<TypewriterAssistantNodeView {...createReasoningProps({ text: 'First reasoning' })} />)
+
+    await waitFor(() => { expect(view.container.textContent).toContain('旧译文') })
+    view.rerender(<TypewriterAssistantNodeView {...createReasoningProps({ text: 'Updated reasoning' })} />)
+
+    expect(view.container.textContent).toContain('Updated reasoning')
+    expect(view.container.textContent).not.toContain('旧译文')
+    await waitFor(() => { expect(fetchMock).toHaveBeenCalledTimes(2) })
+    await act(async () => { await Promise.resolve() })
+    expect(view.container.textContent).not.toContain('旧译文')
+  })
+
+  it('invalidates visible translation when preferences change before the next render', async () => {
+    const originalText = 'Reasoning with configurable translation.'
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(translatedResponse('中文译文'))
+      .mockResolvedValueOnce(translatedResponse('English translation'))
+    const view = render(<TypewriterAssistantNodeView {...createReasoningProps({ text: originalText })} />)
+    await waitFor(() => { expect(view.container.textContent).toContain('中文译文') })
+
+    localStorage.setItem('dsh-think-translate:think', 'false')
+    view.rerender(<TypewriterAssistantNodeView {...createReasoningProps({ text: originalText })} />)
+    expect(view.container.textContent).not.toContain('中文译文')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    localStorage.setItem('dsh-think-translate:think', 'true')
+    localStorage.setItem('dsh-think-translate:lang', 'en')
+    view.rerender(<TypewriterAssistantNodeView {...createReasoningProps({ text: originalText })} />)
+    await waitFor(() => { expect(view.container.textContent).toContain('English translation') })
+    expect(view.container.textContent).not.toContain('中文译文')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('defers translation while streaming and only translates once settled', async () => {
     const partialText = 'Evaluating candidates in real time...'
     const settledText = 'Evaluating candidates in real time... Done.'
     const translatedText = '实时评估候选方案... 完成。'
 
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ ok: true, text: translatedText }),
-    })
-    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(translatedResponse(translatedText))
 
     // 1. When running (even if auto-expanded), no translation fetch occurs
     const view = render(
@@ -102,7 +137,6 @@ describe('think translation integration', () => {
       />,
     )
 
-    await new Promise(resolve => setTimeout(resolve, 50))
     expect(fetchMock).not.toHaveBeenCalled()
     expect(view.container.textContent).not.toContain('原文')
 
@@ -124,11 +158,7 @@ describe('think translation integration', () => {
     const historicalText = 'Historical reasoning from earlier conversation turn.'
     const translatedText = '来自早期会话轮次的历史思考过程。'
 
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ ok: true, text: translatedText }),
-    })
-    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(translatedResponse(translatedText))
 
     // Render collapsed historical row (isLatest: false)
     const view = render(
@@ -138,7 +168,6 @@ describe('think translation integration', () => {
     )
 
     // Under default lazy mode, collapsed historical rows must NOT trigger fetch
-    await new Promise(resolve => setTimeout(resolve, 50))
     expect(fetchMock).not.toHaveBeenCalled()
     expect(view.container.textContent).not.toContain(translatedText)
 
@@ -159,11 +188,7 @@ describe('think translation integration', () => {
     const originalText = 'Reasoning under expand-only mode.'
     const translatedText = '仅展开模式下的思考过程。'
 
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ ok: true, text: translatedText }),
-    })
-    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(translatedResponse(translatedText))
 
     // Render collapsed row in expand-only mode
     const view = render(
@@ -173,7 +198,6 @@ describe('think translation integration', () => {
     )
 
     // In expand-only mode, collapsed row must NOT trigger fetch
-    await new Promise(resolve => setTimeout(resolve, 50))
     expect(fetchMock).not.toHaveBeenCalled()
     expect(view.container.textContent).not.toContain(translatedText)
 
@@ -194,13 +218,9 @@ describe('think translation integration', () => {
     const originalText = 'Testing retry behavior after network failure.'
     const translatedText = '测试网络失败后的重试行为。'
 
-    const fetchMock = vi.fn()
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockRejectedValueOnce(new Error('Network glitch'))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ ok: true, text: translatedText }),
-      })
-    globalThis.fetch = fetchMock as unknown as typeof fetch
+      .mockResolvedValueOnce(translatedResponse(translatedText))
 
     // 1. Mount settled in expand mode, then expand
     const view = render(
@@ -212,12 +232,11 @@ describe('think translation integration', () => {
     fireEvent.click(toggleButton!)
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    await new Promise(resolve => setTimeout(resolve, 50))
+    await act(async () => { await Promise.resolve() })
     expect(view.container.textContent).toContain(originalText)
 
     // 2. Collapse and reopen: cache key was not locked by the failure, so it retries and succeeds
     fireEvent.click(toggleButton!)
-    await new Promise(resolve => setTimeout(resolve, 20))
     fireEvent.click(toggleButton!)
 
     await waitFor(() => {
@@ -229,13 +248,12 @@ describe('think translation integration', () => {
   it('falls back gracefully to original text when translation endpoint is unavailable', async () => {
     const originalText = 'Checking network configuration.'
 
-    const fetchMock = vi.fn().mockRejectedValue(new Error('Endpoint unavailable'))
-    globalThis.fetch = fetchMock as unknown as typeof fetch
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Endpoint unavailable'))
 
     const view = render(<TypewriterAssistantNodeView {...createReasoningProps({ text: originalText })} />)
 
     // Wait microtasks to ensure fetch rejected
-    await new Promise(resolve => setTimeout(resolve, 50))
+    await act(async () => { await Promise.resolve() })
 
     expect(view.container.textContent).toContain(originalText)
     expect(view.container.textContent).not.toContain('原文')
@@ -245,12 +263,9 @@ describe('think translation integration', () => {
     localStorage.setItem('dsh-think-translate:think', 'false')
     const originalText = 'Reading memory preferences.'
 
-    const fetchMock = vi.fn()
-    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
 
     const view = render(<TypewriterAssistantNodeView {...createReasoningProps({ text: originalText })} />)
-
-    await new Promise(resolve => setTimeout(resolve, 50))
 
     expect(view.container.textContent).toContain(originalText)
     expect(fetchMock).not.toHaveBeenCalled()

@@ -507,39 +507,47 @@ function AnimatedReasoning({
     onRevealCommit: () => { notifyFollowCommit(commitAnchorRef.current) },
   })
   const shown = running && !reduced ? displayed : text
-  const [translation, setTranslation] = useState<string | null>(null)
+  const [translation, setTranslation] = useState<{ key: string; text: string } | null>(null)
   const translationKeyRef = useRef<string>('')
   const inFlightRef = useRef<{ controller: AbortController; key: string } | null>(null)
+  let enabled = true
+  let lang = 'zh-CN'
+  let mode = 'lazy'
+  try {
+    if (!running && typeof localStorage !== 'undefined') {
+      enabled = localStorage.getItem('dsh-think-translate:think') !== 'false'
+      lang = localStorage.getItem('dsh-think-translate:lang') || 'zh-CN'
+      mode = localStorage.getItem('dsh-think-translate:mode') || 'lazy'
+    }
+  } catch {
+    // Storage read errors fall back to defaults.
+  }
+  const cacheKey = `${lang}|${text}`
+  // A settled block can change without a running phase; only show its own translation.
+  const visibleTranslation = !running && enabled && translation?.key === cacheKey
+    ? translation.text
+    : null
 
   useEffect(() => {
     // 1. Defer translation until the block settles to keep typewriter motion pure
     // and avoid flooding the backend with partial streaming text snapshots.
     if (running) {
       setTranslation(null)
+      translationKeyRef.current = ''
       inFlightRef.current?.controller.abort()
       inFlightRef.current = null
       return
     }
     if (!text || !text.trim()) {
       setTranslation(null)
+      translationKeyRef.current = ''
       inFlightRef.current?.controller.abort()
       inFlightRef.current = null
       return
     }
-    let enabled = true
-    let lang = 'zh-CN'
-    let mode = 'lazy'
-    try {
-      if (typeof localStorage !== 'undefined') {
-        enabled = localStorage.getItem('dsh-think-translate:think') !== 'false'
-        lang = localStorage.getItem('dsh-think-translate:lang') || 'zh-CN'
-        mode = localStorage.getItem('dsh-think-translate:mode') || 'lazy'
-      }
-    } catch {
-      // Storage read errors fall back to defaults.
-    }
     if (!enabled) {
       setTranslation(null)
+      translationKeyRef.current = ''
       inFlightRef.current?.controller.abort()
       inFlightRef.current = null
       return
@@ -554,7 +562,6 @@ function AnimatedReasoning({
       return
     }
 
-    const cacheKey = `${lang}|${text}`
     // Request ownership is independent of disclosure toggling: if already translated
     // or currently fetching the exact text, do not duplicate or abort in flight.
     if (translationKeyRef.current === cacheKey || inFlightRef.current?.key === cacheKey) return
@@ -575,7 +582,7 @@ function AnimatedReasoning({
         if (controller.signal.aborted) return
         if (data && data.ok && !data.skipped && typeof data.text === 'string' && data.text.trim() && data.text !== text) {
           translationKeyRef.current = cacheKey
-          setTranslation(data.text)
+          setTranslation({ key: cacheKey, text: data.text })
         }
       })
       .catch(() => {
@@ -586,7 +593,7 @@ function AnimatedReasoning({
           inFlightRef.current = null
         }
       })
-  }, [text, running, expanded, eager])
+  }, [text, running, expanded, eager, enabled, lang, mode])
 
   useEffect(() => {
     return () => {
@@ -597,7 +604,7 @@ function AnimatedReasoning({
 
   const summary = running
     ? latestLine(shown)
-    : (!running && translation ? firstLine(translation) : firstLine(text))
+    : (visibleTranslation ? firstLine(visibleTranslation) : firstLine(text))
   useLogarithmicFade(fadeRootRef, logarithmicFade && !reduced && expanded, running, fadeSpeedRef)
 
   useLayoutEffect(() => {
@@ -735,9 +742,9 @@ function AnimatedReasoning({
           )}
         >
           <div ref={fadeRootRef} className={css.thinkBody}>
-            {!running && translation ? (
+            {visibleTranslation ? (
               <>
-                <div className={css.thinkTranslation}>{translation}</div>
+                <div className={css.thinkTranslation}>{visibleTranslation}</div>
                 <details className={css.thinkOriginal}>
                   <summary className={css.thinkOriginalSummary}>
                     {(t as unknown as (key: string) => string)('message.original')}
