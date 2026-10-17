@@ -57,10 +57,99 @@ function expandTarget(target: string, captured: string): string {
   return target.replaceAll('*', captured)
 }
 
+/**
+ * Remove `//` and block comments from the Host's JSONC facade.
+ *
+ * The Host keeps its alias table in a commented `tsconfig.base.json`; Node has
+ * no JSONC parser, so scan once and drop comments outside strings. Comment
+ * markers inside quoted paths stay intact because strings win.
+ * @param text - raw JSONC source.
+ * @returns the same document with comments replaced by whitespace.
+ */
+function stripJsonComments(text: string): string {
+  let out = ''
+  let inString = false
+  let inLine = false
+  let inBlock = false
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index] ?? ''
+    const next = text[index + 1] ?? ''
+    if (inLine) {
+      if (char === '\n') {
+        inLine = false
+        out += char
+      }
+      continue
+    }
+    if (inBlock) {
+      if (char === '*' && next === '/') {
+        inBlock = false
+        index += 1
+      }
+      continue
+    }
+    if (inString) {
+      out += char
+      if (char === '\\') {
+        out += next
+        index += 1
+      } else if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') {
+      inString = true
+      out += char
+      continue
+    }
+    if (char === '/' && next === '/') {
+      inLine = true
+      index += 1
+      continue
+    }
+    if (char === '/' && next === '*') {
+      inBlock = true
+      index += 1
+      continue
+    }
+    out += char
+  }
+  return out
+}
+
+/**
+ * The Host's own alias table for the checked-out generation.
+ *
+ * `tsconfig.paths.json` mirrors the Host specifiers this plugin resolved when
+ * it was last updated; the Host's `tsconfig.base.json` is the live authority
+ * for its own consumers. New Host generations add specifiers their client
+ * sources import (0.2.x, for example, reached for
+ * `@deepseek-ai/dsh-util-workspace-path` from `ui-primitives`), and a stale
+ * mirror turns every one of those into an unresolvable import. Reading the
+ * facade as a fallback keeps the suite running across Host updates without
+ * waiting for the mirror to be regenerated; entries the mirror already maps
+ * keep winning, and `resolve.alias` below still outranks both.
+ * @param mirror - parsed `tsconfig.paths.json`.
+ * @returns alias entries in precedence order: mirror first, Host facade after.
+ */
+function mergedHarnessPaths(mirror: PathMap): Array<[string, string[]]> {
+  const entries = Object.entries(mirror.compilerOptions.paths)
+  const facade = join(harnessRoot ?? '', 'tsconfig.base.json')
+  if (harnessRoot === null || !existsSync(facade)) return entries
+  const host = JSON.parse(stripJsonComments(readFileSync(facade, 'utf8'))) as PathMap
+  const seen = new Set(entries.map(([pattern]) => pattern))
+  for (const [pattern, targets] of Object.entries(host.compilerOptions.paths)) {
+    if (seen.has(pattern)) continue
+    seen.add(pattern)
+    // Facade targets are relative to the Host root, not to this checkout.
+    entries.push([pattern, targets.map(target => join(harnessRoot, target))])
+  }
+  return entries
+}
+
 function harnessPathsPlugin(): Plugin | null {
   if (harnessRoot === null) return null
   const map = JSON.parse(readFileSync(join(root, 'tsconfig.paths.json'), 'utf8')) as PathMap
-  const entries = Object.entries(map.compilerOptions.paths)
+  const entries = mergedHarnessPaths(map)
   const exact = new Map<string, string[]>()
   const wild: Array<{ pattern: string; targets: string[] }> = []
   // Every target is written against the sibling layout; re-root it so a nested
