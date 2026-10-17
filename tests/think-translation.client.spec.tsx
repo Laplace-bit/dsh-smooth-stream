@@ -270,4 +270,35 @@ describe('think translation integration', () => {
     expect(view.container.textContent).toContain(originalText)
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  it('hands the expanded reasoning body to a replacing kernel feature instead of translating itself', async () => {
+    const originalText = 'Evaluating the candidates for database indexing.'
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    const renderBody = vi.fn((text: string) => <div data-kernel-body>{`translated:${text}`}</div>)
+
+    const view = render(
+      <TypewriterAssistantNodeView
+        {...createReasoningProps({ text: originalText, status: 'settled', thinkAutoExpand: false })}
+        renderReasoningBody={renderBody}
+      />,
+    )
+
+    // A replaced Body is the kernel's expanded-disclosure contribution, so it
+    // stays unmounted while the block is closed — exactly as the kernel's own
+    // ReasoningRow leaves it, and no translation starts in the background.
+    expect(renderBody).not.toHaveBeenCalled()
+    expect(view.container.querySelector('[data-kernel-body]')).toBeNull()
+    expect(view.container.textContent).toContain(originalText)
+
+    fireEvent.click(view.container.querySelector('[data-disclosure-row]')!)
+
+    await waitFor(() => { expect(view.container.querySelector('[data-kernel-body]')).not.toBeNull() })
+    expect(renderBody).toHaveBeenCalledWith(originalText, false)
+
+    // The plugin's own display-layer translation stands down: two translations
+    // in one reasoning row would disagree with each other.
+    await act(async () => { await Promise.resolve() })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(view.container.textContent).not.toContain('原文')
+  })
 })

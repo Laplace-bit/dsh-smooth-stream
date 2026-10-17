@@ -18,6 +18,16 @@ import css from './TypewriterAssistantNodeView.module.css'
 type AssistantProps = ChatNodeViewProps<'assistant-step'>
 type MarkdownProps = Pick<ComponentProps<typeof MarkdownText>, 'labels' | 'fileMentions' | 'text'>
 
+/**
+ * Kernel seat for one expanded reasoning body. The takeover never names the
+ * registry key itself: `index.ts` dispatches the kernel's
+ * `conversation.chat.reasoning.body` child slot and hands the result here.
+ * @param text - the reasoning text to render, already smoothed.
+ * @param running - whether this block is still the streaming tail.
+ * @returns the kernel's own body contribution.
+ */
+export type ReasoningBodySeat = (text: string, running: boolean) => ReactNode
+
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(
     () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true,
@@ -459,6 +469,7 @@ function AnimatedReasoning({
   followRevealScaleRef,
   snapAutoCollapse,
   eager = false,
+  renderBody,
   t,
 }: {
   text: string
@@ -474,6 +485,15 @@ function AnimatedReasoning({
   snapAutoCollapse: boolean
   /** Whether this reasoning block belongs to the active or latest turn (for lazy translation gating). */
   eager?: boolean | undefined
+  /**
+   * Kernel seat for the expanded reasoning body, present only when a feature
+   * other than the kernel's own default replaced
+   * `conversation.chat.reasoning.body`. The takeover then renders that
+   * contribution instead of its own body, so host-native translations and any
+   * later reasoning-body feature keep working; the plugin's own display-layer
+   * translation stays out of the way while it does.
+   */
+  renderBody?: ReasoningBodySeat | undefined
   t: AssistantProps['t']
 }) {
   const reduced = motionReduced
@@ -510,11 +530,14 @@ function AnimatedReasoning({
   const [translation, setTranslation] = useState<{ key: string; text: string } | null>(null)
   const translationKeyRef = useRef<string>('')
   const inFlightRef = useRef<{ controller: AbortController; key: string } | null>(null)
+  // A kernel feature owns the expanded body: draw it and leave translation to
+  // it, because two translations in one reasoning row would disagree.
+  const ownsBody = renderBody === undefined
   let enabled = true
   let lang = 'zh-CN'
   let mode = 'lazy'
   try {
-    if (!running && typeof localStorage !== 'undefined') {
+    if (ownsBody && !running && typeof localStorage !== 'undefined') {
       enabled = localStorage.getItem('dsh-think-translate:think') !== 'false'
       lang = localStorage.getItem('dsh-think-translate:lang') || 'zh-CN'
       mode = localStorage.getItem('dsh-think-translate:mode') || 'lazy'
@@ -524,11 +547,20 @@ function AnimatedReasoning({
   }
   const cacheKey = `${lang}|${text}`
   // A settled block can change without a running phase; only show its own translation.
-  const visibleTranslation = !running && enabled && translation?.key === cacheKey
+  const visibleTranslation = ownsBody && !running && enabled && translation?.key === cacheKey
     ? translation.text
     : null
 
   useEffect(() => {
+    // A kernel feature owns the body; this plugin keeps no translation state of
+    // its own for the block.
+    if (!ownsBody) {
+      setTranslation(null)
+      translationKeyRef.current = ''
+      inFlightRef.current?.controller.abort()
+      inFlightRef.current = null
+      return
+    }
     // 1. Defer translation until the block settles to keep typewriter motion pure
     // and avoid flooding the backend with partial streaming text snapshots.
     if (running) {
@@ -593,7 +625,7 @@ function AnimatedReasoning({
           inFlightRef.current = null
         }
       })
-  }, [text, running, expanded, eager, enabled, lang, mode])
+  }, [ownsBody, text, running, expanded, eager, enabled, lang, mode])
 
   useEffect(() => {
     return () => {
@@ -701,6 +733,14 @@ function AnimatedReasoning({
     element.scrollLeft = running ? element.scrollWidth - element.clientWidth : 0
   }, [running, summary])
 
+  // The kernel renders its body Seat only inside an open disclosure, so the
+  // contribution is mounted exactly there. While closed the takeover draws its
+  // own smoothed text underneath (the collapsed track is fully clipped), which
+  // keeps the height glide and leaves the feature unmounted — and therefore
+  // untranslated — until the reader opens the block, exactly as the kernel's
+  // own ReasoningRow leaves it.
+  const hostedBody = expanded && renderBody !== undefined ? renderBody(shown, running) : undefined
+
   // Preserve FollowHost's layout wrapper without mounting a second scroll owner.
   return (
     <div className={css.follow} ref={commitAnchorRef}>
@@ -742,7 +782,9 @@ function AnimatedReasoning({
           )}
         >
           <div ref={fadeRootRef} className={css.thinkBody}>
-            {visibleTranslation ? (
+            {hostedBody !== undefined ? (
+              hostedBody
+            ) : visibleTranslation ? (
               <>
                 <div className={css.thinkTranslation}>{visibleTranslation}</div>
                 <details className={css.thinkOriginal}>
@@ -790,6 +832,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   loadImage,
   fileMentions,
   turnProcess,
+  renderReasoningBody,
   t,
 }: AssistantProps & {
   /**
@@ -800,6 +843,14 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
    * field, so it is declared here and erased at compile time.
    */
   groupPart?: 'reasoning' | 'response' | undefined
+  /**
+   * Kernel reasoning-body seat, supplied by the takeover only when the
+   * kernel's own default was replaced at `conversation.chat.reasoning.body`
+   * (see `index.ts`). Absent on older kernels, on the shadow fallback that
+   * declares no children, and whenever the default still owns the slot; the
+   * renderer then keeps full ownership of the reasoning body.
+   */
+  renderReasoningBody?: ReasoningBodySeat | undefined
   mode?: StreamMode
   preset?: StreamSmoothingPreset
   revealCharsPerSec?: number
@@ -969,6 +1020,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
               followRevealScaleRef={reasoningOwnsSpeed && index === last ? rootRevealScaleRef : undefined}
               snapAutoCollapse={groupPart === undefined}
               eager={eager}
+              renderBody={renderReasoningBody}
               t={t}
             />
           </FoldableReasoning>,

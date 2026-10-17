@@ -114,6 +114,7 @@ Host 日志中显示 `[dsh-smooth-stream] plugin loaded!` 即表示已成功加�
 
 | DSH 内核 | 本插件支持情况 |
 |---|---|
+| 0.2.x（`@deepseek-ai/dsh-client-*` ≥ `0.2.0-rc.0`） | ✅ `peerDependencies` 已声明。助手步骤的接管改为原地替换内置行（0.2.x 每个 keyed 条目各占一个座位），因此保留了内核的 children/locale/inject 座位；思考正文新增的 `conversation.chat.reasoning.body` 槽位已接入（见下） |
 | 0.1.7（`@deepseek-ai/dsh-client-*` ≥ `0.1.7-rc.1`） | ✅ 当前声明范围：`peerDependencies` 的下限即此版本。插件配置页迁到侧栏 Plugins（`plugins.bundle.config`）、助手步骤的双流程座位（`groupPart`）、图标与 primitive 改名、settings 投影 seam（`describe()` / `update()`）均已适配 |
 | ≤ 0.1.6（含 0.1.5-rc 桌面内核） | ⚠️ 代码里保留了旧 seam 的兼容分支（设置注册表、size 后缀图标名），但**已不在 `peerDependencies` 声明范围内**，本版未实测 |
 | 0.1.0-rc.5 ～ 0.1.0-rc.7 | ✅ 旧版本（≤ 0.6.1）支持 |
@@ -121,6 +122,7 @@ Host 日志中显示 `[dsh-smooth-stream] plugin loaded!` 即表示已成功加�
 | 0.1.2-alpha.1 ～ 0.1.2-alpha.3 | ✅ 0.4.3 起 |
 
 - ✅ = 兼容；⚠️ = 仍可用但已超出声明范围。`0.1.7` 线是本版的目标内核，已按“同一份构建、运行时探测”的方式适配；0.1.5-rc 的兼容分支保留在代码中，便于回退到旧内核时仍能加载。
+- **0.2.x 给思考正文新增了 `conversation.chat.reasoning.body` 槽位**（内核自带的思维链翻译、以及后续任何思考正文特性都注册在这里）。接管渲染思考正文时会先看该槽位：只有内核默认实现占位时仍由插件自己画（保留插件的平滑与自动滚动），一旦有别的特性替换了默认实现，展开状态就交回槽位，插件自身的显示层翻译同时让位，避免同一行出现两份互相矛盾的翻译。槽位不存在（旧内核、影子注册回退）时行为不变。
 - **0.1.7 起内核把插件配置从 Settings 移到侧栏 Plugins 面板**（`plugins.bundle.config` 槽位），并给助手步骤同时挂上 `reasoning` / `response` 两个流程座位（`groupPart`）、把图标导出从 size 后缀改名为权重后缀。本版对三者都做了运行时适配：槽位不存在时旧路径继续生效，`groupPart` 缺失时按“全部块归属本渲染”处理，图标按候选名逐个探测。
 - **0.1.2 起内核移除了 `settingsNamespace()` 运行时助手**（≤ 0.1.1 上它只是个校验恒等函数，0.1.2 仅保留同名类型）。本插件不静态导入该符号，而是在注册设置命名空间时本地内联常量并断言为 `SettingsNamespace` 类型。
 - **不要对 `@deepseek-ai/*` 包的运行时符号做静态导入**。宿主 CLI 经 `node --import tsx/esm` 启动，tsx 会应用宿主 `tsconfig` 的 `paths` 映射，外部插件对 `@deepseek-ai/*` 的裸导入可能被重定向进宿主源码，一旦宿主侧改名/删符号就会以模块实例化错误的形式炸掉启动。类型导入（`import type`）不受影响；本版对 primitive 的读取因此改走模块表探测（`harnessIcons.ts` / `primitives-compat.tsx`）。
