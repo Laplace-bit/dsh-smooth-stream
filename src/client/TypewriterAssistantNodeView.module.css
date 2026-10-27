@@ -127,6 +127,15 @@
   will-change: scroll-position;
 }
 
+/* Full-height preference: the block grows in place and the conversation
+   follower owns the scroll position, so the inner scroll box disappears. */
+.thinkBody[data-unbounded] {
+  max-height: none;
+  overflow-y: visible;
+  overscroll-behavior: auto;
+  contain: none;
+}
+
 .thinkBody::-webkit-scrollbar {
   width: 6px;
 }

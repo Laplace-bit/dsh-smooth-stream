@@ -16,6 +16,11 @@ import {
 } from 'react'
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { TypewriterAssistantNodeView } from '../src/client/TypewriterAssistantNodeView.tsx'
+
+/** Fold answers used by the renderer specs: streaming open, then folded at rest. */
+const EXPANDED_FOLD = { running: 'expanded', settled: 'collapsed', height: 'limited' } as const
+/** Both phases collapsed: the stream never re-opens the block. */
+const COLLAPSED_FOLD = { running: 'collapsed', settled: 'collapsed', height: 'limited' } as const
 import {
   computeFollowRevealScale,
   computeFollowReserve,
@@ -1116,7 +1121,7 @@ describe('assistant renderer', () => {
           <div data-chat-transcript>
             <TypewriterAssistantNodeView
               {...assistantProps('running', [{ kind: 'reasoning', text }])}
-              thinkAutoExpand={false}
+              thinkFold={COLLAPSED_FOLD}
             />
           </div>
           <div role="status">Deep diving...</div>
@@ -1156,7 +1161,7 @@ describe('assistant renderer', () => {
             <div data-chat-transcript>
               <TypewriterAssistantNodeView
                 {...assistantProps('running', [{ kind: 'reasoning', text }])}
-                thinkAutoExpand={false}
+                thinkFold={COLLAPSED_FOLD}
               />
             </div>
             <div role="status">Deep diving...</div>
@@ -1185,7 +1190,7 @@ describe('assistant renderer', () => {
           <div data-chat-transcript>
             <TypewriterAssistantNodeView
               {...assistantProps('running', [{ kind: 'reasoning', text }])}
-              thinkAutoExpand
+              thinkFold={EXPANDED_FOLD}
             />
           </div>
           <div role="status">Deep diving...</div>
@@ -1225,7 +1230,7 @@ describe('assistant renderer', () => {
             <div data-chat-transcript>
               <TypewriterAssistantNodeView
                 {...assistantProps('running', [{ kind: 'reasoning', text }])}
-                thinkAutoExpand
+                thinkFold={EXPANDED_FOLD}
               />
             </div>
             <div role="status">Deep diving...</div>
@@ -1251,7 +1256,7 @@ describe('assistant renderer', () => {
           <div data-chat-transcript>
             <TypewriterAssistantNodeView
               {...assistantProps('running', [{ kind: 'reasoning', text: 'examining' }])}
-              thinkAutoExpand
+              thinkFold={EXPANDED_FOLD}
             />
           </div>
           <div role="status">Deep diving...</div>
@@ -1303,7 +1308,7 @@ describe('assistant renderer', () => {
           <div data-chat-anchor-key="assistant">
             <TypewriterAssistantNodeView
               {...assistantProps('running', [think])}
-              thinkAutoExpand={false}
+              thinkFold={COLLAPSED_FOLD}
             />
           </div>
           <div role="status">Deep diving...</div>
@@ -1352,7 +1357,7 @@ describe('assistant renderer', () => {
           <div data-chat-anchor-key="assistant">
             <TypewriterAssistantNodeView
               {...assistantProps('running', [think])}
-              thinkAutoExpand={false}
+              thinkFold={COLLAPSED_FOLD}
             />
           </div>
           <div role="status" style={{ marginTop: 'calc(calc(48px + 48px) + 48px)' }}>
@@ -1398,7 +1403,7 @@ describe('assistant renderer', () => {
           <div data-chat-anchor-key="assistant">
             <TypewriterAssistantNodeView
               {...assistantProps('running', [think])}
-              thinkAutoExpand={false}
+              thinkFold={COLLAPSED_FOLD}
             />
           </div>
           <div role="status" style={{ marginTop: 3 * FOLLOW_STATUS_RUNWAY_PX }}>
@@ -1522,7 +1527,7 @@ describe('assistant renderer', () => {
           <div data-chat-transcript>
             <TypewriterAssistantNodeView
               {...assistantProps('running', [think])}
-              thinkAutoExpand={false}
+              thinkFold={COLLAPSED_FOLD}
             />
           </div>
           <div role="status">Deep diving...</div>
@@ -1557,7 +1562,7 @@ describe('assistant renderer', () => {
           <div data-chat-transcript>
             <TypewriterAssistantNodeView
               {...assistantProps('running', [think, { kind: 'text', text: 'Short answer.' }])}
-              thinkAutoExpand={false}
+              thinkFold={COLLAPSED_FOLD}
             />
           </div>
           <div role="status">Deep diving...</div>
@@ -1586,7 +1591,7 @@ describe('assistant renderer', () => {
           <div data-chat-transcript>
             <TypewriterAssistantNodeView
               {...assistantProps('running', blocks)}
-              thinkAutoExpand={false}
+              thinkFold={COLLAPSED_FOLD}
             />
           </div>
           <div role="status">Deep diving...</div>
@@ -2532,7 +2537,7 @@ describe('assistant renderer', () => {
           <div data-chat-transcript>
             <TypewriterAssistantNodeView
               {...assistantProps('running', [block])}
-              thinkAutoExpand={false}
+              thinkFold={COLLAPSED_FOLD}
             />
           </div>
           <div role="status">Deep diving...</div>
@@ -2571,7 +2576,7 @@ describe('assistant renderer', () => {
           <div data-chat-transcript>
             <TypewriterAssistantNodeView
               {...assistantProps('settled', [block])}
-              thinkAutoExpand={false}
+              thinkFold={COLLAPSED_FOLD}
             />
           </div>
         </div>

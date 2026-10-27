@@ -12,6 +12,7 @@ import { useLogarithmicFade } from './useLogarithmicFade.ts'
 import { useDecoupledMarkdown } from './useDecoupledMarkdown.ts'
 import { FollowHost } from './FollowHost.tsx'
 import { DEFAULT_STREAM_CONFIG, type StreamMode } from '../config.ts'
+import { DEFAULT_THINK_FOLD, foldStateFor, type ThinkFoldPolicy } from '../fold-policy.ts'
 import { DEFAULT_STREAM_SETTINGS, type StreamMotionPreference } from '../settings.ts'
 import css from './TypewriterAssistantNodeView.module.css'
 
@@ -461,7 +462,7 @@ function AnimatedReasoning({
   text,
   running,
   preset,
-  thinkAutoExpand,
+  thinkFold,
   motionReduced,
   logarithmicFade,
   shouldHoldBack,
@@ -475,7 +476,8 @@ function AnimatedReasoning({
   text: string
   running: boolean
   preset: StreamSmoothingPreset
-  thinkAutoExpand: boolean
+  /** Per-phase disclosure and expanded height for this reasoning block. */
+  thinkFold: ThinkFoldPolicy
   motionReduced: boolean
   logarithmicFade: boolean
   shouldHoldBack: () => boolean
@@ -497,7 +499,7 @@ function AnimatedReasoning({
   t: AssistantProps['t']
 }) {
   const reduced = motionReduced
-  const [expanded, setExpanded] = useState(running && thinkAutoExpand)
+  const [expanded, setExpanded] = useState(running && thinkFold.running === 'expanded')
   const [autoClosed, setAutoClosed] = useState(false)
   const summaryRef = useRef<HTMLSpanElement>(null)
   const fadeRootRef = useRef<HTMLDivElement>(null)
@@ -640,12 +642,15 @@ function AnimatedReasoning({
   useLogarithmicFade(fadeRootRef, logarithmicFade && !reduced && expanded, running, fadeSpeedRef)
 
   useLayoutEffect(() => {
-    // Only the running state owns disclosure while auto-expand is on; with it
-    // off, a manual toggle is never wrestled back by the stream.
-    if (thinkAutoExpand) {
-      setExpanded(running)
-      setAutoClosed(!running)
-    }
+    // The policy, not the stream, owns disclosure at a phase flip: running and
+    // settled each carry their own answer, so a block can open when its stream
+    // starts and survive the flip. A manual toggle in between is never wrestled
+    // back, because this effect only runs when the phase or the policy changes.
+    const target = foldStateFor(thinkFold, running)
+    setExpanded(target === 'expanded')
+    // A policy-driven collapse is the automatic one: 0.1.x snaps it and lets
+    // the follower absorb the height step instead of animating the track too.
+    setAutoClosed(target === 'collapsed')
     if (running) {
       userScrolledRef.current = false
     }
@@ -653,7 +658,7 @@ function AnimatedReasoning({
     // correction in the SAME task, before the grown-but-uncompensated frame
     // can reach a paint.
     notifyFollowCommit(commitAnchorRef.current)
-  }, [running, thinkAutoExpand])
+  }, [running, thinkFold])
 
   useEffect(() => {
     // Only the live stream owns the reading position. A settled block is
@@ -781,7 +786,11 @@ function AnimatedReasoning({
             </>
           )}
         >
-          <div ref={fadeRootRef} className={css.thinkBody}>
+          <div
+            ref={fadeRootRef}
+            className={css.thinkBody}
+            data-unbounded={thinkFold.height === 'full' || undefined}
+          >
             {hostedBody !== undefined ? (
               hostedBody
             ) : visibleTranslation ? (
@@ -821,7 +830,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   revealCharsPerSec: _revealCharsPerSec = DEFAULT_STREAM_CONFIG.revealCharsPerSec,
   scrollSpeedPxPerSec: _scrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.scrollSpeedPxPerSec,
   maxScrollSpeedPxPerSec: _maxScrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.maxScrollSpeedPxPerSec,
-  thinkAutoExpand = DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+  thinkFold = DEFAULT_THINK_FOLD,
   logarithmicFade = DEFAULT_STREAM_SETTINGS.logarithmicFade,
   controlScroll = true,
   motionPreference = DEFAULT_STREAM_SETTINGS.motionPreference,
@@ -856,7 +865,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   revealCharsPerSec?: number
   scrollSpeedPxPerSec?: number
   maxScrollSpeedPxPerSec?: number
-  thinkAutoExpand?: boolean
+  thinkFold?: ThinkFoldPolicy
   logarithmicFade?: boolean
   controlScroll?: boolean
   motionPreference?: StreamMotionPreference
@@ -1012,7 +1021,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
               text={block.text}
               running={streaming && index === last && (groupPart !== 'reasoning' || stepTailIsReasoning)}
               preset={preset}
-              thinkAutoExpand={thinkAutoExpand}
+              thinkFold={thinkFold}
               logarithmicFade={logarithmicFade && data.status !== 'interrupted'}
               motionReduced={reduced}
               shouldHoldBack={shouldHoldBack}

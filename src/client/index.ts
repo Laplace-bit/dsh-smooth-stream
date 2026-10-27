@@ -265,7 +265,9 @@ class SettingsCell {
       && next.controlScroll === this.value.controlScroll
       && next.preset === this.value.preset
       && next.motionPreference === this.value.motionPreference
-      && next.thinkAutoExpand === this.value.thinkAutoExpand
+      && next.thinkRunning === this.value.thinkRunning
+      && next.thinkSettled === this.value.thinkSettled
+      && next.thinkHeight === this.value.thinkHeight
       && next.logarithmicFade === this.value.logarithmicFade
       && next.debugEnabled === this.value.debugEnabled
       && next.debugTuning === this.value.debugTuning
@@ -471,6 +473,13 @@ export function apply(ctx: ClientContext): void {
       settings.getSnapshot,
       settings.getSnapshot,
     )
+    // Stable across renders so the memoized renderer only re-renders when a
+    // fold answer actually changed.
+    const thinkFold = useMemo(() => ({
+      running: preferences.thinkRunning,
+      settled: preferences.thinkSettled,
+      height: preferences.thinkHeight,
+    }), [preferences.thinkRunning, preferences.thinkSettled, preferences.thinkHeight])
     // The swap preserves the built-in entry's children table, so the kernel
     // hands this component the same child-seat dispatch the built-in row
     // consumed. The shadow fallback declares no children and therefore gets
@@ -515,7 +524,7 @@ export function apply(ctx: ClientContext): void {
       revealCharsPerSec: config.revealCharsPerSec,
       scrollSpeedPxPerSec: config.scrollSpeedPxPerSec,
       maxScrollSpeedPxPerSec: config.maxScrollSpeedPxPerSec,
-      thinkAutoExpand: preferences.thinkAutoExpand,
+      thinkFold,
       logarithmicFade: preferences.logarithmicFade,
       controlScroll: preferences.controlScroll,
       motionPreference: preferences.motionPreference,

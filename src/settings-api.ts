@@ -31,8 +31,12 @@ export interface StreamSettingsView {
   preset: import('./settings.ts').StreamSmoothingPreset
   /** How the reveal honors the OS reduced-motion preference. */
   motionPreference: import('./settings.ts').StreamMotionPreference
-  /** Current resolved preference. */
-  thinkAutoExpand: boolean
+  /** How the reasoning block folds while it streams. */
+  thinkRunning: import('./fold-policy.ts').FoldState
+  /** How the reasoning block folds once it stops streaming. */
+  thinkSettled: import('./fold-policy.ts').FoldState
+  /** Expanded reasoning-body height. */
+  thinkHeight: import('./fold-policy.ts').FoldHeight
   /** Whether new answer/thinking text fades into its original color. */
   logarithmicFade: boolean
   /** Whether a fixed npm update command is safe to offer. */

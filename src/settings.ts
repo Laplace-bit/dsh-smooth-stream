@@ -7,6 +7,8 @@
  * live.
  */
 
+import { DEFAULT_THINK_FOLD, type FoldHeight, type FoldState } from './fold-policy.ts'
+
 /** Settings namespace registered by the Host and served through the plugin RPC. */
 export const STREAM_SETTINGS_NS = 'smooth-stream'
 
@@ -90,11 +92,29 @@ export interface StreamSettings {
    */
   motionPreference: StreamMotionPreference
   /**
-   * Whether a reasoning ("Think") block auto-expands while it is the
-   * streaming tail. Off keeps the block collapsed — the user can still open
-   * it by hand — and stops the running state from re-owning the disclosure.
+   * Retired in favor of {@link thinkRunning}. Kept as an accepted field so a
+   * legacy `settings.yaml` section imports as a whole: the migration validates
+   * every key in the section, and an unknown one rejects all of them. Nothing
+   * reads this value.
+   * @deprecated Use {@link thinkRunning}.
    */
   thinkAutoExpand: boolean
+  /**
+   * How a reasoning ("Think") block folds while it is the streaming tail.
+   * `expanded` opens it as its stream starts; `collapsed` leaves it shut, and a
+   * manual open stays until the next phase flip.
+   */
+  thinkRunning: FoldState
+  /**
+   * How the block folds once it stops streaming. `expanded` keeps what was just
+   * written readable; `collapsed` returns it to its one-line summary.
+   */
+  thinkSettled: FoldState
+  /**
+   * Expanded-body height. `limited` keeps the block inside its own 300px box;
+   * `full` lets it grow in place and hands scrolling to the conversation.
+   */
+  thinkHeight: FoldHeight
   /** Logarithmic text fade for the answer and expanded thinking body. */
   logarithmicFade: boolean
   /** Whether the live renderer diagnostics panel is enabled. */
@@ -110,6 +130,9 @@ export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   preset: 'silky',
   motionPreference: 'auto',
   thinkAutoExpand: true,
+  thinkRunning: DEFAULT_THINK_FOLD.running,
+  thinkSettled: DEFAULT_THINK_FOLD.settled,
+  thinkHeight: DEFAULT_THINK_FOLD.height,
   logarithmicFade: true,
   debugEnabled: false,
   debugTuning: DEFAULT_STREAM_DEBUG_TUNING,

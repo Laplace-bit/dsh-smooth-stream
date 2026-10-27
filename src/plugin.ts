@@ -4,6 +4,7 @@ import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import Schema from '@deepseek-ai/schemastery'
 import { DEFAULT_STREAM_CONFIG, type StreamConfig } from './config.ts'
 import { injectStreamConfig } from './boot-config.ts'
+import { isFoldHeight, isFoldState } from './fold-policy.ts'
 import { STREAM_PACKAGE_NAME, STREAM_PACKAGE_VERSION } from './package-meta.ts'
 import { inspectProfileInstallation, updateNpmProfilePackage } from './profile-installation.ts'
 import { registerSettingsChannel } from './settings-channel.ts'
@@ -108,7 +109,9 @@ export function apply(ctx: Context, config: Config): void {
           controlScroll: resolved.controlScroll,
           preset: resolved.preset ?? config.preset,
           motionPreference: resolved.motionPreference,
-          thinkAutoExpand: resolved.thinkAutoExpand,
+          thinkRunning: resolved.thinkRunning,
+          thinkSettled: resolved.thinkSettled,
+          thinkHeight: resolved.thinkHeight,
           logarithmicFade: resolved.logarithmicFade,
           canUpgrade: installation.kind === 'npm',
         }
@@ -151,13 +154,18 @@ export function apply(ctx: Context, config: Config): void {
           if (typeof payload !== 'object' || payload === null || Array.isArray(payload)
             || typeof (payload as { enabled?: unknown }).enabled !== 'boolean'
             || typeof (payload as { controlScroll?: unknown }).controlScroll !== 'boolean'
-            || typeof (payload as { thinkAutoExpand?: unknown }).thinkAutoExpand !== 'boolean'
+            || ((payload as { thinkRunning?: unknown }).thinkRunning !== undefined
+              && !isFoldState((payload as { thinkRunning?: unknown }).thinkRunning))
+            || ((payload as { thinkSettled?: unknown }).thinkSettled !== undefined
+              && !isFoldState((payload as { thinkSettled?: unknown }).thinkSettled))
+            || ((payload as { thinkHeight?: unknown }).thinkHeight !== undefined
+              && !isFoldHeight((payload as { thinkHeight?: unknown }).thinkHeight))
           ) {
             return {
               ok: false,
               error: {
                 code: 'settings-rejected',
-                message: 'enabled, controlScroll and thinkAutoExpand must be booleans',
+                message: 'enabled and controlScroll must be booleans; fold settings must be expanded|collapsed and limited|full',
                 details: { ns: STREAM_SETTINGS_NS },
               },
             }
@@ -178,7 +186,9 @@ export function apply(ctx: Context, config: Config): void {
               controlScroll: boolean
               preset?: unknown
               motionPreference?: unknown
-              thinkAutoExpand: boolean
+              thinkRunning?: unknown
+              thinkSettled?: unknown
+              thinkHeight?: unknown
               logarithmicFade?: unknown
               debugEnabled?: unknown
               debugTuning?: unknown
@@ -239,7 +249,9 @@ export function apply(ctx: Context, config: Config): void {
               controlScroll: next.controlScroll,
               ...(next.preset === undefined ? {} : { preset: next.preset }),
               ...(next.motionPreference === undefined ? {} : { motionPreference: next.motionPreference }),
-              thinkAutoExpand: next.thinkAutoExpand,
+              ...(next.thinkRunning === undefined ? {} : { thinkRunning: next.thinkRunning }),
+              ...(next.thinkSettled === undefined ? {} : { thinkSettled: next.thinkSettled }),
+              ...(next.thinkHeight === undefined ? {} : { thinkHeight: next.thinkHeight }),
               ...(next.logarithmicFade === undefined ? {} : { logarithmicFade: next.logarithmicFade }),
               ...(hasDebug ? { debugEnabled: next.debugEnabled, debugTuning: next.debugTuning } : {}),
             })

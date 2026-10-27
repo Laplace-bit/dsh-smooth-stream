@@ -1,6 +1,7 @@
 /** Staged form state for the plugin-owned smooth-stream settings RPC. */
 
 import { createSnapshotStore, type SnapshotStore } from './clientStore.ts'
+import { type FoldHeight, type FoldState } from '../fold-policy.ts'
 import {
   DEFAULT_STREAM_DEBUG_TUNING,
   DEFAULT_STREAM_SETTINGS,
@@ -27,7 +28,9 @@ export interface SmoothStreamCardState {
   controlScroll: boolean
   preset: StreamSmoothingPreset
   motionPreference: StreamMotionPreference
-  thinkAutoExpand: boolean
+  thinkRunning: FoldState
+  thinkSettled: FoldState
+  thinkHeight: FoldHeight
   logarithmicFade: boolean
   debugEnabled: boolean
   debugTuning: StreamDebugTuning
@@ -57,7 +60,7 @@ export class SmoothStreamCardController {
   private readonly store = createSnapshotStore<SmoothStreamCardState>(this.projection())
   private loaded: StreamSettingsView | undefined
   private loadedDebug: StreamDebugSettingsView | undefined
-  private stagedBase: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'preset' | 'motionPreference' | 'thinkAutoExpand' | 'logarithmicFade'> | undefined
+  private stagedBase: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'preset' | 'motionPreference' | 'thinkRunning' | 'thinkSettled' | 'thinkHeight' | 'logarithmicFade'> | undefined
   private stagedDebug: Pick<StreamSettings, 'debugEnabled' | 'debugTuning'> | undefined
   private saving = false
   private failed = false
@@ -95,14 +98,16 @@ export class SmoothStreamCardController {
       hooks: { smoothStreamCard: this.store },
       edit: (patch) => {
         if (this.saving) return
-        if (patch.enabled !== undefined || patch.controlScroll !== undefined || patch.preset !== undefined || patch.motionPreference !== undefined || patch.thinkAutoExpand !== undefined || patch.logarithmicFade !== undefined) {
+        if (patch.enabled !== undefined || patch.controlScroll !== undefined || patch.preset !== undefined || patch.motionPreference !== undefined || patch.thinkRunning !== undefined || patch.thinkSettled !== undefined || patch.thinkHeight !== undefined || patch.logarithmicFade !== undefined) {
           this.stagedBase = {
             ...this.baseValues(),
             ...(patch.enabled === undefined ? {} : { enabled: patch.enabled }),
             ...(patch.controlScroll === undefined ? {} : { controlScroll: patch.controlScroll }),
             ...(patch.preset === undefined ? {} : { preset: patch.preset }),
             ...(patch.motionPreference === undefined ? {} : { motionPreference: patch.motionPreference }),
-            ...(patch.thinkAutoExpand === undefined ? {} : { thinkAutoExpand: patch.thinkAutoExpand }),
+            ...(patch.thinkRunning === undefined ? {} : { thinkRunning: patch.thinkRunning }),
+            ...(patch.thinkSettled === undefined ? {} : { thinkSettled: patch.thinkSettled }),
+            ...(patch.thinkHeight === undefined ? {} : { thinkHeight: patch.thinkHeight }),
             ...(patch.logarithmicFade === undefined ? {} : { logarithmicFade: patch.logarithmicFade }),
           }
         }
@@ -148,13 +153,15 @@ export class SmoothStreamCardController {
     }
   }
 
-  private baseValues(): Pick<StreamSettings, 'enabled' | 'controlScroll' | 'preset' | 'motionPreference' | 'thinkAutoExpand' | 'logarithmicFade'> {
+  private baseValues(): Pick<StreamSettings, 'enabled' | 'controlScroll' | 'preset' | 'motionPreference' | 'thinkRunning' | 'thinkSettled' | 'thinkHeight' | 'logarithmicFade'> {
     return this.stagedBase ?? {
       enabled: this.loaded?.enabled ?? DEFAULT_STREAM_SETTINGS.enabled,
       controlScroll: this.loaded?.controlScroll ?? DEFAULT_STREAM_SETTINGS.controlScroll,
       preset: this.loaded?.preset ?? DEFAULT_STREAM_SETTINGS.preset,
       motionPreference: this.loaded?.motionPreference ?? DEFAULT_STREAM_SETTINGS.motionPreference,
-      thinkAutoExpand: this.loaded?.thinkAutoExpand ?? DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+      thinkRunning: this.loaded?.thinkRunning ?? DEFAULT_STREAM_SETTINGS.thinkRunning,
+      thinkSettled: this.loaded?.thinkSettled ?? DEFAULT_STREAM_SETTINGS.thinkSettled,
+      thinkHeight: this.loaded?.thinkHeight ?? DEFAULT_STREAM_SETTINGS.thinkHeight,
       logarithmicFade: this.loaded?.logarithmicFade ?? DEFAULT_STREAM_SETTINGS.logarithmicFade,
     }
   }
@@ -168,7 +175,13 @@ export class SmoothStreamCardController {
 
   /** Complete settings projection consumed by the live SettingsCell bridge. */
   values(): StreamSettings {
-    return { ...this.baseValues(), ...this.debugValues() }
+    // The retired switch is not editable; the saved document keeps whatever the
+    // profile already stored, and the card never writes it.
+    return {
+      thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+      ...this.baseValues(),
+      ...this.debugValues(),
+    }
   }
 
   private async load(): Promise<void> {

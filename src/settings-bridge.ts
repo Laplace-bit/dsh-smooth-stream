@@ -33,12 +33,29 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import Schema from '@deepseek-ai/schemastery'
 import { DEFAULT_STREAM_CONFIG, type StreamConfig } from './config.ts'
+import { DEFAULT_THINK_FOLD, type FoldHeight, type FoldState } from './fold-policy.ts'
 import {
   DEFAULT_STREAM_SETTINGS,
   STREAM_SETTINGS_NS,
   type StreamDebugTuning,
   type StreamSettings,
 } from './settings.ts'
+
+/** One fold phase's schema; each phase carries its own default. */
+function foldStateSchema(defaultValue: FoldState): Schema<FoldState> {
+  return Schema.union([
+    Schema.const('expanded'),
+    Schema.const('collapsed'),
+  ] as const).default(defaultValue)
+}
+
+/** Expanded-body height schema. */
+function foldHeightSchema(defaultValue: FoldHeight): Schema<FoldHeight> {
+  return Schema.union([
+    Schema.const('limited'),
+    Schema.const('full'),
+  ] as const).default(defaultValue)
+}
 
 /**
  * Diagnostic tuning schema, shared by the legacy user section and the modern
@@ -71,6 +88,9 @@ export const streamSettingsSchema: Schema<StreamSettings> = Schema.object({
     Schema.const('force-reduced'),
   ] as const).default(DEFAULT_STREAM_SETTINGS.motionPreference),
   thinkAutoExpand: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand),
+  thinkRunning: foldStateSchema(DEFAULT_THINK_FOLD.running),
+  thinkSettled: foldStateSchema(DEFAULT_THINK_FOLD.settled),
+  thinkHeight: foldHeightSchema(DEFAULT_THINK_FOLD.height),
   logarithmicFade: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.logarithmicFade),
   debugEnabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.debugEnabled),
   debugTuning: streamDebugTuningSchema,
@@ -112,6 +132,9 @@ export const streamSettingsFields = {
     Schema.const('force-reduced'),
   ] as const).default(DEFAULT_STREAM_SETTINGS.motionPreference)),
   thinkAutoExpand: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand)),
+  thinkRunning: volatileField(foldStateSchema(DEFAULT_THINK_FOLD.running)),
+  thinkSettled: volatileField(foldStateSchema(DEFAULT_THINK_FOLD.settled)),
+  thinkHeight: volatileField(foldHeightSchema(DEFAULT_THINK_FOLD.height)),
   logarithmicFade: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.logarithmicFade)),
   debugEnabled: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.debugEnabled)),
   debugTuning: volatileField(streamDebugTuningSchema),
