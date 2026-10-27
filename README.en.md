@@ -153,6 +153,7 @@ For a local preview, run `pnpm build:repro`, serve the repository with `python3 
   - **While thinking streams** (expanded by default): Open the reasoning body as it arrives; collapsed leaves it shut until opened by hand.
   - **After it settles** (collapsed by default): Keep the reasoning readable once it stops, or fold it back to its one-line summary.
   - **Expanded height** (limited by default): Limited keeps the body inside its own 300px scroll box; full lets it grow to its whole height and hands scrolling to the conversation.
+  - **After a turn completes** (follow kernel by default): Whether a finished turn folds its process into the one-line summary. Choosing keep or collapsed applies the chosen state once to the mounted answer row, after the turn has closed and is foldable; a manual fold is left alone while that row stays mounted, and the state is applied again if the row remounts.
 - **Collapse finished work** (default on): Folds thoughts and tool steps into a summary line once the turn settles.
 - **Show render diagnostics** (default off): Opens a live HUD on the right side to inspect FPS, character backlog, spring state, and adjust physical parameters in real time.
 

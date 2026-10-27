@@ -139,6 +139,7 @@ describe('smooth-stream settings channel fallback', () => {
           thinkRunning: DEFAULT_STREAM_SETTINGS.thinkRunning,
           thinkSettled: DEFAULT_STREAM_SETTINGS.thinkSettled,
           thinkHeight: DEFAULT_STREAM_SETTINGS.thinkHeight,
+          turnFold: DEFAULT_STREAM_SETTINGS.turnFold,
           logarithmicFade: DEFAULT_STREAM_SETTINGS.logarithmicFade,
           canUpgrade: false,
         },

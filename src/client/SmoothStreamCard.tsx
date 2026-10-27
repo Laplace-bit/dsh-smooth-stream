@@ -242,6 +242,16 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
                     disabled={!state.writable || state.saving || !state.enabled}
                     onPick={(value) => { props.edit({ thinkHeight: value }) }}
                   />
+                  <FoldRow
+                    t={t}
+                    label="turnFold"
+                    hint="turnFoldHint"
+                    name="smooth-stream-turn-fold"
+                    value={state.turnFold}
+                    options={[['follow', 'foldFollow'], ['expanded', 'foldKeep'], ['collapsed', 'foldCollapse']]}
+                    disabled={!state.writable || state.saving || !state.enabled}
+                    onPick={(value) => { props.edit({ turnFold: value }) }}
+                  />
                 </div>
                 <label className={state.debugAvailable ? css.field : `${css.field} ${css.fieldDisabled}`}>
                   <span className={css.fieldHead}>

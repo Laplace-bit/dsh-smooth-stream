@@ -37,6 +37,8 @@ export interface StreamSettingsView {
   thinkSettled: import('./fold-policy.ts').FoldState
   /** Expanded reasoning-body height. */
   thinkHeight: import('./fold-policy.ts').FoldHeight
+  /** Whether a completed Turn's process keeps its fold state under plugin control. */
+  turnFold: import('./fold-policy.ts').FoldOverride
   /** Whether new answer/thinking text fades into its original color. */
   logarithmicFade: boolean
   /** Whether a fixed npm update command is safe to offer. */

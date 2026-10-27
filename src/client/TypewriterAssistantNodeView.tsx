@@ -12,7 +12,13 @@ import { useLogarithmicFade } from './useLogarithmicFade.ts'
 import { useDecoupledMarkdown } from './useDecoupledMarkdown.ts'
 import { FollowHost } from './FollowHost.tsx'
 import { DEFAULT_STREAM_CONFIG, type StreamMode } from '../config.ts'
-import { DEFAULT_THINK_FOLD, foldStateFor, type ThinkFoldPolicy } from '../fold-policy.ts'
+import {
+  DEFAULT_THINK_FOLD,
+  DEFAULT_TURN_FOLD,
+  foldStateFor,
+  type FoldOverride,
+  type ThinkFoldPolicy,
+} from '../fold-policy.ts'
 import { DEFAULT_STREAM_SETTINGS, type StreamMotionPreference } from '../settings.ts'
 import css from './TypewriterAssistantNodeView.module.css'
 
@@ -641,12 +647,15 @@ function AnimatedReasoning({
     : (visibleTranslation ? firstLine(visibleTranslation) : firstLine(text))
   useLogarithmicFade(fadeRootRef, logarithmicFade && !reduced && expanded, running, fadeSpeedRef)
 
+  // Only the phase and its answer drive disclosure. Depending on the whole
+  // policy would re-assert the answer when `height` alone changed, folding a
+  // block the reader had just opened.
+  const target = foldStateFor(thinkFold, running)
   useLayoutEffect(() => {
     // The policy, not the stream, owns disclosure at a phase flip: running and
     // settled each carry their own answer, so a block can open when its stream
     // starts and survive the flip. A manual toggle in between is never wrestled
-    // back, because this effect only runs when the phase or the policy changes.
-    const target = foldStateFor(thinkFold, running)
+    // back, because this effect only runs when the phase or its answer changes.
     setExpanded(target === 'expanded')
     // A policy-driven collapse is the automatic one: 0.1.x snaps it and lets
     // the follower absorb the height step instead of animating the track too.
@@ -658,7 +667,11 @@ function AnimatedReasoning({
     // correction in the SAME task, before the grown-but-uncompensated frame
     // can reach a paint.
     notifyFollowCommit(commitAnchorRef.current)
-  }, [running, thinkFold])
+  }, [running, target])
+  // A height-only change re-measures the block without touching disclosure.
+  useLayoutEffect(() => {
+    notifyFollowCommit(commitAnchorRef.current)
+  }, [thinkFold.height])
 
   useEffect(() => {
     // Only the live stream owns the reading position. A settled block is
@@ -831,6 +844,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   scrollSpeedPxPerSec: _scrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.scrollSpeedPxPerSec,
   maxScrollSpeedPxPerSec: _maxScrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.maxScrollSpeedPxPerSec,
   thinkFold = DEFAULT_THINK_FOLD,
+  turnFold = DEFAULT_TURN_FOLD,
   logarithmicFade = DEFAULT_STREAM_SETTINGS.logarithmicFade,
   controlScroll = true,
   motionPreference = DEFAULT_STREAM_SETTINGS.motionPreference,
@@ -866,6 +880,8 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   scrollSpeedPxPerSec?: number
   maxScrollSpeedPxPerSec?: number
   thinkFold?: ThinkFoldPolicy
+  /** Whether the plugin overrides the kernel's Turn-process fold. */
+  turnFold?: FoldOverride
   logarithmicFade?: boolean
   controlScroll?: boolean
   motionPreference?: StreamMotionPreference
@@ -898,6 +914,32 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   // only the answer step folds, only in compact-transcript mode, and only
   // once the turn has closed (foldable implies it). Mirrors the built-in
   // assistant renderer so the takeover keeps the official behavior.
+  // The kernel opens a live Turn's process unconditionally and ignores
+  // `setOpen` until the Turn closes, so applying the override while streaming
+  // would burn the once-per-Turn chance without saving anything. Wait for the
+  // Turn itself to close: an intermediate step settling is not a closed Turn.
+  const turnClosed = (node.location.kind === 'turn' || node.location.kind === 'step')
+    && node.location.turn.status === 'closed'
+  // One override per Turn and per mounted answer row: the answer is saved the
+  // first time this closed Turn is foldable, and a later manual fold is never
+  // taken back while the row stays mounted.
+  const syncedTurnRef = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    if (turnFold === 'follow' || !turnClosed) return
+    // A split kernel renders one answer step as a reasoning row and a response
+    // row with the same `data.step`; only the response row answers for it, or
+    // the second one would re-apply over a manual fold.
+    if (groupPart === 'reasoning') return
+    if (turnProcess === undefined || !turnProcess.foldable) return
+    // A sibling row of the same Turn (an earlier step added by a historical
+    // page) must not answer either.
+    if (data.step !== (turnProcess.spec.answerStep ?? 0)) return
+    if (syncedTurnRef.current === data.turn) return
+    syncedTurnRef.current = data.turn
+    // Always save, even when `open` already matches: an unstored open is the
+    // kernel's temporary default, which the next input may fold back.
+    turnProcess.setOpen(turnFold === 'expanded')
+  }, [turnFold, turnClosed, groupPart, turnProcess, data.turn, data.step])
   const reasoningHidden = turnProcess !== undefined
     && turnProcess.foldable
     && turnProcess.spec.answerStep === data.step

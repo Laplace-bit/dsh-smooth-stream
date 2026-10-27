@@ -7,7 +7,13 @@
  * live.
  */
 
-import { DEFAULT_THINK_FOLD, type FoldHeight, type FoldState } from './fold-policy.ts'
+import {
+  DEFAULT_THINK_FOLD,
+  DEFAULT_TURN_FOLD,
+  type FoldHeight,
+  type FoldOverride,
+  type FoldState,
+} from './fold-policy.ts'
 
 /** Settings namespace registered by the Host and served through the plugin RPC. */
 export const STREAM_SETTINGS_NS = 'smooth-stream'
@@ -115,6 +121,12 @@ export interface StreamSettings {
    * `full` lets it grow in place and hands scrolling to the conversation.
    */
   thinkHeight: FoldHeight
+  /**
+   * Whether a completed Turn keeps its process expanded. `follow` leaves the
+   * kernel's work-details policy in charge; the other two override it once per
+   * Turn, after which a manual fold wins again.
+   */
+  turnFold: FoldOverride
   /** Logarithmic text fade for the answer and expanded thinking body. */
   logarithmicFade: boolean
   /** Whether the live renderer diagnostics panel is enabled. */
@@ -133,6 +145,7 @@ export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   thinkRunning: DEFAULT_THINK_FOLD.running,
   thinkSettled: DEFAULT_THINK_FOLD.settled,
   thinkHeight: DEFAULT_THINK_FOLD.height,
+  turnFold: DEFAULT_TURN_FOLD,
   logarithmicFade: true,
   debugEnabled: false,
   debugTuning: DEFAULT_STREAM_DEBUG_TUNING,

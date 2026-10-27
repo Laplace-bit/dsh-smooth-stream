@@ -5,6 +5,7 @@ import {
   DEFAULT_THINK_FOLD,
   foldStateFor,
   isFoldHeight,
+  isFoldOverride,
   isFoldState,
   type ThinkFoldPolicy,
 } from '../src/fold-policy.ts'
@@ -38,6 +39,14 @@ describe('fold policy', () => {
     expect(isFoldState('manual')).toBe(false)
     expect(isFoldState(true)).toBe(false)
     expect(isFoldState(undefined)).toBe(false)
+  })
+
+  it('accepts only the declared Turn overrides', () => {
+    expect(isFoldOverride('follow')).toBe(true)
+    expect(isFoldOverride('expanded')).toBe(true)
+    expect(isFoldOverride('collapsed')).toBe(true)
+    expect(isFoldOverride('open')).toBe(false)
+    expect(isFoldOverride(null)).toBe(false)
   })
 
   it('accepts only the declared heights', () => {

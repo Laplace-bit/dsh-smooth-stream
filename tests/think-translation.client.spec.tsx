@@ -25,7 +25,11 @@ function createReasoningProps(options: {
   return {
     node: {
       kind: 'assistant-step',
-      location: { kind: 'step' },
+      location: {
+        kind: 'step',
+        turn: { status: status === 'running' ? 'open' : 'closed' },
+        step: { status: status === 'running' ? 'open' : 'closed' },
+      },
       data: {
         status,
         blocks: [{ kind: 'reasoning', text }],

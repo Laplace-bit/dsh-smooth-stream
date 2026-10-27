@@ -69,3 +69,24 @@ export function isFoldHeight(value: unknown): value is FoldHeight {
 export function foldStateFor(policy: ThinkFoldPolicy, running: boolean): FoldState {
   return running ? policy.running : policy.settled
 }
+
+/**
+ * How the plugin treats the Turn-level process fold.
+ *
+ * The kernel folds a completed Turn's process into its `worked for X` line
+ * according to the work-details policy. `follow` leaves that decision alone;
+ * the other two answers override it once per Turn.
+ */
+export type FoldOverride = 'follow' | 'expanded' | 'collapsed'
+
+/** Default keeps the kernel in charge, so the plugin changes nothing until asked. */
+export const DEFAULT_TURN_FOLD: FoldOverride = 'follow'
+
+/**
+ * 判断一个未知值是否为合法的回合折叠覆盖。
+ * @param value - 待判断的值。
+ * @returns 是否为 {@link FoldOverride}。
+ */
+export function isFoldOverride(value: unknown): value is FoldOverride {
+  return value === 'follow' || value === 'expanded' || value === 'collapsed'
+}

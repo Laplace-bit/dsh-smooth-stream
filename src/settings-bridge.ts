@@ -33,7 +33,13 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import Schema from '@deepseek-ai/schemastery'
 import { DEFAULT_STREAM_CONFIG, type StreamConfig } from './config.ts'
-import { DEFAULT_THINK_FOLD, type FoldHeight, type FoldState } from './fold-policy.ts'
+import {
+  DEFAULT_THINK_FOLD,
+  DEFAULT_TURN_FOLD,
+  type FoldHeight,
+  type FoldOverride,
+  type FoldState,
+} from './fold-policy.ts'
 import {
   DEFAULT_STREAM_SETTINGS,
   STREAM_SETTINGS_NS,
@@ -54,6 +60,15 @@ function foldHeightSchema(defaultValue: FoldHeight): Schema<FoldHeight> {
   return Schema.union([
     Schema.const('limited'),
     Schema.const('full'),
+  ] as const).default(defaultValue)
+}
+
+/** Turn-level fold override schema. */
+function foldOverrideSchema(defaultValue: FoldOverride): Schema<FoldOverride> {
+  return Schema.union([
+    Schema.const('follow'),
+    Schema.const('expanded'),
+    Schema.const('collapsed'),
   ] as const).default(defaultValue)
 }
 
@@ -91,6 +106,7 @@ export const streamSettingsSchema: Schema<StreamSettings> = Schema.object({
   thinkRunning: foldStateSchema(DEFAULT_THINK_FOLD.running),
   thinkSettled: foldStateSchema(DEFAULT_THINK_FOLD.settled),
   thinkHeight: foldHeightSchema(DEFAULT_THINK_FOLD.height),
+  turnFold: foldOverrideSchema(DEFAULT_TURN_FOLD),
   logarithmicFade: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.logarithmicFade),
   debugEnabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.debugEnabled),
   debugTuning: streamDebugTuningSchema,
@@ -135,6 +151,7 @@ export const streamSettingsFields = {
   thinkRunning: volatileField(foldStateSchema(DEFAULT_THINK_FOLD.running)),
   thinkSettled: volatileField(foldStateSchema(DEFAULT_THINK_FOLD.settled)),
   thinkHeight: volatileField(foldHeightSchema(DEFAULT_THINK_FOLD.height)),
+  turnFold: volatileField(foldOverrideSchema(DEFAULT_TURN_FOLD)),
   logarithmicFade: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.logarithmicFade)),
   debugEnabled: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.debugEnabled)),
   debugTuning: volatileField(streamDebugTuningSchema),

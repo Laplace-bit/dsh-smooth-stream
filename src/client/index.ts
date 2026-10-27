@@ -268,6 +268,7 @@ class SettingsCell {
       && next.thinkRunning === this.value.thinkRunning
       && next.thinkSettled === this.value.thinkSettled
       && next.thinkHeight === this.value.thinkHeight
+      && next.turnFold === this.value.turnFold
       && next.logarithmicFade === this.value.logarithmicFade
       && next.debugEnabled === this.value.debugEnabled
       && next.debugTuning === this.value.debugTuning
@@ -525,6 +526,7 @@ export function apply(ctx: ClientContext): void {
       scrollSpeedPxPerSec: config.scrollSpeedPxPerSec,
       maxScrollSpeedPxPerSec: config.maxScrollSpeedPxPerSec,
       thinkFold,
+      turnFold: preferences.turnFold,
       logarithmicFade: preferences.logarithmicFade,
       controlScroll: preferences.controlScroll,
       motionPreference: preferences.motionPreference,

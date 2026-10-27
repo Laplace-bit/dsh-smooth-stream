@@ -66,6 +66,8 @@ export type SmoothStreamLocaleKey =
   | 'thinkRunning' | 'thinkRunningHint'
   | 'thinkSettled' | 'thinkSettledHint'
   | 'thinkHeight' | 'thinkHeightHint'
+  | 'turnFold' | 'turnFoldHint'
+  | 'foldFollow' | 'foldKeep' | 'foldCollapse'
   | 'foldExpanded' | 'foldCollapsed'
   | 'foldLimited' | 'foldFull'
   | 'logarithmicFade' | 'logarithmicFadeHint'
@@ -126,6 +128,11 @@ export const en: Record<SmoothStreamLocaleKey, string> = {
   foldCollapsed: 'Collapsed',
   foldLimited: 'Limited',
   foldFull: 'Full height',
+  turnFold: 'After a turn completes',
+  turnFoldHint: 'Whether a finished turn folds its process into the one-line summary. Follow kernel uses the work-details mode.',
+  foldFollow: 'Follow kernel',
+  foldKeep: 'Keep expanded',
+  foldCollapse: 'Collapsed',
   logarithmicFade: 'Logarithmic fade',
   logarithmicFadeHint: 'Fade new answer and expanded thinking text into view. Follows the motion preference.',
   debugEnabled: 'Show render diagnostics',
@@ -242,6 +249,11 @@ export const zh: Record<SmoothStreamLocaleKey, string> = {
   foldCollapsed: '收起',
   foldLimited: '限高',
   foldFull: '全高',
+  turnFold: '回合结束后',
+  turnFoldHint: '回合完成时是否把整个过程收起成一行摘要；跟随内核时使用工作详情模式的设置。',
+  foldFollow: '跟随内核',
+  foldKeep: '保持展开',
+  foldCollapse: '收起',
   logarithmicFade: '对数淡入',
   logarithmicFadeHint: '让回答正文和展开的思考文字由淡变实，遵循动效偏好。',
   debugEnabled: '显示渲染调试面板',

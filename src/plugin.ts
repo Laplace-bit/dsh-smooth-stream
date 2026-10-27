@@ -4,7 +4,7 @@ import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import Schema from '@deepseek-ai/schemastery'
 import { DEFAULT_STREAM_CONFIG, type StreamConfig } from './config.ts'
 import { injectStreamConfig } from './boot-config.ts'
-import { isFoldHeight, isFoldState } from './fold-policy.ts'
+import { isFoldHeight, isFoldOverride, isFoldState } from './fold-policy.ts'
 import { STREAM_PACKAGE_NAME, STREAM_PACKAGE_VERSION } from './package-meta.ts'
 import { inspectProfileInstallation, updateNpmProfilePackage } from './profile-installation.ts'
 import { registerSettingsChannel } from './settings-channel.ts'
@@ -112,6 +112,7 @@ export function apply(ctx: Context, config: Config): void {
           thinkRunning: resolved.thinkRunning,
           thinkSettled: resolved.thinkSettled,
           thinkHeight: resolved.thinkHeight,
+          turnFold: resolved.turnFold,
           logarithmicFade: resolved.logarithmicFade,
           canUpgrade: installation.kind === 'npm',
         }
@@ -160,6 +161,8 @@ export function apply(ctx: Context, config: Config): void {
               && !isFoldState((payload as { thinkSettled?: unknown }).thinkSettled))
             || ((payload as { thinkHeight?: unknown }).thinkHeight !== undefined
               && !isFoldHeight((payload as { thinkHeight?: unknown }).thinkHeight))
+            || ((payload as { turnFold?: unknown }).turnFold !== undefined
+              && !isFoldOverride((payload as { turnFold?: unknown }).turnFold))
           ) {
             return {
               ok: false,
@@ -189,6 +192,7 @@ export function apply(ctx: Context, config: Config): void {
               thinkRunning?: unknown
               thinkSettled?: unknown
               thinkHeight?: unknown
+              turnFold?: unknown
               logarithmicFade?: unknown
               debugEnabled?: unknown
               debugTuning?: unknown
@@ -252,6 +256,7 @@ export function apply(ctx: Context, config: Config): void {
               ...(next.thinkRunning === undefined ? {} : { thinkRunning: next.thinkRunning }),
               ...(next.thinkSettled === undefined ? {} : { thinkSettled: next.thinkSettled }),
               ...(next.thinkHeight === undefined ? {} : { thinkHeight: next.thinkHeight }),
+              ...(next.turnFold === undefined ? {} : { turnFold: next.turnFold }),
               ...(next.logarithmicFade === undefined ? {} : { logarithmicFade: next.logarithmicFade }),
               ...(hasDebug ? { debugEnabled: next.debugEnabled, debugTuning: next.debugTuning } : {}),
             })

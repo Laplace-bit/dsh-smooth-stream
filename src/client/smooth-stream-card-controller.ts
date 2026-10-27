@@ -1,7 +1,7 @@
 /** Staged form state for the plugin-owned smooth-stream settings RPC. */
 
 import { createSnapshotStore, type SnapshotStore } from './clientStore.ts'
-import { type FoldHeight, type FoldState } from '../fold-policy.ts'
+import { type FoldHeight, type FoldOverride, type FoldState } from '../fold-policy.ts'
 import {
   DEFAULT_STREAM_DEBUG_TUNING,
   DEFAULT_STREAM_SETTINGS,
@@ -31,6 +31,7 @@ export interface SmoothStreamCardState {
   thinkRunning: FoldState
   thinkSettled: FoldState
   thinkHeight: FoldHeight
+  turnFold: FoldOverride
   logarithmicFade: boolean
   debugEnabled: boolean
   debugTuning: StreamDebugTuning
@@ -60,7 +61,7 @@ export class SmoothStreamCardController {
   private readonly store = createSnapshotStore<SmoothStreamCardState>(this.projection())
   private loaded: StreamSettingsView | undefined
   private loadedDebug: StreamDebugSettingsView | undefined
-  private stagedBase: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'preset' | 'motionPreference' | 'thinkRunning' | 'thinkSettled' | 'thinkHeight' | 'logarithmicFade'> | undefined
+  private stagedBase: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'preset' | 'motionPreference' | 'thinkRunning' | 'thinkSettled' | 'thinkHeight' | 'turnFold' | 'logarithmicFade'> | undefined
   private stagedDebug: Pick<StreamSettings, 'debugEnabled' | 'debugTuning'> | undefined
   private saving = false
   private failed = false
@@ -98,7 +99,7 @@ export class SmoothStreamCardController {
       hooks: { smoothStreamCard: this.store },
       edit: (patch) => {
         if (this.saving) return
-        if (patch.enabled !== undefined || patch.controlScroll !== undefined || patch.preset !== undefined || patch.motionPreference !== undefined || patch.thinkRunning !== undefined || patch.thinkSettled !== undefined || patch.thinkHeight !== undefined || patch.logarithmicFade !== undefined) {
+        if (patch.enabled !== undefined || patch.controlScroll !== undefined || patch.preset !== undefined || patch.motionPreference !== undefined || patch.thinkRunning !== undefined || patch.thinkSettled !== undefined || patch.thinkHeight !== undefined || patch.turnFold !== undefined || patch.logarithmicFade !== undefined) {
           this.stagedBase = {
             ...this.baseValues(),
             ...(patch.enabled === undefined ? {} : { enabled: patch.enabled }),
@@ -108,6 +109,7 @@ export class SmoothStreamCardController {
             ...(patch.thinkRunning === undefined ? {} : { thinkRunning: patch.thinkRunning }),
             ...(patch.thinkSettled === undefined ? {} : { thinkSettled: patch.thinkSettled }),
             ...(patch.thinkHeight === undefined ? {} : { thinkHeight: patch.thinkHeight }),
+            ...(patch.turnFold === undefined ? {} : { turnFold: patch.turnFold }),
             ...(patch.logarithmicFade === undefined ? {} : { logarithmicFade: patch.logarithmicFade }),
           }
         }
@@ -153,7 +155,7 @@ export class SmoothStreamCardController {
     }
   }
 
-  private baseValues(): Pick<StreamSettings, 'enabled' | 'controlScroll' | 'preset' | 'motionPreference' | 'thinkRunning' | 'thinkSettled' | 'thinkHeight' | 'logarithmicFade'> {
+  private baseValues(): Pick<StreamSettings, 'enabled' | 'controlScroll' | 'preset' | 'motionPreference' | 'thinkRunning' | 'thinkSettled' | 'thinkHeight' | 'turnFold' | 'logarithmicFade'> {
     return this.stagedBase ?? {
       enabled: this.loaded?.enabled ?? DEFAULT_STREAM_SETTINGS.enabled,
       controlScroll: this.loaded?.controlScroll ?? DEFAULT_STREAM_SETTINGS.controlScroll,
@@ -162,6 +164,7 @@ export class SmoothStreamCardController {
       thinkRunning: this.loaded?.thinkRunning ?? DEFAULT_STREAM_SETTINGS.thinkRunning,
       thinkSettled: this.loaded?.thinkSettled ?? DEFAULT_STREAM_SETTINGS.thinkSettled,
       thinkHeight: this.loaded?.thinkHeight ?? DEFAULT_STREAM_SETTINGS.thinkHeight,
+      turnFold: this.loaded?.turnFold ?? DEFAULT_STREAM_SETTINGS.turnFold,
       logarithmicFade: this.loaded?.logarithmicFade ?? DEFAULT_STREAM_SETTINGS.logarithmicFade,
     }
   }

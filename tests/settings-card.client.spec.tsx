@@ -41,6 +41,7 @@ const developmentView: StreamSettingsView = {
     thinkRunning: 'expanded',
     thinkSettled: 'collapsed',
     thinkHeight: 'limited',
+    turnFold: 'follow',
     logarithmicFade: true,
   canUpgrade: false,
 }
@@ -104,6 +105,7 @@ async function bench(options: BenchOptions = {}): Promise<{
         thinkRunning?: unknown
         thinkSettled?: unknown
         thinkHeight?: unknown
+        turnFold?: unknown
         logarithmicFade?: boolean
         debugEnabled?: unknown
         debugTuning?: unknown
@@ -121,6 +123,7 @@ async function bench(options: BenchOptions = {}): Promise<{
         thinkRunning: settings.thinkRunning as StreamSettingsView['thinkRunning'],
         thinkSettled: settings.thinkSettled as StreamSettingsView['thinkSettled'],
         thinkHeight: settings.thinkHeight as StreamSettingsView['thinkHeight'],
+        turnFold: (settings.turnFold ?? 'follow') as StreamSettingsView['turnFold'],
         logarithmicFade: settings.logarithmicFade ?? view.logarithmicFade,
       }
       if (typeof settings.debugEnabled === 'boolean' && typeof settings.debugTuning === 'object' && settings.debugTuning !== null) {
@@ -337,6 +340,7 @@ describe('smooth-stream settings card', () => {
       thinkRunning: 'collapsed',
       thinkSettled: 'collapsed',
       thinkHeight: 'limited',
+      turnFold: 'follow',
       logarithmicFade: true,
     })
   })
@@ -417,6 +421,7 @@ describe('smooth-stream settings card', () => {
       thinkRunning: 'expanded',
       thinkSettled: 'collapsed',
       thinkHeight: 'limited',
+      turnFold: 'follow',
       logarithmicFade: true,
       debugEnabled: true,
       debugTuning: tuning,

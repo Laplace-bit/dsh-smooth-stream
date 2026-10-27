@@ -1,7 +1,7 @@
 /** Browser adapter for the Host-owned smooth-stream settings RPC. */
 
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
-import { DEFAULT_THINK_FOLD, isFoldHeight, isFoldState } from '../fold-policy.ts'
+import { DEFAULT_THINK_FOLD, DEFAULT_TURN_FOLD, isFoldHeight, isFoldOverride, isFoldState } from '../fold-policy.ts'
 import type { StreamDebugTuning, StreamSettings } from '../settings.ts'
 import {
   STREAM_SETTINGS_RPC,
@@ -30,6 +30,7 @@ function settingsView(value: unknown): StreamSettingsView {
     || (data.thinkRunning !== undefined && !isFoldState(data.thinkRunning))
     || (data.thinkSettled !== undefined && !isFoldState(data.thinkSettled))
     || (data.thinkHeight !== undefined && !isFoldHeight(data.thinkHeight))
+    || (data.turnFold !== undefined && !isFoldOverride(data.turnFold))
     || (data.logarithmicFade !== undefined && typeof data.logarithmicFade !== 'boolean')
     || typeof data.canUpgrade !== 'boolean') {
     throw new Error('dsh-smooth-stream: malformed settings response')
@@ -41,6 +42,7 @@ function settingsView(value: unknown): StreamSettingsView {
     thinkRunning: data.thinkRunning ?? DEFAULT_THINK_FOLD.running,
     thinkSettled: data.thinkSettled ?? DEFAULT_THINK_FOLD.settled,
     thinkHeight: data.thinkHeight ?? DEFAULT_THINK_FOLD.height,
+    turnFold: data.turnFold ?? DEFAULT_TURN_FOLD,
   } as unknown as StreamSettingsView
 }
 
@@ -81,7 +83,7 @@ function accepted(result: Awaited<ReturnType<ConnectionHandle['rpc']['call']>>):
 /** Narrow client contract consumed by the staged settings-card controller. */
 export interface SmoothStreamSettingsApi {
   read(): Promise<StreamSettingsView>
-  write(settings: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'motionPreference' | 'thinkRunning' | 'thinkSettled' | 'thinkHeight' | 'logarithmicFade'> & Partial<Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>>): Promise<StreamSettingsView>
+  write(settings: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'motionPreference' | 'thinkRunning' | 'thinkSettled' | 'thinkHeight' | 'turnFold' | 'logarithmicFade'> & Partial<Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>>): Promise<StreamSettingsView>
   readDebug(): Promise<StreamDebugSettingsView>
   writeDebug(settings: Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>): Promise<StreamDebugSettingsView>
   upgrade(): Promise<StreamUpgradeView>
@@ -93,7 +95,7 @@ export function createSmoothStreamSettingsApi(connection: ConnectionHandle): Smo
     async read(): Promise<StreamSettingsView> {
       return settingsView(accepted(await connection.rpc.call(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.read, {})))
     },
-    async write(settings: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'preset' | 'motionPreference' | 'thinkRunning' | 'thinkSettled' | 'thinkHeight' | 'logarithmicFade'> & Partial<Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>>): Promise<StreamSettingsView> {
+    async write(settings: Pick<StreamSettings, 'enabled' | 'controlScroll' | 'preset' | 'motionPreference' | 'thinkRunning' | 'thinkSettled' | 'thinkHeight' | 'turnFold' | 'logarithmicFade'> & Partial<Pick<StreamSettings, 'debugEnabled' | 'debugTuning'>>): Promise<StreamSettingsView> {
       return settingsView(accepted(await connection.rpc.call(
         STREAM_SETTINGS_RPC_CHANNEL,
         STREAM_SETTINGS_RPC.write,
@@ -105,6 +107,7 @@ export function createSmoothStreamSettingsApi(connection: ConnectionHandle): Smo
           thinkRunning: settings.thinkRunning,
           thinkSettled: settings.thinkSettled,
           thinkHeight: settings.thinkHeight,
+          turnFold: settings.turnFold,
           logarithmicFade: settings.logarithmicFade,
           ...(settings.debugEnabled === undefined || settings.debugTuning === undefined
             ? {}
