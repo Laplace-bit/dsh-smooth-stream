@@ -159,7 +159,7 @@ describe('render diagnostics panel', () => {
     const { face, setState } = setup()
     const info = screen.getAllByRole('button', { name: en.debugRevealMultiplier })[0]
     if (info === undefined) throw new Error('reveal multiplier info button was not rendered')
-    fireEvent.mouseEnter(info)
+    fireEvent.pointerEnter(info)
     expect((await screen.findByRole('tooltip', { hidden: true })).textContent).toContain(en.debugTipRevealMultiplier)
 
     fireEvent.click(screen.getByRole('button', { name: en.debugPanelClose }))

@@ -545,7 +545,7 @@ describe('assistant renderer', () => {
     )
     const beforeHover = visualPosition()
     const button = view.getByRole('button', { name: 'copy' })
-    fireEvent.mouseEnter(button)
+    fireEvent.pointerEnter(button)
     expect(view.container.querySelector('[role="tooltip"]')).not.toBeNull()
     await act(() => vi.advanceTimersByTimeAsync(0))
     expect(visualPosition()).toBeCloseTo(beforeHover, 5)
