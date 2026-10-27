@@ -142,7 +142,7 @@ The plugin defaults to `preset: balanced`. You can tune the cadence in your prof
 
 ## User Preferences
 
-Open **Settings → Plugins → Plugin Configuration** in the Web UI:
+Open **Plugins → Installed → dsh-smooth-stream** in the Web UI sidebar and use the configuration card on the package page (kernels before 0.1.7 keep **Settings → Plugins → Plugin Configuration**):
 
 **Logarithmic fade** (on by default) adapts the tail from 24 to at most 160 graphemes according to reveal speed, fading answers and expanded thinking from 0% opacity over 240ms with a reversed logarithmic curve that stays translucent longer. Text settles even during network pauses. Turning it off preserves text pacing and scrolling. It follows the motion preference and skips code, formulas and thinking summaries. Browsers without text-range highlighting support retain the existing reveal behavior.
 
