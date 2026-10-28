@@ -1,25 +1,35 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TypewriterAssistantNodeView } from '../src/client/TypewriterAssistantNodeView.tsx'
+import type { ThinkFoldPolicy } from '../src/fold-policy.ts'
 
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
 })
 
+/** Streaming open, folded at rest. */
+const EXPANDED_FOLD: ThinkFoldPolicy = { running: 'expanded', settled: 'collapsed', height: 'limited' }
+/** Folded in both phases. */
+const COLLAPSED_FOLD: ThinkFoldPolicy = { running: 'collapsed', settled: 'collapsed', height: 'limited' }
+
 function createReasoningProps(options: {
   text: string
   status?: 'running' | 'settled'
-  thinkAutoExpand?: boolean
+  thinkFold?: ThinkFoldPolicy
   isLatest?: boolean
 }) {
-  const { text, status = 'settled', thinkAutoExpand = false, isLatest = true } = options
+  const { text, status = 'settled', thinkFold = COLLAPSED_FOLD, isLatest = true } = options
   const finalSeq = 10
   const tailClosingSeq = isLatest ? 10 : 20
   return {
     node: {
       kind: 'assistant-step',
-      location: { kind: 'step' },
+      location: {
+        kind: 'step',
+        turn: { status: status === 'running' ? 'open' : 'closed' },
+        step: { status: status === 'running' ? 'open' : 'closed' },
+      },
       data: {
         status,
         blocks: [{ kind: 'reasoning', text }],
@@ -29,7 +39,7 @@ function createReasoningProps(options: {
         finalNode: { seq: finalSeq },
       },
     },
-    thinkAutoExpand,
+    thinkFold,
     loadImage: async () => new Blob(),
     useTurnData: (key: string) => {
       if (key === 'turn-tail') {
@@ -133,7 +143,7 @@ describe('think translation integration', () => {
     // 1. When running (even if auto-expanded), no translation fetch occurs
     const view = render(
       <TypewriterAssistantNodeView
-        {...createReasoningProps({ text: partialText, status: 'running', thinkAutoExpand: true })}
+        {...createReasoningProps({ text: partialText, status: 'running', thinkFold: EXPANDED_FOLD })}
       />,
     )
 
@@ -143,7 +153,7 @@ describe('think translation integration', () => {
     // 2. Once settled, translation is triggered for the active/latest row
     view.rerender(
       <TypewriterAssistantNodeView
-        {...createReasoningProps({ text: settledText, status: 'settled', thinkAutoExpand: true })}
+        {...createReasoningProps({ text: settledText, status: 'settled', thinkFold: EXPANDED_FOLD })}
       />,
     )
 
@@ -163,7 +173,7 @@ describe('think translation integration', () => {
     // Render collapsed historical row (isLatest: false)
     const view = render(
       <TypewriterAssistantNodeView
-        {...createReasoningProps({ text: historicalText, status: 'settled', isLatest: false, thinkAutoExpand: false })}
+        {...createReasoningProps({ text: historicalText, status: 'settled', isLatest: false, thinkFold: COLLAPSED_FOLD })}
       />,
     )
 
@@ -193,7 +203,7 @@ describe('think translation integration', () => {
     // Render collapsed row in expand-only mode
     const view = render(
       <TypewriterAssistantNodeView
-        {...createReasoningProps({ text: originalText, status: 'settled', thinkAutoExpand: false })}
+        {...createReasoningProps({ text: originalText, status: 'settled', thinkFold: COLLAPSED_FOLD })}
       />,
     )
 
@@ -225,7 +235,7 @@ describe('think translation integration', () => {
     // 1. Mount settled in expand mode, then expand
     const view = render(
       <TypewriterAssistantNodeView
-        {...createReasoningProps({ text: originalText, status: 'settled', thinkAutoExpand: false })}
+        {...createReasoningProps({ text: originalText, status: 'settled', thinkFold: COLLAPSED_FOLD })}
       />,
     )
     const toggleButton = view.container.querySelector('[class*="thinkRow"]') || view.container.querySelector('button')
@@ -278,7 +288,7 @@ describe('think translation integration', () => {
 
     const view = render(
       <TypewriterAssistantNodeView
-        {...createReasoningProps({ text: originalText, status: 'settled', thinkAutoExpand: false })}
+        {...createReasoningProps({ text: originalText, status: 'settled', thinkFold: COLLAPSED_FOLD })}
         renderReasoningBody={renderBody}
       />,
     )

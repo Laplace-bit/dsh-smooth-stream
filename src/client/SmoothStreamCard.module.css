@@ -191,6 +191,32 @@
   cursor: default;
 }
 
+.foldRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.foldRow + .foldRow {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--dsw-alias-border-l2);
+}
+
+.foldHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.foldLabel {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+}
+
 .hint {
   margin: 0;
   font-size: 12px;

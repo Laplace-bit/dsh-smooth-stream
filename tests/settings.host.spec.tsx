@@ -87,7 +87,7 @@ function signal(): AbortSignal {
 describe('smooth-stream host settings', () => {
   it('persists fade, preserves it for old writers and rejects invalid values', async () => {
     const { ctx, fiber, registration } = await mountHost(profileBaseUrl(`link:${process.cwd()}`))
-    const base = { enabled: true, controlScroll: true, thinkAutoExpand: true }
+    const base = { enabled: true, controlScroll: true, thinkRunning: 'expanded' }
     expect(await registration.handler(STREAM_SETTINGS_RPC.write, { ...base, logarithmicFade: false }, signal()))
       .toMatchObject({ ok: true, value: { logarithmicFade: false } })
     expect(await registration.handler(STREAM_SETTINGS_RPC.write, base, signal()))
@@ -115,7 +115,7 @@ describe('smooth-stream host settings', () => {
     const updated = await registration.handler(STREAM_SETTINGS_RPC.write, {
       enabled: true,
       controlScroll: true,
-      thinkAutoExpand: true,
+      thinkRunning: 'expanded',
       preset: 'realtime',
     }, signal())
     expect(updated).toMatchObject({ ok: true, value: { preset: 'realtime' } })
@@ -139,14 +139,14 @@ describe('smooth-stream host settings', () => {
     const ns = toNs(STREAM_SETTINGS_NS)
     expect(ctx.settings.get(ns)).toEqual(DEFAULT_STREAM_SETTINGS)
 
-    await ctx.settings.update(ns, { enabled: false, thinkAutoExpand: false })
+    await ctx.settings.update(ns, { enabled: false, thinkRunning: 'collapsed' })
     expect(ctx.settings.get(ns)).toEqual({
       ...DEFAULT_STREAM_SETTINGS,
       enabled: false,
-      thinkAutoExpand: false,
+      thinkRunning: 'collapsed',
     })
 
-    await expect(ctx.settings.update(ns, { thinkAutoExpand: 'nope' })).rejects.toThrow()
+    await expect(ctx.settings.update(ns, { thinkRunning: 'nope' })).rejects.toThrow()
 
     await fiber.dispose()
     expect(ctx.settings.describe().map(row => row.ns)).not.toContain(ns)
@@ -168,7 +168,10 @@ describe('smooth-stream host settings', () => {
         controlScroll: DEFAULT_STREAM_SETTINGS.controlScroll,
         preset: DEFAULT_STREAM_SETTINGS.preset,
         motionPreference: DEFAULT_STREAM_SETTINGS.motionPreference,
-        thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+        thinkRunning: DEFAULT_STREAM_SETTINGS.thinkRunning,
+        thinkSettled: DEFAULT_STREAM_SETTINGS.thinkSettled,
+        thinkHeight: DEFAULT_STREAM_SETTINGS.thinkHeight,
+        turnFold: DEFAULT_STREAM_SETTINGS.turnFold,
         logarithmicFade: DEFAULT_STREAM_SETTINGS.logarithmicFade,
         canUpgrade: false,
       },
@@ -176,15 +179,15 @@ describe('smooth-stream host settings', () => {
 
     const updated = await registration.handler(
       STREAM_SETTINGS_RPC.write,
-      { enabled: false, controlScroll: true, thinkAutoExpand: false },
+      { enabled: false, controlScroll: true, thinkRunning: 'collapsed' },
       signal(),
     )
-      expect(updated).toMatchObject({ ok: true, value: { enabled: false, controlScroll: true, thinkAutoExpand: false } })
+      expect(updated).toMatchObject({ ok: true, value: { enabled: false, controlScroll: true, thinkRunning: 'collapsed' } })
     expect(ctx.settings.get(toNs(STREAM_SETTINGS_NS))).toEqual({
       ...DEFAULT_STREAM_SETTINGS,
       enabled: false,
       controlScroll: true,
-      thinkAutoExpand: false,
+      thinkRunning: 'collapsed',
     })
 
     const debugInitial = await registration.handler(STREAM_SETTINGS_RPC.debugRead, {}, signal())
@@ -213,29 +216,29 @@ describe('smooth-stream host settings', () => {
       {
         enabled: true,
         controlScroll: true,
-        thinkAutoExpand: true,
+        thinkRunning: 'expanded',
         debugEnabled: false,
         debugTuning: { ...DEFAULT_STREAM_SETTINGS.debugTuning, springDamping: 34 },
       },
       signal(),
     )
-    expect(atomicUpdated).toMatchObject({ ok: true, value: { enabled: true, thinkAutoExpand: true } })
+    expect(atomicUpdated).toMatchObject({ ok: true, value: { enabled: true, thinkRunning: 'expanded' } })
     expect(ctx.settings.get(toNs(STREAM_SETTINGS_NS))).toMatchObject({
       enabled: true,
-      thinkAutoExpand: true,
+      thinkRunning: 'expanded',
       debugEnabled: false,
       debugTuning: { springDamping: 34 },
     })
 
     const partialDebug = await registration.handler(
       STREAM_SETTINGS_RPC.write,
-      { enabled: false, controlScroll: true, thinkAutoExpand: false, debugEnabled: true },
+      { enabled: false, controlScroll: true, thinkRunning: 'collapsed', debugEnabled: true },
       signal(),
     )
     expect(partialDebug).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
     expect(ctx.settings.get(toNs(STREAM_SETTINGS_NS))).toMatchObject({
       enabled: true,
-      thinkAutoExpand: true,
+      thinkRunning: 'expanded',
       debugEnabled: false,
     })
 
@@ -245,26 +248,26 @@ describe('smooth-stream host settings', () => {
     }, signal())
     expect(malformedDebug).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
 
-    const malformed = await registration.handler(STREAM_SETTINGS_RPC.write, { thinkAutoExpand: 'false' }, signal())
+    const malformed = await registration.handler(STREAM_SETTINGS_RPC.write, { thinkRunning: 'nope' }, signal())
     expect(malformed).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
 
     const missingControlScroll = await registration.handler(
       STREAM_SETTINGS_RPC.write,
-      { enabled: true, thinkAutoExpand: true },
+      { enabled: true, thinkRunning: 'expanded' },
       signal(),
     )
     expect(missingControlScroll).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
 
     const badMotionPreference = await registration.handler(
       STREAM_SETTINGS_RPC.write,
-      { enabled: true, controlScroll: true, thinkAutoExpand: true, motionPreference: 'shake' },
+      { enabled: true, controlScroll: true, thinkRunning: 'expanded', motionPreference: 'shake' },
       signal(),
     )
     expect(badMotionPreference).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
 
     const motionPreference = await registration.handler(
       STREAM_SETTINGS_RPC.write,
-      { enabled: true, controlScroll: true, thinkAutoExpand: true, motionPreference: 'force-smooth' },
+      { enabled: true, controlScroll: true, thinkRunning: 'expanded', motionPreference: 'force-smooth' },
       signal(),
     )
     expect(motionPreference).toMatchObject({ ok: true, value: { motionPreference: 'force-smooth' } })

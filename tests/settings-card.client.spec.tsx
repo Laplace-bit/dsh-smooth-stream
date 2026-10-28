@@ -25,6 +25,11 @@ afterEach(() => {
   debugRuntime.resetRuntime()
 })
 
+/** One fold answer's radio, scoped to the group that owns it. */
+function foldRadio(group: string, option: string): HTMLElement {
+  return within(screen.getByRole('radiogroup', { name: group })).getByRole('radio', { name: option })
+}
+
 const developmentView: StreamSettingsView = {
   version: '0.1.0',
   installation: 'development',
@@ -33,7 +38,10 @@ const developmentView: StreamSettingsView = {
     controlScroll: true,
     preset: 'silky',
     motionPreference: 'auto',
-    thinkAutoExpand: true,
+    thinkRunning: 'expanded',
+    thinkSettled: 'collapsed',
+    thinkHeight: 'limited',
+    turnFold: 'follow',
     logarithmicFade: true,
   canUpgrade: false,
 }
@@ -94,12 +102,15 @@ async function bench(options: BenchOptions = {}): Promise<{
     if (endpoint === STREAM_SETTINGS_RPC.write) {
       const settings = payload as {
         enabled?: unknown
-        thinkAutoExpand?: unknown
+        thinkRunning?: unknown
+        thinkSettled?: unknown
+        thinkHeight?: unknown
+        turnFold?: unknown
         logarithmicFade?: boolean
         debugEnabled?: unknown
         debugTuning?: unknown
       }
-      if (typeof settings.enabled !== 'boolean' || typeof settings.thinkAutoExpand !== 'boolean') {
+      if (typeof settings.enabled !== 'boolean' || typeof settings.thinkRunning !== 'string') {
         return { ok: false as const, error: { code: 'internal', message: 'bad payload' } }
       }
       if (options.failWrite === true) {
@@ -109,7 +120,10 @@ async function bench(options: BenchOptions = {}): Promise<{
       view = {
         ...view,
         enabled: settings.enabled,
-        thinkAutoExpand: settings.thinkAutoExpand,
+        thinkRunning: settings.thinkRunning as StreamSettingsView['thinkRunning'],
+        thinkSettled: settings.thinkSettled as StreamSettingsView['thinkSettled'],
+        thinkHeight: settings.thinkHeight as StreamSettingsView['thinkHeight'],
+        turnFold: (settings.turnFold ?? 'follow') as StreamSettingsView['turnFold'],
         logarithmicFade: settings.logarithmicFade ?? view.logarithmicFade,
       }
       if (typeof settings.debugEnabled === 'boolean' && typeof settings.debugTuning === 'object' && settings.debugTuning !== null) {
@@ -259,7 +273,7 @@ describe('smooth-stream settings card', () => {
 
   it('keeps the plugin entry visible when the core settings API filters third-party namespaces', async () => {
     const { ctx, slots, coreDescribe, call } = await bench({
-      view: { ...developmentView, thinkAutoExpand: false },
+      view: { ...developmentView, thinkRunning: 'collapsed' },
     })
     declareCardSlot(slots)
     await ctx.plugin({ inject: [...inject], apply }).await()
@@ -268,7 +282,7 @@ describe('smooth-stream settings card', () => {
     await vi.waitFor(() => {
       expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
         status: 'ready',
-        thinkAutoExpand: false,
+        thinkRunning: 'collapsed',
       })
     })
     render(<SmoothStreamCard {...cardProps(face)} />)
@@ -309,13 +323,13 @@ describe('smooth-stream settings card', () => {
     const face = cardFace(slots)
     await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
 
-    face.edit({ thinkAutoExpand: false })
-    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ dirty: true, thinkAutoExpand: false })
+    face.edit({ thinkRunning: 'collapsed' })
+    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ dirty: true, thinkRunning: 'collapsed' })
     face.save()
     await vi.waitFor(() => {
       expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
         dirty: false,
-        thinkAutoExpand: false,
+        thinkRunning: 'collapsed',
       })
     })
     expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
@@ -323,7 +337,10 @@ describe('smooth-stream settings card', () => {
       controlScroll: true,
       preset: 'silky',
       motionPreference: 'auto',
-      thinkAutoExpand: false,
+      thinkRunning: 'collapsed',
+      thinkSettled: 'collapsed',
+      thinkHeight: 'limited',
+      turnFold: 'follow',
       logarithmicFade: true,
     })
   })
@@ -401,7 +418,10 @@ describe('smooth-stream settings card', () => {
       controlScroll: true,
       preset: 'silky',
       motionPreference: 'auto',
-      thinkAutoExpand: true,
+      thinkRunning: 'expanded',
+      thinkSettled: 'collapsed',
+      thinkHeight: 'limited',
+      turnFold: 'follow',
       logarithmicFade: true,
       debugEnabled: true,
       debugTuning: tuning,
@@ -507,15 +527,15 @@ describe('smooth-stream settings card', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /smooth stream/i }))
     const enabled = screen.getByRole('checkbox', { name: new RegExp(`^${en.enabled}`) })
-    const thinkAutoExpand = screen.getByRole('checkbox', { name: new RegExp(`^${en.thinkAutoExpand}`) })
+    const thinkExpanded = foldRadio(en.thinkRunning, en.foldExpanded)
     expect((enabled as HTMLInputElement).checked).toBe(false)
-    expect(thinkAutoExpand.getAttribute('disabled')).not.toBeNull()
+    expect(thinkExpanded.getAttribute('disabled')).not.toBeNull()
 
     fireEvent.click(enabled)
     card.rerender(<SmoothStreamCard {...cardProps(face)} />)
     expect((screen.getByRole('checkbox', { name: new RegExp(`^${en.enabled}`) }) as HTMLInputElement).checked)
       .toBe(true)
-    expect(screen.getByRole('checkbox', { name: new RegExp(`^${en.thinkAutoExpand}`) }).getAttribute('disabled'))
+    expect(foldRadio(en.thinkRunning, en.foldExpanded).getAttribute('disabled'))
       .toBeNull()
   })
 
@@ -613,7 +633,7 @@ describe('smooth-stream settings card', () => {
 
     expect(screen.getByRole('checkbox', { name: new RegExp(`^${en.enabled}`) }).getAttribute('disabled'))
       .not.toBeNull()
-    expect(screen.getByRole('checkbox', { name: new RegExp(`^${en.thinkAutoExpand}`) }).getAttribute('disabled'))
+    expect(foldRadio(en.thinkRunning, en.foldExpanded).getAttribute('disabled'))
       .not.toBeNull()
 
     write.resolve()

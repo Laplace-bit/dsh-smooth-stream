@@ -62,7 +62,14 @@ export type SmoothStreamLocaleKey =
   | 'motionAuto' | 'motionAutoHint'
   | 'motionForceSmooth' | 'motionForceSmoothHint'
   | 'motionForceReduced' | 'motionForceReducedHint'
-  | 'thinkAutoExpand' | 'thinkAutoExpandHint'
+  | 'foldBehavior'
+  | 'thinkRunning' | 'thinkRunningHint'
+  | 'thinkSettled' | 'thinkSettledHint'
+  | 'thinkHeight' | 'thinkHeightHint'
+  | 'turnFold' | 'turnFoldHint'
+  | 'foldFollow' | 'foldKeep' | 'foldCollapse'
+  | 'foldExpanded' | 'foldCollapsed'
+  | 'foldLimited' | 'foldFull'
   | 'logarithmicFade' | 'logarithmicFadeHint'
   | 'debugEnabled' | 'debugEnabledHint' | 'debugUnavailable'
   | 'debugPanelTitle' | 'debugPanelToggle' | 'debugPanelClose' | 'debugGuide'
@@ -110,10 +117,24 @@ export const en: Record<SmoothStreamLocaleKey, string> = {
   motionForceSmoothHint: 'Keep the smoothing engine even when the system asks for reduced motion.',
   motionForceReduced: 'Always raw',
   motionForceReducedHint: 'Render raw text even when the system allows motion.',
-  thinkAutoExpand: 'Auto-expand thinking',
+  foldBehavior: 'Fold behavior',
+  thinkRunning: 'While thinking streams',
+  thinkRunningHint: 'Open the reasoning body as it arrives. Collapsed leaves it shut until you open it.',
+  thinkSettled: 'After it settles',
+  thinkSettledHint: 'Keep the reasoning readable once it stops, or fold it back to its one-line summary.',
+  thinkHeight: 'Expanded height',
+  thinkHeightHint: 'Limited keeps the body inside its own scroll box; full lets it grow to its whole height.',
+  foldExpanded: 'Expanded',
+  foldCollapsed: 'Collapsed',
+  foldLimited: 'Limited',
+  foldFull: 'Full height',
+  turnFold: 'After a turn completes',
+  turnFoldHint: 'Whether a finished turn folds its process into the one-line summary. Follow kernel uses the work-details mode.',
+  foldFollow: 'Follow kernel',
+  foldKeep: 'Keep expanded',
+  foldCollapse: 'Collapsed',
   logarithmicFade: 'Logarithmic fade',
   logarithmicFadeHint: 'Fade new answer and expanded thinking text into view. Follows the motion preference.',
-  thinkAutoExpandHint: 'Open the thinking block while it streams. Turn off to keep it collapsed.',
   debugEnabled: 'Show render diagnostics',
   debugEnabledHint: 'Show live streaming and scroll metrics on the right side of the chat. Tune values there, then save them here.',
   debugUnavailable: 'Live diagnostics require a newer plugin Host.',
@@ -217,10 +238,24 @@ export const zh: Record<SmoothStreamLocaleKey, string> = {
   motionForceSmoothHint: '即使系统要求减少动态效果，仍保持平滑流式渲染。',
   motionForceReduced: '始终原始',
   motionForceReducedHint: '即使系统允许动效，也直接呈现原始文本。',
-  thinkAutoExpand: '自动展开思考',
+  foldBehavior: '折叠行为',
+  thinkRunning: '思考生成中',
+  thinkRunningHint: '思考内容到达时是否自动展开；收起后需要手动打开。',
+  thinkSettled: '思考结束后',
+  thinkSettledHint: '停止输出后继续展开便于回看，或折叠回一行摘要。',
+  thinkHeight: '展开高度',
+  thinkHeightHint: '限高时正文留在自身滚动框内；全高时按完整高度铺开。',
+  foldExpanded: '展开',
+  foldCollapsed: '收起',
+  foldLimited: '限高',
+  foldFull: '全高',
+  turnFold: '回合结束后',
+  turnFoldHint: '回合完成时是否把整个过程收起成一行摘要；跟随内核时使用工作详情模式的设置。',
+  foldFollow: '跟随内核',
+  foldKeep: '保持展开',
+  foldCollapse: '收起',
   logarithmicFade: '对数淡入',
   logarithmicFadeHint: '让回答正文和展开的思考文字由淡变实，遵循动效偏好。',
-  thinkAutoExpandHint: '思考块在流式时自动展开；关闭后保持折叠，可手动展开。',
   debugEnabled: '显示渲染调试面板',
   debugEnabledHint: '在聊天右侧显示流式渲染和滚动的实时参数，可在面板中调节并在这里保存。',
   debugUnavailable: '当前 Host 版本不支持实时调试，请先更新插件 Host。',

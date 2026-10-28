@@ -142,16 +142,21 @@ The plugin defaults to `preset: balanced`. You can tune the cadence in your prof
 
 ## User Preferences
 
-Open **Settings → Plugins → Plugin Configuration** in the Web UI:
+Open **Plugins → Installed → dsh-smooth-stream** in the Web UI sidebar and use the configuration card on the package page (kernels before 0.1.7 keep **Settings → Plugins → Plugin Configuration**):
 
 **Logarithmic fade** (on by default) adapts the tail from 24 to at most 160 graphemes according to reveal speed, fading answers and expanded thinking from 0% opacity over 240ms with a reversed logarithmic curve that stays translucent longer. Text settles even during network pauses. Turning it off preserves text pacing and scrolling. It follows the motion preference and skips code, formulas and thinking summaries. Browsers without text-range highlighting support retain the existing reveal behavior.
 
 For a local preview, run `pnpm build:repro`, serve the repository with `python3 -m http.server 8765 --bind 127.0.0.1`, and open `http://127.0.0.1:8765/repro/index.html?demo=fade`. This uses the real reveal/fade hooks with synthetic rich-text fixtures. Run `node scripts/verify-logarithmic-fade.mjs` to check and record it (Chrome and `pnpm exec playwright-core install ffmpeg` required; override the Chrome path with `CHROME_BIN`). Reports and recordings go to the ignored `repro/artifacts/logarithmic-fade/` directory.
 
 - **Enable smooth streaming** (default on): Toggles custom stream rendering and follow. Disabling instantly falls back to built-in Harness rendering.
-- **Auto-expand thinking**: Controls whether reasoning opens automatically while streaming.
-- **Collapse finished work** (default on): Folds thoughts and tool steps into a summary line once the turn settles.
+- **Fold behavior**: Per-phase control over how a reasoning block opens and how tall its expanded body grows.
+  - **While thinking streams** (expanded by default): Open the reasoning body as it arrives; collapsed leaves it shut until opened by hand.
+  - **After it settles** (collapsed by default): Keep the reasoning readable once it stops, or fold it back to its one-line summary.
+  - **Expanded height** (limited by default): Limited keeps the body inside its own 300px scroll box; full lets it grow to its whole height and hands scrolling to the conversation.
+  - **After a turn completes** (follow kernel by default): Whether a finished turn folds its process into the one-line summary. Choosing keep or collapsed applies the chosen state once to the mounted answer row, after the turn has closed and is foldable; a manual fold is left alone while that row stays mounted, and the state is applied again if the row remounts.
 - **Show render diagnostics** (default off): Opens a live HUD on the right side to inspect FPS, character backlog, spring state, and adjust physical parameters in real time.
+
+Upgrade note: `thinkAutoExpand` remains accepted for old configuration files but no longer affects rendering. If you previously disabled auto-expansion, choose **Collapsed** under **While thinking streams** again after upgrading. Without a new setting, the default is expanded. Once a turn policy has applied to an answer row, changing it preserves that row's current state; later turns or reopening the conversation use the new policy. Turns the kernel forces open remain under kernel control.
 
 ---
 

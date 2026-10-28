@@ -109,7 +109,11 @@ it('dispatches the kernel reasoning Body only when a feature replaced it', async
     const view = render(createElement(swapped as never, {
       node: {
         kind: 'assistant-step',
-        location: { kind: 'step' },
+        location: {
+          kind: 'step',
+          turn: { status: 'closed' },
+          step: { status: 'closed' },
+        },
         data: { status: 'settled', blocks: [{ kind: 'reasoning', text: 'thinking' }], turn: 1, step: 1, time: 0 },
       },
       useTurnData: () => undefined,

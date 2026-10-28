@@ -159,6 +159,8 @@ describe('render diagnostics panel', () => {
     const { face, setState } = setup()
     const info = screen.getAllByRole('button', { name: en.debugRevealMultiplier })[0]
     if (info === undefined) throw new Error('reveal multiplier info button was not rendered')
+    // Browser mouse hover emits both events; Harness generations use either.
+    fireEvent.pointerEnter(info, { pointerType: 'mouse' })
     fireEvent.mouseEnter(info)
     expect((await screen.findByRole('tooltip', { hidden: true })).textContent).toContain(en.debugTipRevealMultiplier)
 

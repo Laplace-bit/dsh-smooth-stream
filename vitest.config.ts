@@ -214,11 +214,25 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     projects: [
-      { extends: true, test: { name: 'host', environment: 'jsdom', include: ['tests/**/*.host.spec.tsx'] } },
+      {
+        extends: true,
+        test: {
+          name: 'host',
+          environment: 'jsdom',
+          include: ['tests/**/*.host.spec.tsx'],
+          setupFiles: ['./tests/setup-storage.ts'],
+        },
+      },
       {
         extends: true,
         plugins: [harnessPathsPlugin()].filter((plugin): plugin is Plugin => plugin !== null),
-        test: { name: 'client', environment: 'jsdom', include: ['tests/**/*.spec.tsx'], exclude: ['tests/**/*.host.spec.tsx'], setupFiles: ['./tests/setup.ts'] },
+        test: {
+          name: 'client',
+          environment: 'jsdom',
+          include: ['tests/**/*.spec.tsx'],
+          exclude: ['tests/**/*.host.spec.tsx'],
+          setupFiles: ['./tests/setup-storage.ts', './tests/setup.ts'],
+        },
       },
     ],
   },

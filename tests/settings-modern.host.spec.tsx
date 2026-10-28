@@ -14,6 +14,8 @@ import { describe, expect, it } from 'vitest'
 import { apply, Config } from '../src/plugin.ts'
 import { STREAM_SETTINGS_RPC, STREAM_SETTINGS_RPC_CHANNEL } from '../src/settings-api.ts'
 import { DEFAULT_STREAM_SETTINGS, STREAM_SETTINGS_NS } from '../src/settings.ts'
+import { streamSettingsFields } from '../src/settings-bridge.ts'
+import Schema from '@deepseek-ai/schemastery'
 
 interface UpdateCall {
   ns: string
@@ -112,6 +114,27 @@ function signal(): AbortSignal {
 }
 
 describe('smooth-stream on the modern settings seam', () => {
+  it('keeps the retired switch volatile so a legacy section still imports', () => {
+    // The kernel's settings.yaml import validates every key in a section and
+    // rejects all of them when one is not volatile. The switch is unread, but
+    // dropping its declaration would take enabled and logarithmicFade with it.
+    const field = streamSettingsFields.thinkAutoExpand as unknown as { meta?: { volatile?: unknown } }
+    expect(field.meta?.volatile).toBe(true)
+  })
+
+  it('imports the sibling preferences of a section that still carries the retired switch', () => {
+    const schema = Schema.object(streamSettingsFields)
+    const imported = schema({
+      enabled: false,
+      controlScroll: false,
+      thinkAutoExpand: false,
+      logarithmicFade: false,
+    } as never) as unknown as Record<string, unknown>
+    expect(imported.enabled).toBe(false)
+    expect(imported.controlScroll).toBe(false)
+    expect(imported.logarithmicFade).toBe(false)
+  })
+
   it('mounts without settings.register and serves the RPC', async () => {
     const { registration, fiber } = await mountModern()
 
@@ -126,7 +149,7 @@ describe('smooth-stream on the modern settings seam', () => {
         controlScroll: false,
         preset: DEFAULT_STREAM_SETTINGS.preset,
         motionPreference: DEFAULT_STREAM_SETTINGS.motionPreference,
-        thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+        thinkRunning: DEFAULT_STREAM_SETTINGS.thinkRunning,
         logarithmicFade: DEFAULT_STREAM_SETTINGS.logarithmicFade,
       },
     })
@@ -145,7 +168,7 @@ describe('smooth-stream on the modern settings seam', () => {
       value: { enabled: false, preset: 'realtime', logarithmicFade: false },
     })
     // Fields the user never touched still resolve to the shared defaults.
-    expect(view).toMatchObject({ value: { thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand } })
+    expect(view).toMatchObject({ value: { thinkRunning: DEFAULT_STREAM_SETTINGS.thinkRunning } })
     await fiber.dispose()
   })
 
@@ -155,7 +178,7 @@ describe('smooth-stream on the modern settings seam', () => {
     const written = await registration.handler(STREAM_SETTINGS_RPC.write, {
       enabled: false,
       controlScroll: false,
-      thinkAutoExpand: false,
+      thinkRunning: 'collapsed',
       preset: 'silky',
       motionPreference: 'force-reduced',
       logarithmicFade: false,
@@ -166,7 +189,7 @@ describe('smooth-stream on the modern settings seam', () => {
       value: {
         enabled: false,
         controlScroll: false,
-        thinkAutoExpand: false,
+        thinkRunning: 'collapsed',
         preset: 'silky',
         motionPreference: 'force-reduced',
         logarithmicFade: false,
@@ -179,7 +202,7 @@ describe('smooth-stream on the modern settings seam', () => {
       patch: {
         enabled: false,
         controlScroll: false,
-        thinkAutoExpand: false,
+        thinkRunning: 'collapsed',
         preset: 'silky',
         motionPreference: 'force-reduced',
         logarithmicFade: false,
@@ -220,7 +243,7 @@ describe('smooth-stream on the modern settings seam', () => {
     const rejected = await registration.handler(STREAM_SETTINGS_RPC.write, {
       enabled: false,
       controlScroll: true,
-      thinkAutoExpand: true,
+      thinkRunning: 'expanded',
     }, signal())
     expect(rejected).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
     await fiber.dispose()
@@ -234,7 +257,7 @@ describe('smooth-stream on the modern settings seam', () => {
     const rejected = await registration.handler(STREAM_SETTINGS_RPC.write, {
       enabled: false,
       controlScroll: true,
-      thinkAutoExpand: true,
+      thinkRunning: 'expanded',
     }, signal())
     expect(rejected).toMatchObject({ ok: false, error: { code: 'settings-rejected' } })
     await fiber.dispose()

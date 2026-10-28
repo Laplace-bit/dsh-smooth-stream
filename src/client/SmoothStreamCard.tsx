@@ -18,6 +18,7 @@ import { useState } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import { IconChevronDown, IconRefresh } from './harnessIcons.ts'
+import type { SmoothStreamLocaleKey } from './locales.ts'
 import type { SmoothStreamCardFace } from './smooth-stream-card-controller.ts'
 import css from './SmoothStreamCard.module.css'
 
@@ -33,6 +34,42 @@ export type SmoothStreamCardProps =
      */
     variant?: 'card' | 'page'
   }
+
+/** One fold setting: a labelled radio pair plus its hint line. */
+function FoldRow<Value extends string>(props: {
+  t: SmoothStreamCardProps['t']
+  label: SmoothStreamLocaleKey
+  hint: SmoothStreamLocaleKey
+  name: string
+  value: Value
+  options: readonly (readonly [Value, SmoothStreamLocaleKey])[]
+  disabled: boolean
+  onPick: (value: Value) => void
+}) {
+  return (
+    <div className={css.foldRow}>
+      <div className={css.foldHead}>
+        <span className={css.foldLabel}>{props.t(props.label)}</span>
+        <span className={css.choiceRow} role="radiogroup" aria-label={props.t(props.label)}>
+          {props.options.map(([option, optionLabel]) => (
+            <label key={option} className={css.choice}>
+              <input
+                type="radio"
+                className={css.choiceInput}
+                name={props.name}
+                checked={props.value === option}
+                disabled={props.disabled}
+                onChange={() => { props.onPick(option) }}
+              />
+              {props.t(optionLabel)}
+            </label>
+          ))}
+        </span>
+      </div>
+      <span className={css.hint}>{props.t(props.hint)}</span>
+    </div>
+  )
+}
 
 /** Render the smooth-stream card independently of the core settings namespace allowlist. */
 export function SmoothStreamCard(props: SmoothStreamCardProps) {
@@ -173,19 +210,49 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
                     ))}
                   </span>
                 </div>
-                <label className={state.enabled ? css.field : `${css.field} ${css.fieldDisabled}`}>
-                  <span className={css.fieldHead}>
-                    <span className={css.label}>{t('thinkAutoExpand')}</span>
-                    <input
-                      type="checkbox"
-                      className={css.toggle}
-                      checked={state.thinkAutoExpand}
-                      disabled={!state.writable || state.saving || !state.enabled}
-                      onChange={(event) => { props.edit({ thinkAutoExpand: event.target.checked }) }}
-                    />
-                  </span>
-                  <span className={css.hint}>{t('thinkAutoExpandHint')}</span>
-                </label>
+                <div className={state.enabled ? css.field : `${css.field} ${css.fieldDisabled}`}>
+                  <span className={css.label}>{t('foldBehavior')}</span>
+                  <FoldRow
+                    t={t}
+                    label="thinkRunning"
+                    hint="thinkRunningHint"
+                    name="smooth-stream-think-running"
+                    value={state.thinkRunning}
+                    options={[['expanded', 'foldExpanded'], ['collapsed', 'foldCollapsed']]}
+                    disabled={!state.writable || state.saving || !state.enabled}
+                    onPick={(value) => { props.edit({ thinkRunning: value }) }}
+                  />
+                  <FoldRow
+                    t={t}
+                    label="thinkSettled"
+                    hint="thinkSettledHint"
+                    name="smooth-stream-think-settled"
+                    value={state.thinkSettled}
+                    options={[['expanded', 'foldExpanded'], ['collapsed', 'foldCollapsed']]}
+                    disabled={!state.writable || state.saving || !state.enabled}
+                    onPick={(value) => { props.edit({ thinkSettled: value }) }}
+                  />
+                  <FoldRow
+                    t={t}
+                    label="thinkHeight"
+                    hint="thinkHeightHint"
+                    name="smooth-stream-think-height"
+                    value={state.thinkHeight}
+                    options={[['limited', 'foldLimited'], ['full', 'foldFull']]}
+                    disabled={!state.writable || state.saving || !state.enabled}
+                    onPick={(value) => { props.edit({ thinkHeight: value }) }}
+                  />
+                  <FoldRow
+                    t={t}
+                    label="turnFold"
+                    hint="turnFoldHint"
+                    name="smooth-stream-turn-fold"
+                    value={state.turnFold}
+                    options={[['follow', 'foldFollow'], ['expanded', 'foldKeep'], ['collapsed', 'foldCollapse']]}
+                    disabled={!state.writable || state.saving || !state.enabled}
+                    onPick={(value) => { props.edit({ turnFold: value }) }}
+                  />
+                </div>
                 <label className={state.debugAvailable ? css.field : `${css.field} ${css.fieldDisabled}`}>
                   <span className={css.fieldHead}>
                     <span className={css.label}>{t('debugEnabled')}</span>

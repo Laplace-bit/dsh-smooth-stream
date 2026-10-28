@@ -136,7 +136,10 @@ describe('smooth-stream settings channel fallback', () => {
           controlScroll: DEFAULT_STREAM_SETTINGS.controlScroll,
           preset: DEFAULT_STREAM_SETTINGS.preset,
           motionPreference: DEFAULT_STREAM_SETTINGS.motionPreference,
-          thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+          thinkRunning: DEFAULT_STREAM_SETTINGS.thinkRunning,
+          thinkSettled: DEFAULT_STREAM_SETTINGS.thinkSettled,
+          thinkHeight: DEFAULT_STREAM_SETTINGS.thinkHeight,
+          turnFold: DEFAULT_STREAM_SETTINGS.turnFold,
           logarithmicFade: DEFAULT_STREAM_SETTINGS.logarithmicFade,
           canUpgrade: false,
         },
@@ -146,7 +149,7 @@ describe('smooth-stream settings channel fallback', () => {
     const write = await call(route as WebRoute, STREAM_SETTINGS_RPC.write, {
       enabled: false,
       controlScroll: true,
-      thinkAutoExpand: true,
+      thinkRunning: 'expanded',
     })
     expect(JSON.parse(write.body)).toMatchObject({
       result: { ok: true, value: { enabled: false, controlScroll: true } },

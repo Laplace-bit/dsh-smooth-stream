@@ -28,6 +28,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { JSDOM } from 'jsdom'
 
 const require = createRequire(import.meta.url)
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -80,6 +81,14 @@ const COPY = {
   enabled: dictValue(zh, 'enabled'),
   controlScroll: dictValue(zh, 'controlScroll'),
   preset: dictValue(zh, 'preset'),
+  thinkRunning: dictValue(zh, 'thinkRunning'),
+  thinkSettled: dictValue(zh, 'thinkSettled'),
+  thinkHeight: dictValue(zh, 'thinkHeight'),
+  turnFold: dictValue(zh, 'turnFold'),
+  foldExpanded: dictValue(zh, 'foldExpanded'),
+  foldCollapsed: dictValue(zh, 'foldCollapsed'),
+  foldLimited: dictValue(zh, 'foldLimited'),
+  foldFollow: dictValue(zh, 'foldFollow'),
   save: dictValue(zh, 'save'),
   discard: dictValue(zh, 'discard'),
   developmentVersion: dictValue(zh, 'developmentVersion'),
@@ -144,7 +153,10 @@ const SNAPSHOT = {
   controlScroll: true,
   preset: 'silky',
   motionPreference: 'auto',
-  thinkAutoExpand: true,
+  thinkRunning: 'expanded',
+  thinkSettled: 'collapsed',
+  thinkHeight: 'limited',
+  turnFold: 'follow',
   logarithmicFade: true,
   debugAvailable: true,
   debugEnabled: false,
@@ -210,6 +222,28 @@ check('the page view drops the card chrome the host redraws', () => {
   assert.ok(!html.includes(`>${COPY.description}<`), 'the host owns the one-liner')
   assert.ok(!html.includes(SNAPSHOT.version), 'no version badge inside the page body')
   assert.ok(!html.includes('未保存'), 'no unsaved badge inside the page body')
+})
+
+check('the built page selects the four default fold preferences', () => {
+  const html = markup(react.createElement(SmoothStreamPluginsPage, props({ view: 'page' })))
+  const dom = new JSDOM(html)
+  try {
+    const groups = [...dom.window.document.querySelectorAll('[role="radiogroup"]')]
+    for (const [label, selected] of [
+      [COPY.thinkRunning, COPY.foldExpanded],
+      [COPY.thinkSettled, COPY.foldCollapsed],
+      [COPY.thinkHeight, COPY.foldLimited],
+      [COPY.turnFold, COPY.foldFollow],
+    ]) {
+      const group = groups.find(element => element.getAttribute('aria-label') === label)
+      assert.ok(group, `the page renders the ${label} choices`)
+      const checked = group.querySelectorAll('input:checked')
+      assert.equal(checked.length, 1, `${label} selects exactly one option`)
+      assert.equal(checked[0].closest('label').textContent, selected)
+    }
+  } finally {
+    dom.window.close()
+  }
 })
 
 check('an unknown or missing view still shows the switches', () => {
