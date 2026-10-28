@@ -545,7 +545,9 @@ describe('assistant renderer', () => {
     )
     const beforeHover = visualPosition()
     const button = view.getByRole('button', { name: 'copy' })
-    fireEvent.pointerEnter(button)
+    // Browser mouse hover emits both events; Harness generations use either.
+    fireEvent.pointerEnter(button, { pointerType: 'mouse' })
+    fireEvent.mouseEnter(button)
     expect(view.container.querySelector('[role="tooltip"]')).not.toBeNull()
     await act(() => vi.advanceTimersByTimeAsync(0))
     expect(visualPosition()).toBeCloseTo(beforeHover, 5)
