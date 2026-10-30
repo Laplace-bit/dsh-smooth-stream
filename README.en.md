@@ -1,7 +1,7 @@
 # dsh-smooth-stream
 
 > **Transform jumpy AI outputs into a calm, teleprompter-smooth reading experience.**  
-> Physics-based stream rendering and zero-reflow viewport tracking for the DeepSeek Harness (`dsh`) Web UI.
+> Physics-based stream rendering and compositor-compensated viewport tracking for the DeepSeek Harness (`dsh`) Web UI.
 
 English · [中文](README.md) · [Homepage](https://laplace-bit.github.io/dsh-smooth-stream/) · [How It Works](https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html) · [npm](https://www.npmjs.com/package/dsh-smooth-stream)
 
@@ -41,23 +41,23 @@ Traditional chat UIs bind DOM rendering and scrolling directly to arrival events
           │ Fractional character debt integration                             │ 2nd-order damped spring (k=130, c=24)
           ▼                                                                   ▼
  [ Progressive DOM Reveal ] ────────────────────────────────────────► [ GPU Compositor Transform ]
-  (Per-frame visual delta ≤ 8px)                                       (Zero Reflow / Pure Composite)
+  (Frame-budgeted character reveal)                                    (Transform compensates visual lag)
 ```
 
 ### 1. Dynamic Adaptive Reveal Engine
 - **Fractional character debt**: Evaluates reveal velocity from current backlog ($v = 90 + \text{backlog}^{1.25} \times P$). Leisurely when arrival is slow; accelerates smoothly during bursts without ever dumping text walls.
-- **Wrap smoothing**: Caps per-frame visual displacement to $\le 8\text{px}$ during line wraps and new block arrivals, spreading sudden $24\text{--}28\text{px}$ layout steps across several frames.
+- **Wrap smoothing**: Predictive body follow uses a continuous trajectory with bounded velocity and acceleration; other height growth uses the spring. The 8px budget normally applies to transform decay at about 60Hz. It is not a universal frame-displacement limit: compensation for actual height changes can exceed it.
 - **Uniform completion drain**: When the generation finishes, the residual queue drains at a steady speed, creating clean transitions between body, reasoning, and tool calls.
 
 ### 2. GPU-Driven Damped Spring Follower
 - **Second-order spring physics**: Uses a sub-stepped damped spring ($k=130, c=24, m=1$) to convert discrete height changes into a continuous trajectory.
-- **Zero-reflow viewport tracking**: Keeps the real scrollport pinned to the bottom while absorbing residual visual lag entirely via `transform: translate3d` on the message container. No layout-triggering properties are touched during follow.
+- **Transform compensation**: With scroll takeover enabled, the real scrollport stays at the bottom and `transform: translate3d` absorbs visual lag within the measured safe space. The engine still reads heights and rectangles and adjusts temporary margins, padding, and scroll position, so it does not guarantee zero reflow. With takeover disabled, the kernel owns bottom-follow.
 - **Closed-loop backpressure**: If visual lag fills the predictive runway ($\approx 72\text{px}$), the follower throttles reveal speed (down to $0.55\times$), ensuring text expansion never outpaces the viewport spring.
 - **Stall resilience & ProMotion parity**: Clamps elapsed physical time ($\Delta t \le 32\text{ms}$) during main-thread stalls to prevent teleporting catches. Settling dynamics are identical across 60Hz and 120Hz (ProMotion) displays.
 
-### 3. Turn Lifecycle Auto-Collapse
-- Reasoning and tool executions remain expanded while streaming.
-- Once a turn settles, intermediate processes cleanly fold behind a minimalist `Processed in Xs` summary row, keeping the conversation view focused on final answers.
+### 3. Per-Phase Fold Policy
+- Reasoning visibility during generation, visibility after completion, and expanded height are independently configurable.
+- The completed turn follows the kernel by default, with explicit expanded and collapsed overrides. See User Preferences below for the conditions under which an override applies.
 
 ---
 
@@ -79,7 +79,7 @@ Verified by local browser-level audit suites:
 | **Overflow & Rebound Gate** | `node scripts/verify-overflow.mjs` | Zero over-scroll, zero bounce under burst load |
 | **Tail Vibration Probe** | `pnpm test` | Single-frame shift $\le 30\text{px}$, 7-frame amplitude $\le 32\text{px}$ |
 
-- Core ESM bundle is approximately **4.7 kB** (gzipped). See [How It Works](https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html) for full benchmarks.
+- Host ESM and browser bundles are built separately; use the current `pnpm build` output for sizes. See [How It Works](https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html) for the mechanism.
 
 ---
 
@@ -126,7 +126,7 @@ To uninstall: `pnpm dsh plugin --profile web remove dsh-smooth-stream`.
 - **Kernel 0.2.x added the `conversation.chat.reasoning.body` slot** for the expanded reasoning body (the kernel's own chain-of-thought translation and any later reasoning-body feature register there). When this plugin draws reasoning itself it checks that slot first: while only the kernel's default occupies it the plugin keeps the body (smoothing and auto-scroll included); as soon as another feature replaces the default, the expanded body is handed back to the slot and the plugin's own display-layer translation stands down, so one reasoning row never shows two conflicting translations. Without the slot (older kernels, the shadow-registration fallback) nothing changes.
 - **Kernel 0.1.7 moved plugin configuration out of Settings into the sidebar Plugins panel** (`plugins.bundle.config`), hands one assistant step two flow parts at once (`groupPart`), and renamed icon exports from size suffixes to weight suffixes. This release adapts all three at runtime: without the slot the old path stays live, a missing `groupPart` means "every block belongs to this render", and icons are probed name by name.
 - **Kernel 0.1.2 removed the `settingsNamespace()` runtime helper** (on ≤ 0.1.1 it was a validating identity function; 0.1.2 keeps only the same-named type). This plugin does not statically import that symbol — it inlines its namespace constant locally and asserts it as the `SettingsNamespace` type.
-- **Never statically import runtime symbols from `@deepseek-ai/*` packages.** The host CLI starts via `node --import tsx/esm`, and tsx applies the host `tsconfig` `paths` mapping, so a bare `@deepseek-ai/*` import from an external plugin may be redirected into the host's own sources — any host-side rename or removal then explodes at boot as a module instantiation error. Type-only imports (`import type`) are unaffected; this release therefore reads primitives out of the module table (`harnessIcons.ts` / `primitives-compat.tsx`).
+- **Use Cordis services for cross-plugin collaboration and probe unstable UI exports through the module table.** The host CLI's tsx `paths` mapping can redirect bare imports into host sources, where a renamed or removed symbol can fail startup; primitives therefore use `harnessIcons.ts` / `primitives-compat.tsx`. Platform modules and libraries allowed for inlining still use static imports. `tsdown.config.ts` checks this boundary; `import type` adds no runtime import.
 
 ## Presets & Configuration
 
