@@ -1,7 +1,7 @@
 # dsh-smooth-stream
 
 > **让 AI 的长篇生成如提词器般温润流淌。**  
-> 为 DeepSeek Harness（`dsh`）打造的二阶弹簧物理流式渲染与零重排跟随引擎。
+> 为 DeepSeek Harness（`dsh`）打造的物理流式渲染与合成层补偿跟随引擎。
 
 [English](README.en.md) · [项目主页](https://laplace-bit.github.io/dsh-smooth-stream/) · [工作原理与基准](https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html) · [npm](https://www.npmjs.com/package/dsh-smooth-stream)
 
@@ -42,23 +42,23 @@
           │ 字符积压与分数积分                                      │ 二阶阻尼弹簧积分 (k=130, c=24)
           ▼                                                     ▼
  [ 逐帧平滑展开 DOM ] ───────────────────────────────► [ 合成层 Transform 补偿 ]
-  (单帧视觉位移 ≤ 8px)                                   (0 Reflow / 纯 GPU 合成)
+  (按帧预算揭示字符)                                       (Transform 补偿视觉滞后)
 ```
 
 ### 1. 动态自适应的揭示引擎（Reveal Engine）
 - **分数级字符积分**：根据积压队列深度自适应调节速度（$v = 90 + \text{backlog}^{1.25} \times P$），低负载时从容自然，高积压时平稳追赶，绝不倾泻整段文本。
-- **折行限幅平滑**：长文本和代码块发生换行时，单帧视觉位移被限制在 8px 以内，将原本 24~28px 的单帧跳跃平摊至数帧完成。
+- **折行平滑**：正文预测跟随使用速度、加速度受限的连续轨迹吸收折行；其他高度增长由弹簧跟随。8px 是约 60Hz 下变换衰减的常规预算，并非所有场景的单帧位移上限；补偿真实高度变化时可超过此值。
 - **尾部平稳收束**：回合结束标记到达后，残余缓冲区以恒定速率释放，正文、思考链与工具调用之间自然衔接。
 
-### 2. 纯合成层驱动的跟随引擎（Follow Engine）
+### 2. 合成层补偿的跟随引擎（Follow Engine）
 - **二阶阻尼物理系统**：采用 $k=130, c=24, m=1$ 的亚步进物理弹簧，将内容高度的变化转化为平滑连续的速度与位移轨迹。
-- **零重排（Zero-Reflow）位移补偿**：真实滚动容器始终锚定在底部，剩余的视觉滞后完全由外层 DOM 的 `transform: translate3d` 吸收。跟随过程不读写任何触发 Layout 的属性，杜绝重排风暴。
+- **变换位移补偿**：接管滚动时，真实滚动容器锚定在底部，安全范围内的视觉滞后由外层 DOM 的 `transform: translate3d` 吸收。引擎仍需读取高度和矩形，并调整临时边距、填充及滚动位置，因此不保证零重排；关闭接管后由内核负责贴底。
 - **闭环背压控制（Closed-Loop Backpressure）**：当跟随滞后接近预留空间时，反向向揭示引擎施加阻尼（最低降至 0.55 倍速），防止文本增长超出视口弹簧范围。
 - **掉帧自愈与跨刷新率一致**：主线程卡顿（Stall）时自动钳位物理时间（$\le 32\text{ms}$），避免画面恢复后的突进瞬移；在 60Hz 与 120Hz（ProMotion）屏幕下拥有近乎一致的物理收敛时间。
 
-### 3. 会话生命周期自动折叠（Turn Auto-Collapse）
-- 对话进行时，思考链与工具调用保持实时展开；
-- 回合结算完成并稳定后，自动将执行过程收敛为一行极简的 `已处理 X 秒` 摘要，保持工作区专注；支持随时点击无缝展开。
+### 3. 按阶段配置折叠（Turn Fold Policy）
+- 思考块可分别配置生成中、结束后的开合状态及展开高度。
+- 整个回合结束后的开合默认跟随内核，也可选择保持展开或收起；适用条件见下方「用户偏好设置」。
 
 ---
 
@@ -80,7 +80,7 @@
 | **视口溢出闸门** | `node scripts/verify-overflow.mjs` | 极限输出场景下零过滚、零反弹 |
 | **尾行晃动抑制** | `pnpm test` | 单帧跳变 ≤30px，7 帧振幅峰值 ≤32px |
 
-- 核心 ESM 产物经 Gzip 压缩后仅约 **4.7 kB**。详见[工作原理与基准](https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html)。
+- Host ESM 与浏览器 bundle 分别构建，当前体积以 `pnpm build` 输出为准。机制说明见[工作原理与基准](https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html)。
 
 ---
 
@@ -125,7 +125,7 @@ Host 日志中显示 `[dsh-smooth-stream] plugin loaded!` 即表示已成功加�
 - **0.2.x 给思考正文新增了 `conversation.chat.reasoning.body` 槽位**（内核自带的思维链翻译、以及后续任何思考正文特性都注册在这里）。接管渲染思考正文时会先看该槽位：只有内核默认实现占位时仍由插件自己画（保留插件的平滑与自动滚动），一旦有别的特性替换了默认实现，展开状态就交回槽位，插件自身的显示层翻译同时让位，避免同一行出现两份互相矛盾的翻译。槽位不存在（旧内核、影子注册回退）时行为不变。
 - **0.1.7 起内核把插件配置从 Settings 移到侧栏 Plugins 面板**（`plugins.bundle.config` 槽位），并给助手步骤同时挂上 `reasoning` / `response` 两个流程座位（`groupPart`）、把图标导出从 size 后缀改名为权重后缀。本版对三者都做了运行时适配：槽位不存在时旧路径继续生效，`groupPart` 缺失时按“全部块归属本渲染”处理，图标按候选名逐个探测。
 - **0.1.2 起内核移除了 `settingsNamespace()` 运行时助手**（≤ 0.1.1 上它只是个校验恒等函数，0.1.2 仅保留同名类型）。本插件不静态导入该符号，而是在注册设置命名空间时本地内联常量并断言为 `SettingsNamespace` 类型。
-- **不要对 `@deepseek-ai/*` 包的运行时符号做静态导入**。宿主 CLI 经 `node --import tsx/esm` 启动，tsx 会应用宿主 `tsconfig` 的 `paths` 映射，外部插件对 `@deepseek-ai/*` 的裸导入可能被重定向进宿主源码，一旦宿主侧改名/删符号就会以模块实例化错误的形式炸掉启动。类型导入（`import type`）不受影响；本版对 primitive 的读取因此改走模块表探测（`harnessIcons.ts` / `primitives-compat.tsx`）。
+- **跨插件协作使用 Cordis 服务；易变的 UI 导出通过模块表探测**。宿主 CLI 的 tsx `paths` 映射可能把裸导入重定向到宿主源码，已改名或移除的符号会令启动失败，因此 primitive 使用 `harnessIcons.ts` / `primitives-compat.tsx` 探测。平台模块和允许内联的库仍可静态导入，具体边界由 `tsdown.config.ts` 校验；`import type` 不产生运行时导入。
 
 ## 配置与手感预设
 

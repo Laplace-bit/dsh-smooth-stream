@@ -1496,6 +1496,7 @@ function applyVisual(
     }
     if (preFloor !== lastFloorSeen) {
       followFloorHistory.set(port, preFloor)
+      invalidatePaintLimit(port)
     }
   }
   // TERMINAL BUDGET CAP. While the producer has stopped and reveal work is
@@ -1548,6 +1549,9 @@ function applyVisual(
     if (status !== null) setShift(status, 0)
     return targetHeight
   }
+  // Clearance belongs to the position we will paint. Measuring at the old
+  // scrollTop underestimates room after a wrap or a large tool commit.
+  if (writeScrollTop) setFollowScrollTop(port, floor)
   // The visible scroll position rides the spring's smooth extent so each newly
   // revealed line is approached at continuous velocity instead of snapping the
   // whole wrap into one frame (the residual "不丝滑" jump). `animatedH` advances
@@ -2243,7 +2247,7 @@ export function useConversationFollow(
       // commits can continue using the cached chrome geometry.
       if (followFloorHistory.get(port) !== floor) invalidatePaintLimit(port)
       const isReasoningSurface = rootRef.current?.querySelector('[data-variant="think"]') !== null
-      const trajectoryShift = predictive
+      const trajectoryShift = predictGrowth
         && !isReasoningSurface
         && runwayOffsetOf(port) > 0
         && trajectoryPositionPx !== null
@@ -2510,7 +2514,7 @@ export function useConversationFollow(
               !hostOwnsScroll,
             )
             if (
-              predictive
+              (predictiveRef?.current ?? predictive)
               && root.querySelector('[data-variant="think"]') === null
               && runwayOffsetOf(nextPort) > 0
             ) {
@@ -2561,6 +2565,9 @@ export function useConversationFollow(
         animatedH = extent
         reservePx = 0
         velocityPxPerSec = 0
+        trajectoryPositionPx = null
+        trajectoryFloorPx = null
+        trajectoryWasActive = false
         followScrollLedgers.set(nextPort, nextPort.scrollTop)
         hold(nextPort)
       } else if (following && interacting && (readerGestureIntent || readerScrolledUp(nextPort))) {
@@ -2675,13 +2682,15 @@ export function useConversationFollow(
       const runwayOffset = runwayOffsetOf(nextPort)
       const contentHeight = nextPort.scrollHeight
       const floorNow = Math.max(0, contentHeight - nextPort.clientHeight)
+      setFollowScrollTop(nextPort, floorNow)
+      if (followFloorHistory.get(nextPort) !== floorNow) invalidatePaintLimit(nextPort)
       // Ledger the length this commit actually added, so the terminal budget is
       // seeded from observed geometry rather than from the streaming constant.
       lastCommitGrowthPx = lastObservedContentHeight > 0
         ? Math.max(0, contentHeight - lastObservedContentHeight)
         : 0
       lastObservedContentHeight = contentHeight
-      const trajectoryActive = predictive
+      const trajectoryActive = predictGrowth
         && root.querySelector('[data-variant="think"]') === null
         && runwayOffset > 0
       let trajectoryShift: number | undefined
@@ -2938,7 +2947,9 @@ export function useConversationFollow(
       // measure the extent against it):
       let settleQuietMs = 0
       let settleSig = ''
-      if (!activeRef.current) {
+      const finalEntranceGrowth = startedAsEntrance
+        && environmentCommitGrowthPx(host) > FOLLOW_SETTLE_EPSILON_PX
+      if (!activeRef.current && !finalEntranceGrowth) {
         followTraceUntilMs = Math.max(followTraceUntilMs, performance.now() + 10000)
         followTrace('fast-gate', { sh: host.scrollHeight, st: Math.round(host.scrollTop), pad: Math.round(flowPadOf(host)) })
         const stableTail = turnStatusOf(host) === null
@@ -3001,7 +3012,7 @@ export function useConversationFollow(
       // whenever a real host transaction is what moved the layout.
       followTerminalPhases.set(
         host,
-        statusWasPresent === true || turnStatusOf(host) !== null || followHadStatus.has(host)
+        finalEntranceGrowth || statusWasPresent === true || turnStatusOf(host) !== null || followHadStatus.has(host)
           ? 'host-cascade'
           : 'terminal-drain',
       )
