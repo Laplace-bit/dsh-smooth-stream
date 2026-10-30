@@ -8,7 +8,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
-import { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler, ConnectionRpcHandlerOptions } from '@deepseek-ai/dsh-client-connection'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import * as DshSettings from '@deepseek-ai/dsh-settings'
@@ -114,6 +114,41 @@ async function call(
 }
 
 describe('smooth-stream settings channel fallback', () => {
+  it('prefers the service channel with both services injected on modern settings', async () => {
+    const ctx = new Context()
+    const routes: WebRoute[] = []
+    const webServer = fakeWebServer(routes)
+    ctx.provide('webServer', webServer as never)
+    ctx.provide('settings', { settings: {} } as never)
+    let handler: ConnectionRpcHandler | undefined
+    let removed = 0
+    class Connection extends Service {
+      constructor(ctx: Context) { super(ctx, 'connection') }
+      get rpc() {
+        const owner = this.ctx
+        return {
+          handle(channel: string, callback: ConnectionRpcHandler) {
+            expect(owner.webServer).toBe(webServer)
+            expect(channel).toBe(STREAM_SETTINGS_RPC_CHANNEL)
+            handler = callback
+            return () => { removed += 1 }
+          },
+        }
+      }
+    }
+    await ctx.plugin(Connection).await()
+    const fiber = ctx.plugin({ apply, Config })
+    await fiber.await()
+    mounted.push(() => fiber.dispose())
+    expect(handler).toBeTypeOf('function')
+    expect(routes).toEqual([])
+    expect(await handler!(STREAM_SETTINGS_RPC.read, {}, new AbortController().signal))
+      .toMatchObject({ ok: true, value: { writable: false, controlScroll: false } })
+    await fiber.dispose()
+    mounted.pop()
+    expect(removed).toBe(1)
+  })
+
   it('mounts the channel directly when the connection service cannot, and serves the settings', async () => {
     const host = await mountHost(true)
     mounted.push(host.dispose)
@@ -209,12 +244,19 @@ describe('smooth-stream settings channel on dsh 0.2.x', () => {
    * without the legacy `register` capability — so the read-only branch serves
    * the card from the composition config.
    */
-  async function mountHost02(config?: { controlScroll?: boolean }): Promise<{ dispose: () => Promise<void>; routes: WebRoute[] }> {
+  async function mountHost02(config?: { controlScroll?: boolean }, connected = true): Promise<{ dispose: () => Promise<void>; routes: WebRoute[] }> {
     const ctx = new Context()
     ctx.baseUrl = `${pathToFileURL(process.cwd()).href}/`
     const routes: WebRoute[] = []
     ctx.provide('webServer', fakeWebServer(routes) as never)
     ctx.provide('settings', { settings: {} } as never)
+    if (connected) {
+      ctx.provide('connection', {
+        requestRejection(request: IncomingMessage) {
+          return request.headers.cookie === undefined ? 401 : undefined
+        },
+      } as never)
+    }
     // The schema fills omitted fields, so a partial overlay-style config is
     // valid at runtime; the cast only widens cordis's fully-resolved type.
     const fiber = ctx.plugin({ apply, Config }, config as never)
@@ -246,5 +288,11 @@ describe('smooth-stream settings channel on dsh 0.2.x', () => {
     mounted.push(host.dispose)
     const view = await readView(host.routes)
     expect(view).toMatchObject({ writable: false, controlScroll: true })
+  })
+
+  it('waits for connection instead of mounting an unauthenticated modern channel', async () => {
+    const host = await mountHost02(undefined, false)
+    mounted.push(host.dispose)
+    expect(host.routes).toEqual([])
   })
 })

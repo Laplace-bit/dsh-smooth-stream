@@ -347,7 +347,9 @@ export function apply(ctx: Context, config: Config): void {
     if (typeof (settingsCtx.settings as { register?: unknown }).register === 'function') {
       settingsCtx.inject(['connection'], mountChannel)
     } else {
-      settingsCtx.inject(['webServer'], mountChannel)
+      // Both services are used by the channel. Current Harness enforces
+      // Cordis injection declarations even when the services already exist.
+      settingsCtx.inject(['connection', 'webServer'], mountChannel)
     }
   })
 }
