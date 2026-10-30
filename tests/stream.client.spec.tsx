@@ -785,7 +785,12 @@ describe('assistant renderer', () => {
       return frames.length
     })
     const cancelFrame = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => undefined)
-    const clock = vi.spyOn(performance, 'now').mockReturnValue(0)
+    let clockNow = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => clockNow)
+    const step = (ms: number): void => {
+      clockNow += ms
+      act(() => frames.shift()?.(clockNow))
+    }
     let baseHeight = 500
     const view = render(
       <div data-conversation-scroll>
@@ -809,19 +814,26 @@ describe('assistant renderer', () => {
 
     try {
       port.scrollTop = 390
-      act(() => frames.shift()?.(0))
+      step(0)
+      step(16)
       const before = -port.scrollTop + currentTranslate(transcript)
       baseHeight = 700
-      act(() => frames.shift()?.(100))
+      step(100)
 
       const after = -port.scrollTop + currentTranslate(transcript)
-      const springAdvance = computeFollowStep(32, {
-        lag: 200,
-        speedEma: FOLLOW_SPEED_REF_CPS,
-      }).advancePx
-      // Composer-only follow does not pre-open a runway at the 35cps neutral
-      // seed; the clamped 32ms spring step is therefore the whole movement.
-      expect(before - after).toBeCloseTo(springAdvance, 5)
+      // Predictive follow uses the continuous trajectory, whose recovery
+      // advances by one clamped 32ms interval even though 100ms elapsed.
+      const seedVelocity = FOLLOW_SPEED_REF_CPS * 0.4 / 1000
+      const recovery = computeFollowTrajectoryStep(32, {
+        positionPx: -before,
+        velocityPxPerMs: seedVelocity,
+        targetPx: port.scrollHeight - port.clientHeight,
+        targetVelocityPxPerMs: seedVelocity,
+        minLagPx: 0,
+        maxLagPx: 390,
+      })
+      expect(before - after).toBeGreaterThan(0)
+      expect(-after).toBeCloseTo(recovery.positionPx, 5)
     } finally {
       view.unmount()
       requestFrame.mockRestore()
@@ -2620,7 +2632,7 @@ describe('assistant renderer', () => {
     Object.defineProperty(port, 'scrollHeight', {
       configurable: true,
       get: () => baseHeight
-        + (Number.parseFloat(status.style.marginTop) || 0)
+        + (status.isConnected ? Number.parseFloat(status.style.marginTop) || 0 : 0)
         + (Number.parseFloat(transcript.style.marginBottom) || 0)
         + (Number.parseFloat(flow.style.paddingBottom) || 0),
     })
@@ -2649,12 +2661,15 @@ describe('assistant renderer', () => {
       </div>,
     )
 
-    let previousTop = port.scrollTop
+    let previousVisualTop = -port.scrollTop + currentTranslate(transcript)
     let worstDownwardFrame = 0
     for (let elapsed = 0; elapsed < 2400; elapsed += 16) {
       await act(() => vi.advanceTimersByTimeAsync(16))
-      worstDownwardFrame = Math.max(worstDownwardFrame, previousTop - port.scrollTop)
-      previousTop = port.scrollTop
+      // Removing equal layout and compositor offsets moves the raw floor
+      // while preserving every painted pixel. Measure the visible position.
+      const visualTop = -port.scrollTop + currentTranslate(transcript)
+      worstDownwardFrame = Math.max(worstDownwardFrame, visualTop - previousVisualTop)
+      previousVisualTop = visualTop
       const shift = currentTranslate(transcript)
       const runway = Number.parseFloat(transcript.style.marginBottom) || 0
       // While the temporary runway contributes to the scroll floor, an equal
@@ -3611,7 +3626,9 @@ describe('isGrowingChatNode', () => {
     vi.spyOn(status, 'getBoundingClientRect').mockReturnValue({ top: 160, bottom: 186 } as DOMRect)
     port.scrollTop = 400
 
-    await act(() => vi.advanceTimersByTimeAsync(16))
+    // The shared clock first establishes its time base, then measures the
+    // geometry installed after render.
+    await act(() => vi.advanceTimersByTimeAsync(32))
     const entered = currentTranslate(transcript)
     expect(entered).toBeGreaterThan(8)
 
