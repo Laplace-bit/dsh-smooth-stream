@@ -5,3 +5,8 @@ export const debugRuntime = {
   activeTuning: () => DEFAULT_STREAM_DEBUG_TUNING,
   reportFollow: () => {},
 }
+
+/** No stream is active in the pure benchmark harness. */
+export function readNewestStreamMetric(): null {
+  return null
+}
