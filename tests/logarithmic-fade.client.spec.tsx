@@ -173,6 +173,25 @@ it('retargets a fading grapheme when its text is split across new nodes', async 
   expect(ranges().map(range => range.toString()).sort()).toEqual(['é', 'x'])
 })
 
+it('retains the fading prefix when a nested subtree is replaced before observation', async () => {
+  const { root, controller } = attach()
+  const original = document.createElement('span')
+  original.textContent = 'a'
+  root.append(original)
+  controller.update(true, true, 100)
+  await act(async () => { await Promise.resolve() })
+  tick(64)
+
+  const replacement = document.createElement('span')
+  replacement.textContent = 'ab'
+  root.replaceChildren(replacement)
+  controller.update(true, true, 200)
+  expect(ranges().map(range => range.toString()).sort()).toEqual(['a', 'b'])
+
+  await act(async () => { await Promise.resolve() })
+  expect(ranges().map(range => range.toString()).sort()).toEqual(['a', 'b'])
+})
+
 it('lingers after completion and clears immediately when disabled', () => {
   const { controller } = attach('hello')
   controller.update(true, true)
@@ -314,6 +333,26 @@ it('re-derives exclusion when an ancestor stops being hidden', async () => {
   text.data = 'ab'
   await vi.advanceTimersByTimeAsync(0)
   controller.update(true, true, 200)
+  expect(ranges().map(range => range.toString())).toEqual(['b'])
+})
+
+it('re-derives exclusion when aria-live is added or removed', async () => {
+  const span = document.createElement('span')
+  const text = document.createTextNode('a')
+  span.append(text)
+  const { root, controller } = attach()
+  root.append(span)
+  controller.update(true, true)
+  expect(ranges().map(range => range.toString())).toEqual(['a'])
+  await act(async () => { await Promise.resolve() })
+
+  span.setAttribute('aria-live', 'polite')
+  await act(async () => { await Promise.resolve() })
+  expect(ranges()).toHaveLength(0)
+
+  span.removeAttribute('aria-live')
+  text.data = 'ab'
+  await act(async () => { await Promise.resolve() })
   expect(ranges().map(range => range.toString())).toEqual(['b'])
 })
 

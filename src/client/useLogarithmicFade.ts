@@ -12,12 +12,11 @@ const COLOR_PROPERTY = '--dsh-smooth-stream-fade-color'
 // Lightning CSS scopes highlight identifiers as well as class names.
 const highlightName = (index: number): string => css[`${PREFIX}${index}`] ?? `${PREFIX}${index}`
 const EXCLUDED = 'pre,code,math,.katex,.katex-display,mjx-container,svg,script,style,textarea,input,button,select,[role="button"],[contenteditable],[hidden],[aria-hidden="true"],[aria-live]'
-// Attributes that can start or stop an EXCLUDED match mid-stream (`hidden` and
-// `aria-hidden` flip whole subtrees, `class` carries the math renderers,
-// `role`/`contenteditable` match their own selectors). `style` is deliberately
-// absent: every colour write below is a style property, so observing it would
-// make the fade re-enter its own observer.
-const EXCLUDED_ATTRIBUTES = ['hidden', 'aria-hidden', 'role', 'contenteditable', 'class']
+// Attributes that can start or stop an EXCLUDED match mid-stream. `hidden`,
+// `aria-hidden`, and `aria-live` affect subtrees; `class`, `role`, and
+// `contenteditable` match their own selectors. `style` is deliberately absent:
+// every colour write below would otherwise re-enter the fade's own observer.
+const EXCLUDED_ATTRIBUTES = ['hidden', 'aria-hidden', 'aria-live', 'role', 'contenteditable', 'class']
 // Attributes on <html>/<body> that can move the resolved `currentColor`, i.e.
 // an app theme switch that is not delivered through the media query.
 const APPEARANCE_ATTRIBUTES = ['class', 'style', 'data-theme', 'data-color-scheme', 'data-appearance']
@@ -357,11 +356,10 @@ export class LogarithmicFadeController {
   private readText(): string {
     if (this.scannedStructureRevision !== this.structureRevision) this.scanNodes()
     // The commit-driven pass runs before the observer microtask for the same
-    // commit, so a replaced text node can still be in the table. A removed
-    // node keeps its data, which would silently hand a detached node to the
-    // Range and colour code, so re-scan on the first eviction.
+    // commit, so a replaced subtree can still be in the table. Its text nodes
+    // may retain detached parents, so check membership in the root itself.
     for (const entry of this.nodes) {
-      if (entry.node.parentNode !== null) continue
+      if (this.root.contains(entry.node)) continue
       this.scanNodes()
       break
     }
