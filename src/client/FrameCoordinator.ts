@@ -5,12 +5,15 @@
  * physics, fade painting, and diagnostic sampling. One document owns exactly
  * one live animation frame while any task is active.
  *
- * Strict phase order in every frame:
- * 1. Read Phase: layout reads ONLY when some task declared them dirty.
- * 2. Simulate Phase: pure math / integration (pacing, spring, buckets).
+ * Callback order in every frame:
+ * 1. Read Phase: requested geometry callbacks when layout is dirty.
+ * 2. Simulate Phase: pacing, spring, and follow updates.
  *    A task returns `true` to stay armed for the next frame.
- * 3. Write Phase: batched DOM mutations (text nodes, transforms, CSS vars,
- *    at most one scrollTop write per owner).
+ * 3. Write Phase: optional batched DOM mutation callbacks.
+ *
+ * The follow task also measures and writes DOM in its simulate callback to
+ * correct geometry before paint. These phases order callbacks; they do not
+ * enforce DOM read/write separation or guarantee zero reflow.
  *
  * Tasks registered later never overtake earlier ones inside a phase, so a
  * task's relative order is its registration order.
@@ -18,8 +21,8 @@
  * `requestRead` is the bridge to the previous frame: a task that just wrote
  * layout-affecting DOM (pacing revealed text, mutate() batch) declares that
  * geometry must be re-read at the top of the NEXT frame, before the follow
- * engine simulates. That keeps the "no layout read after a layout write in
- * the same frame" invariant without giving up a same-reveal measurement.
+ * engine simulates. Same-frame follow correction can still require another
+ * geometry measurement after a scroll or runway write.
  */
 
 export interface FrameTask {

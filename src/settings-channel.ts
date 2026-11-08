@@ -76,21 +76,8 @@ export function registerSettingsChannel(
   channel: string,
   handler: ConnectionRpcHandler,
 ): () => void {
-  let connection: ChannelConnection | undefined
-  try {
-    connection = ctx.get('connection') as ChannelConnection | undefined
-  } catch {
-    // dsh 0.2.x: the connection service may be unresolvable from a plugin
-    // scope; the direct mount below then serves the channel unfenced.
-    connection = undefined
-  }
+  const connection = ctx.get('connection') as ChannelConnection | undefined
   return ctx.effect(() => {
-    try {
-      const direct = mountDirectRoute(ctx, connection, channel, handler)
-      if (direct !== undefined) return direct
-    } catch {
-      // fall through to the service path
-    }
     const viaService = tryServiceChannel(connection, channel, handler)
     if (viaService !== undefined) return viaService
     return mountDirectRoute(ctx, connection, channel, handler)
@@ -128,13 +115,9 @@ function tryServiceChannel(
 /**
  * Mount the channel prefix on the Web server.
  *
- * With the connection service reachable the route sits behind the connection
- * trust fence. On dsh 0.2.x the connection service is unresolvable from a
- * plugin scope, so the route is then served unfenced (loopback + the app's
- * own token gate only) with a warning — the same trade-off the skill center
- * plugin ships on 0.2.x.
- * @throws fail-closed when the connection service is reachable but cannot
- * fence, so the channel is never exposed without the trust policy.
+ * The fallback uses the same request fence as the service-owned route.
+ * Index token exchange does not authenticate a separately registered route.
+ * @throws when the connection fence or the Web server is unavailable.
  */
 function mountDirectRoute(
   ctx: Context,
@@ -148,23 +131,16 @@ function mountDirectRoute(
     throw new Error(`dsh-smooth-stream: webServer is unavailable, so ${channel} cannot be mounted`)
   }
   if (typeof reject !== 'function') {
-    if (connection !== undefined) {
-      throw new Error(
-        `dsh-smooth-stream: connection.requestRejection is unavailable, so ${channel} `
-        + 'cannot be mounted behind the connection trust fence',
-      )
-    }
-    console.warn(
-      `[dsh-smooth-stream] ${channel} mounted without the connection trust fence `
-      + '(dsh 0.2.x: the connection service is not injectable here); '
-      + 'loopback and the app token gate remain the only protections',
+    throw new Error(
+      `dsh-smooth-stream: connection.requestRejection is unavailable, so ${channel} `
+      + 'cannot be mounted behind the connection trust fence',
     )
   }
   return webServer.register({
     kind: 'prefix',
     path: channel,
     handler: async (req, res) => {
-      const rejection = reject?.call(connection, req)
+      const rejection = reject.call(connection, req)
       if (rejection !== undefined) {
         res.writeHead(rejection)
         res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
