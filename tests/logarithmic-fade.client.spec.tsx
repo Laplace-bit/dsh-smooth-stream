@@ -1,6 +1,7 @@
 import { act, cleanup, render } from '@testing-library/react'
 import { useRef } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { FrameCoordinator } from '../src/client/FrameCoordinator.ts'
 import { fadeTailSize, logarithmicOpacity, LogarithmicFadeController, useLogarithmicFade } from '../src/client/useLogarithmicFade.ts'
 import { TypewriterAssistantNodeView } from '../src/client/TypewriterAssistantNodeView.tsx'
 
@@ -98,6 +99,30 @@ it('keeps a 24-grapheme burst tail without changing DOM or selection text', () =
   expect(vi.getTimerCount()).toBe(0)
 })
 
+it.each([false, true])('releases its frame task after each fade (other task active: %s)', async (otherActive) => {
+  const coordinator = FrameCoordinator.forDocument(document)
+  const otherTask = otherActive ? coordinator.registerTask({ onSimulate: () => true }) : null
+  const { root, controller } = attach()
+  const taskCounts: number[] = []
+  controller.update(true, true)
+
+  for (const character of ['a', 'b', 'c']) {
+    await act(async () => { root.append(character) })
+    expect(ranges()).toHaveLength(1)
+    tick(256)
+    expect(ranges()).toHaveLength(0)
+    taskCounts.push(coordinator.taskCount)
+    expect(coordinator.active).toBe(otherActive)
+  }
+
+  const baseline = Number(otherActive)
+  expect(taskCounts).toEqual([baseline, baseline, baseline])
+  controller.dispose()
+  expect(coordinator.taskCount).toBe(baseline)
+  coordinator.unregisterTask(otherTask)
+  expect(coordinator.taskCount).toBe(0)
+})
+
 it('retains birth times through repeat commits, DOM replacement and append', async () => {
   const { root, controller } = attach('a')
   controller.update(true, true)
@@ -112,6 +137,59 @@ it('retains birth times through repeat commits, DOM replacement and append', asy
   expect(ranges()).toHaveLength(0)
   controller.update(true, true)
   expect(ranges()).toHaveLength(0)
+})
+
+it('reuses the existing range when text is appended to its node', async () => {
+  const { root, controller } = attach('a')
+  controller.update(true, true)
+  const originalRange = ranges()[0]!
+  tick(64)
+
+  const node = root.firstChild!
+  node.textContent = 'ab'
+  await act(async () => { await Promise.resolve() })
+
+  expect(ranges().includes(originalRange)).toBe(true)
+  expect(originalRange.toString()).toBe('a')
+  expect(ranges().map(range => range.toString()).sort()).toEqual(['a', 'b'])
+  tick(192)
+  expect(ranges().map(range => range.toString())).toEqual(['b'])
+  tick(64)
+  expect(ranges()).toHaveLength(0)
+})
+
+it('retargets a fading grapheme when its text is split across new nodes', async () => {
+  const { root, controller } = attach('é')
+  controller.update(true, true)
+  const originalRange = ranges()[0]!
+
+  root.replaceChildren(document.createTextNode('e'), document.createTextNode('́x'))
+  await act(async () => { await Promise.resolve() })
+
+  expect(ranges().includes(originalRange)).toBe(true)
+  expect(originalRange.toString()).toBe('é')
+  expect(originalRange.startContainer).toBe(root.firstChild)
+  expect(originalRange.endContainer).toBe(root.lastChild)
+  expect(ranges().map(range => range.toString()).sort()).toEqual(['é', 'x'])
+})
+
+it('retains the fading prefix when a nested subtree is replaced before observation', async () => {
+  const { root, controller } = attach()
+  const original = document.createElement('span')
+  original.textContent = 'a'
+  root.append(original)
+  controller.update(true, true, 100)
+  await act(async () => { await Promise.resolve() })
+  tick(64)
+
+  const replacement = document.createElement('span')
+  replacement.textContent = 'ab'
+  root.replaceChildren(replacement)
+  controller.update(true, true, 200)
+  expect(ranges().map(range => range.toString()).sort()).toEqual(['a', 'b'])
+
+  await act(async () => { await Promise.resolve() })
+  expect(ranges().map(range => range.toString()).sort()).toEqual(['a', 'b'])
 })
 
 it('lingers after completion and clears immediately when disabled', () => {
@@ -214,6 +292,30 @@ it('re-derives exclusion when a Text node is moved into an excluded ancestor', a
   expect(ranges()).toHaveLength(0)
 })
 
+it('re-derives exclusion when a subtree moves into and out of code', async () => {
+  const group = document.createElement('span')
+  const inner = document.createElement('span')
+  const text = document.createTextNode('a')
+  const code = document.createElement('code')
+  inner.append(text)
+  group.append(inner)
+  const { root, controller } = attach()
+  root.append(group, code)
+  controller.update(true, true)
+  expect(ranges().map(range => range.toString())).toEqual(['a'])
+  await act(async () => { await Promise.resolve() })
+
+  code.append(group)
+  text.data = 'ab'
+  await act(async () => { await Promise.resolve() })
+  expect(ranges()).toHaveLength(0)
+
+  root.insertBefore(group, code)
+  text.data = 'abc'
+  await act(async () => { await Promise.resolve() })
+  expect(ranges().map(range => range.toString())).toEqual(['c'])
+})
+
 it('re-derives exclusion when an ancestor stops being hidden', async () => {
   const span = document.createElement('span')
   span.setAttribute('hidden', '')
@@ -231,6 +333,26 @@ it('re-derives exclusion when an ancestor stops being hidden', async () => {
   text.data = 'ab'
   await vi.advanceTimersByTimeAsync(0)
   controller.update(true, true, 200)
+  expect(ranges().map(range => range.toString())).toEqual(['b'])
+})
+
+it('re-derives exclusion when aria-live is added or removed', async () => {
+  const span = document.createElement('span')
+  const text = document.createTextNode('a')
+  span.append(text)
+  const { root, controller } = attach()
+  root.append(span)
+  controller.update(true, true)
+  expect(ranges().map(range => range.toString())).toEqual(['a'])
+  await act(async () => { await Promise.resolve() })
+
+  span.setAttribute('aria-live', 'polite')
+  await act(async () => { await Promise.resolve() })
+  expect(ranges()).toHaveLength(0)
+
+  span.removeAttribute('aria-live')
+  text.data = 'ab'
+  await act(async () => { await Promise.resolve() })
   expect(ranges().map(range => range.toString())).toEqual(['b'])
 })
 

@@ -12,12 +12,11 @@ const COLOR_PROPERTY = '--dsh-smooth-stream-fade-color'
 // Lightning CSS scopes highlight identifiers as well as class names.
 const highlightName = (index: number): string => css[`${PREFIX}${index}`] ?? `${PREFIX}${index}`
 const EXCLUDED = 'pre,code,math,.katex,.katex-display,mjx-container,svg,script,style,textarea,input,button,select,[role="button"],[contenteditable],[hidden],[aria-hidden="true"],[aria-live]'
-// Attributes that can start or stop an EXCLUDED match mid-stream (`hidden` and
-// `aria-hidden` flip whole subtrees, `class` carries the math renderers,
-// `role`/`contenteditable` match their own selectors). `style` is deliberately
-// absent: every colour write below is a style property, so observing it would
-// make the fade re-enter its own observer.
-const EXCLUDED_ATTRIBUTES = ['hidden', 'aria-hidden', 'role', 'contenteditable', 'class']
+// Attributes that can start or stop an EXCLUDED match mid-stream. `hidden`,
+// `aria-hidden`, and `aria-live` affect subtrees; `class`, `role`, and
+// `contenteditable` match their own selectors. `style` is deliberately absent:
+// every colour write below would otherwise re-enter the fade's own observer.
+const EXCLUDED_ATTRIBUTES = ['hidden', 'aria-hidden', 'aria-live', 'role', 'contenteditable', 'class']
 // Attributes on <html>/<body> that can move the resolved `currentColor`, i.e.
 // an app theme switch that is not delivered through the media query.
 const APPEARANCE_ATTRIBUTES = ['class', 'style', 'data-theme', 'data-color-scheme', 'data-appearance']
@@ -104,6 +103,7 @@ function schedule(scheduler: Scheduler): void {
         if (!client.paint(now)) scheduler.pending.delete(client)
       }
       if (scheduler.pending.size === 0) {
+        scheduler.coordinator.unregisterTask(scheduler.taskId)
         scheduler.taskId = null
         return false
       }
@@ -216,13 +216,7 @@ export class LogarithmicFadeController {
   private nodes: TextNodeEntry[] = []
   /** Ineligible nodes in nodes[0..index): a span is fadeable when its bounds match. */
   private ineligiblePrefix: number[] = [0]
-  /**
-   * `closest(EXCLUDED)` derived once per element instead of once per Text node:
-   * exclusion is inherited from the ancestor chain, so a memo stays usable only
-   * while the element keeps its own parent. Moving a subtree into `code` — or
-   * into anything else that matches — invalidates exactly the moved chain the
-   * next time it is read.
-   */
+  /** Inherited exclusion is recomputed on structural changes, including moved subtrees. */
   private excludedElements = new WeakMap<Element, { parent: Element | null, excluded: boolean }>()
   /** Own tag/attribute match per element; dropped when an exclusion attribute moves. */
   private ownExcluded = new WeakMap<Element, boolean>()
@@ -337,6 +331,7 @@ export class LogarithmicFadeController {
 
   /** Rebuild the text-node table after a structural change. */
   private scanNodes(): void {
+    this.excludedElements = new WeakMap()
     const nodes: TextNodeEntry[] = []
     const walker = this.root.ownerDocument.createTreeWalker(this.root, NodeFilter.SHOW_TEXT)
     for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
@@ -361,11 +356,10 @@ export class LogarithmicFadeController {
   private readText(): string {
     if (this.scannedStructureRevision !== this.structureRevision) this.scanNodes()
     // The commit-driven pass runs before the observer microtask for the same
-    // commit, so a replaced text node can still be in the table. A removed
-    // node keeps its data, which would silently hand a detached node to the
-    // Range and colour code, so re-scan on the first eviction.
+    // commit, so a replaced subtree can still be in the table. Its text nodes
+    // may retain detached parents, so check membership in the root itself.
     for (const entry of this.nodes) {
-      if (entry.node.parentNode !== null) continue
+      if (this.root.contains(entry.node)) continue
       this.scanNodes()
       break
     }
@@ -500,14 +494,15 @@ export class LogarithmicFadeController {
     const previous = this.previous
     this.previous = text
     const old = this.characters
-    this.clearRanges()
     if (!this.enabled) {
+      this.clearRanges()
       this.root.classList.remove(css.scope!)
       this.restoreColors()
       this.scheduler.pending.delete(this)
       this.stopIfIdle()
       return
     }
+    this.characters = []
     this.root.classList.add(css.scope!)
     this.ensureRootColor()
     const now = this.pausedAt ?? this.scheduler.window.performance.now()
@@ -549,8 +544,9 @@ export class LogarithmicFadeController {
       const segment = segments.containing(localEnd - 1)
       if (segment === undefined) break
       const start = segment.index + windowStart
+      const span = `${String(start)}:${String(end)}`
       const retained = end <= prefix
-        ? retainedBySpan.get(`${String(start)}:${String(end)}`)
+        ? retainedBySpan.get(span)
         : undefined
       const born = retained?.born ?? (this.active && appended && start >= previous.length ? now : null)
       if (born !== null && now - born < FADE_DURATION_MS && segment.segment.trim() !== '') {
@@ -562,13 +558,28 @@ export class LogarithmicFadeController {
           && ineligible[last + 1] === ineligible[first]) {
           const firstPart = nodes[first]!
           const lastPart = nodes[last]!
-          const range = this.root.ownerDocument.createRange()
-          range.setStart(firstPart.node, start - firstPart.start)
-          range.setEnd(lastPart.node, end - lastPart.start)
-          this.characters.push({ start, end, born, range, bucket: -1 })
+          const range = retained?.range ?? this.root.ownerDocument.createRange()
+          const startOffset = start - firstPart.start
+          const endOffset = end - lastPart.start
+          // DOM edits may move live range boundaries even when their text is unchanged.
+          if (range.startContainer !== firstPart.node || range.startOffset !== startOffset) {
+            range.setStart(firstPart.node, startOffset)
+          }
+          if (range.endContainer !== lastPart.node || range.endOffset !== endOffset) {
+            range.setEnd(lastPart.node, endOffset)
+          }
+          if (retained !== undefined) {
+            retainedBySpan.delete(span)
+            this.characters.push(retained)
+          } else {
+            this.characters.push({ start, end, born, range, bucket: -1 })
+          }
         }
       }
       end = start
+    }
+    for (const character of retainedBySpan.values()) {
+      this.scheduler.highlights[character.bucket]?.delete(character.range)
     }
     if (this.paint(now)) {
       if (this.pausedAt === null) {
