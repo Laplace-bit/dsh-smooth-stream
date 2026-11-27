@@ -11,9 +11,9 @@
  * When the service call fails, this module mounts the same absolute channel
  * prefix directly on `webServer`, behind the connection service's own request
  * fence and speaking the documented request/response envelopes. Nothing here
- * weakens the fence: a kernel without `requestRejection` fails closed instead
- * of exposing the channel to whoever can reach the port. The fallback retires
- * on its own the moment the service call works again.
+ * weakens the fence: a kernel without `requestRejection` or `admit` fails closed
+ * instead of exposing the channel to whoever can reach the port. Each new
+ * activation prefers the service-owned channel again.
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -49,6 +49,7 @@ interface ChannelConnection {
     ) => unknown
   }
   readonly requestRejection?: (request: unknown) => 401 | 403 | undefined
+  readonly admit?: (request: unknown) => { readonly peer: unknown } | { readonly rejection: 401 | 403 | 503 }
 }
 
 /** The subset of the Web server service this module depends on. */
@@ -80,6 +81,19 @@ export function registerSettingsChannel(
   return ctx.effect(() => {
     const viaService = tryServiceChannel(connection, channel, handler)
     if (viaService !== undefined) return viaService
+    // 0.2.3's admit() reads a nested service through its caller's Context.
+    // Re-read connection inside an injected child so its receiver carries that
+    // dependency. Older admit() generations have no authentication service and
+    // must keep working without waiting for a service they will never provide.
+    if (typeof connection?.requestRejection !== 'function'
+      && typeof connection?.admit === 'function'
+      && ctx.get('connection.authentication') !== undefined) {
+      const scoped = ctx.inject(['connection', 'connection.authentication', 'webServer'], (admissionCtx) => {
+        const admittedConnection = admissionCtx.get('connection') as ChannelConnection | undefined
+        return mountDirectRoute(admissionCtx, admittedConnection, channel, handler)
+      })
+      return () => scoped.dispose()
+    }
     return mountDirectRoute(ctx, connection, channel, handler)
   }, `dsh-smooth-stream: ${channel} RPC channel`)
 }
@@ -127,12 +141,13 @@ function mountDirectRoute(
 ): () => void {
   const webServer = ctx.get('webServer') as ChannelWebServer | undefined
   const reject = connection?.requestRejection
+  const admit = connection?.admit
   if (webServer === undefined || typeof webServer.register !== 'function') {
     throw new Error(`dsh-smooth-stream: webServer is unavailable, so ${channel} cannot be mounted`)
   }
-  if (typeof reject !== 'function') {
+  if (typeof reject !== 'function' && typeof admit !== 'function') {
     throw new Error(
-      `dsh-smooth-stream: connection.requestRejection is unavailable, so ${channel} `
+      `dsh-smooth-stream: neither connection.requestRejection nor connection.admit is available, so ${channel} `
       + 'cannot be mounted behind the connection trust fence',
     )
   }
@@ -140,10 +155,13 @@ function mountDirectRoute(
     kind: 'prefix',
     path: channel,
     handler: async (req, res) => {
-      const rejection = reject.call(connection, req)
+      const admission = typeof reject === 'function'
+        ? { rejection: reject.call(connection, req) }
+        : admit!.call(connection, req)
+      const rejection = 'rejection' in admission ? admission.rejection : undefined
       if (rejection !== undefined) {
         res.writeHead(rejection)
-        res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+        res.end(rejection === 401 ? 'unauthorized' : rejection === 503 ? 'service unavailable' : 'forbidden')
         return
       }
       await answer(req, res, channel, handler)
