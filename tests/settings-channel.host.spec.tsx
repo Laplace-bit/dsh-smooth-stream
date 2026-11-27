@@ -14,11 +14,12 @@ import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import * as DshSettings from '@deepseek-ai/dsh-settings'
 const { SettingsProvider } = DshSettings
 type SettingsNamespace = DshSettings.SettingsNamespace
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { STREAM_PACKAGE_VERSION } from '../src/package-meta.ts'
 import { apply, Config } from '../src/plugin.ts'
 import { STREAM_SETTINGS_RPC, STREAM_SETTINGS_RPC_CHANNEL } from '../src/settings-api.ts'
 import { DEFAULT_STREAM_SETTINGS, STREAM_SETTINGS_NS } from '../src/settings.ts'
+import { registerSettingsChannel } from '../src/settings-channel.ts'
 
 /** In-memory settings provider -- same shape as the Harness's own specs. */
 class MemorySettings extends SettingsProvider {
@@ -235,6 +236,134 @@ describe('smooth-stream settings channel fallback', () => {
     expect(host.routes).toEqual([])
     // The plugin still applies: only the card's read is unavailable.
     expect(host.ctx.settings.get(STREAM_SETTINGS_NS as SettingsNamespace)).toEqual(DEFAULT_STREAM_SETTINGS)
+  })
+})
+
+describe('smooth-stream settings channel with connection.admit', () => {
+  it('keeps the legacy fence authoritative when both APIs exist', async () => {
+    const ctx = new Context()
+    const routes: WebRoute[] = []
+    const requestRejection = vi.fn(() => 403 as const)
+    const admit = vi.fn(() => ({ peer: {} }))
+    const handler = vi.fn<ConnectionRpcHandler>(async () => ({ ok: true, value: {} }))
+    ctx.provide('webServer', fakeWebServer(routes) as never)
+    ctx.provide('connection', { requestRejection, admit } as never)
+    const authentication = ctx.plugin((authCtx) => { authCtx.provide('connection.authentication', {}) })
+    await authentication.await()
+    const fiber = ctx.plugin({
+      inject: ['connection', 'webServer'],
+      apply(channelCtx: Context) {
+        return registerSettingsChannel(channelCtx, STREAM_SETTINGS_RPC_CHANNEL, handler)
+      },
+    })
+    await fiber.await()
+    mounted.push(() => ctx.fiber.dispose())
+    expect(routes).toHaveLength(1)
+    expect(await call(routes[0]!, STREAM_SETTINGS_RPC.read, {})).toEqual({ status: 403, body: 'forbidden' })
+    expect(requestRejection).toHaveBeenCalledOnce()
+    await authentication.dispose()
+    expect(routes).toHaveLength(1)
+    expect((await call(routes[0]!, STREAM_SETTINGS_RPC.read, {})).status).toBe(403)
+    expect(admit).not.toHaveBeenCalled()
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  /** Exercise both admit generations without changing the suite's pinned kernel. */
+  async function mountAdmissionHost(nestedAuthentication: boolean) {
+    const ctx = new Context()
+    const routes: WebRoute[] = []
+    ctx.provide('webServer', fakeWebServer(routes) as never)
+    const peer = { principal: { kind: 'owner' } }
+    const authenticate = vi.fn((request: IncomingMessage) => {
+      if (request.headers.origin === 'https://untrusted.example') return { rejection: 403 as const }
+      if (request.headers.cookie === undefined) return { rejection: 401 as const }
+      if (request.headers.cookie === 'unavailable') return { rejection: 503 as const }
+      return { peer }
+    })
+    const authentication = nestedAuthentication
+      ? ctx.plugin((authCtx) => { authCtx.provide('connection.authentication', { authenticate }) })
+      : undefined
+    await authentication?.await()
+    class Connection extends Service {
+      readonly authentication = { authenticate }
+      constructor(ctx: Context) { super(ctx, 'connection') }
+      get rpc() {
+        return {
+          handle() { throw new Error('cannot get property "webServer" without inject') },
+        }
+      }
+      admit(request: IncomingMessage) {
+        if (!nestedAuthentication) return authenticate(request)
+        // Model 0.2.3's strict injection check, even under the pinned Cordis.
+        expect(this.ctx.fiber.inject).toHaveProperty('connection')
+        expect(this.ctx.fiber.inject).toHaveProperty('connection.authentication')
+        return this.authentication.authenticate(request)
+      }
+    }
+    await ctx.plugin(Connection).await()
+    const handler = vi.fn<ConnectionRpcHandler>(async () => ({ ok: true, value: 'settings' }))
+    let release: (() => void) | undefined
+    const fiber = ctx.plugin({
+      inject: ['connection', 'webServer'],
+      apply(channelCtx: Context) {
+        release = registerSettingsChannel(channelCtx, STREAM_SETTINGS_RPC_CHANNEL, handler)
+      },
+    })
+    await fiber.await()
+    mounted.push(() => ctx.fiber.dispose())
+    return { ctx, routes, fiber, authentication, authenticate, handler, release: () => release?.() }
+  }
+
+  it.each([false, true])('serves admitted requests (nested authentication: %s)', async (nestedAuthentication) => {
+    const host = await mountAdmissionHost(nestedAuthentication)
+    const route = host.routes.find(candidate => candidate.path === STREAM_SETTINGS_RPC_CHANNEL)
+    expect(route).toBeDefined()
+    const response = await call(route!, STREAM_SETTINGS_RPC.read, {})
+    expect(response.status).toBe(200)
+    expect(JSON.parse(response.body)).toMatchObject({ result: { ok: true, value: 'settings' } })
+    expect(host.authenticate).toHaveBeenCalledOnce()
+    expect(host.handler).toHaveBeenCalledOnce()
+    await host.fiber.dispose()
+    expect(host.routes).toEqual([])
+  })
+
+  it.each([false, true])('preserves all rejection statuses before dispatch (nested authentication: %s)', async (nestedAuthentication) => {
+    const host = await mountAdmissionHost(nestedAuthentication)
+    const route = host.routes.find(candidate => candidate.path === STREAM_SETTINGS_RPC_CHANNEL)
+    expect(route).toBeDefined()
+    for (const [headers, status, body] of [
+      [{ 'content-type': 'application/json' }, 401, 'unauthorized'],
+      [{ cookie: 'dsh=browser', origin: 'https://untrusted.example' }, 403, 'forbidden'],
+      [{ cookie: 'unavailable' }, 503, 'service unavailable'],
+    ] as const) {
+      expect(await call(route!, STREAM_SETTINGS_RPC.read, {}, { headers })).toEqual({ status, body })
+    }
+    expect(host.handler).not.toHaveBeenCalled()
+  })
+
+  it('withdraws and remounts the nested route with its authentication service', async () => {
+    const host = await mountAdmissionHost(true)
+    expect(host.routes).toHaveLength(1)
+    await host.authentication!.dispose()
+    expect(host.routes).toEqual([])
+    await host.ctx.plugin((authCtx) => {
+      authCtx.provide('connection.authentication', { authenticate: host.authenticate })
+    }).await()
+    expect(host.routes).toHaveLength(1)
+    expect((await call(host.routes[0]!, STREAM_SETTINGS_RPC.read, {})).status).toBe(200)
+  })
+
+  it('withdraws the nested route when the channel is explicitly released', async () => {
+    const host = await mountAdmissionHost(true)
+    expect(host.routes).toHaveLength(1)
+    await host.release()
+    await host.release()
+    expect(host.routes).toEqual([])
+    await host.authentication!.dispose()
+    await host.ctx.plugin((authCtx) => {
+      authCtx.provide('connection.authentication', { authenticate: host.authenticate })
+    }).await()
+    expect(host.routes).toEqual([])
   })
 })
 
